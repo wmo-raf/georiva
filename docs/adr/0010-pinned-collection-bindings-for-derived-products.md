@@ -189,7 +189,9 @@ and unbound products (collection gone) are the two drift states, both loud.
   remains, and the fix must be replicated at every current and future query
   site — the drift class this ADR exists to remove.
 - **Globally-unique Collection slugs.** Breaks running two feeds of the same
-  plugin; STAC/EDR URLs already namespace by catalog. Treats the symptom.
+  plugin; STAC URLs already namespace by catalog, and EDR's do since
+  [ADR-0045](0045-an-edr-collection-id-is-catalog-dot-collection.md) (when this
+  was written they did not). Treats the symptom.
 - **Persist the whole `DerivedProductDefinition` in the DB.** Rejected: the
   ADR-0009 upgrade lifecycle (orphans, "new — not enabled" cards, refreshing
   un-overridden labels) depends on the *code* declaration being live truth. A

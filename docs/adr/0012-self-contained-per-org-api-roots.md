@@ -52,7 +52,10 @@ its queryables, and every self/root/child link resolving back onto the same host
 EDR, `/api/analysis/` and `/api/datasets/` are the same. No root names, links to,
 or can be made to return another organisation's rows.
 
-**Ids stay bare.** `Catalog.slug` and `Collection.slug` go out unqualified and
+**Ids stay bare.** (EDR's collection id is qualified by its catalog,
+`{catalog}.{collection}`, since a collection slug is unique only within one —
+[ADR-0045](0045-an-edr-collection-id-is-catalog-dot-collection.md). The
+organisation is still never in it.) `Catalog.slug` and `Collection.slug` go out unqualified and
 may collide across organisations — `forecast` is Kenya's on Kenya's host and
 Uganda's on Uganda's. The two roots never meet, so the collision is harmless, and
 a client that only ever talks to one host cannot tell this instance from a

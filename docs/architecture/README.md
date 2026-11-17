@@ -325,7 +325,9 @@ exposes the status of long-running loader and processing jobs.
 > document is the GetCapabilities equivalent — it advertises spatial/temporal extents, the explicit
 > timestep list, `parameter_names` with units and WeatherLayers palette hints (under an `x-georiva`
 > extension), the advertised `data_queries`, and a canonical cross-link to the matching STAC
-> collection. Collection ID = `Collection.slug`.
+> collection. Collection ID = `{catalog}.{collection}`; a bare slug redirects to it while it names one
+> collection, and is a 404 listing the ids when it names several
+> ([ADR-0045](../adr/0045-an-edr-collection-id-is-catalog-dot-collection.md)).
 >
 > Both time lists in the document are bounded, because one item row exists per `(reference_time,
 > time)`: `extent.temporal.values` is the latest run's valid times, and `x-georiva.runs` is the

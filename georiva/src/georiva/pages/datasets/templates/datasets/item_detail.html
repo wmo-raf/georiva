@@ -482,7 +482,7 @@
             "activeVarSlug":        "{{ active_var_slug }}",
             "itemTime":             "{{ item.time_iso }}",
             "referenceTime":        "{{ item.reference_time_iso|default:'' }}",
-            "edrUrl":               "/api/edr/collections/{{ collection_slug }}/",
+            "edrUrl":               "{{ edr_collection_url }}",
             "basemapStyleUrl":      "{% static 'basemap/georiva-basemap.json' %}",
             {% comment %}
                 The PNG overlay is georeferenced by the item's own bounds — the

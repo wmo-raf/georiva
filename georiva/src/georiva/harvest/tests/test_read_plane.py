@@ -170,7 +170,7 @@ class RemoteCollectionInWMTSCapabilitiesTests(IsolatedCapabilitiesCache, RemoteC
 
 class RemoteCollectionInTheEDRMetadataPlaneTests(RemoteCollectionMixin, TestCase):
     def detail(self):
-        response = self.client.get(reverse("edr:collection-detail", args=["chirps-daily"]))
+        response = self.client.get(reverse("edr:collection-detail", args=["chirps.chirps-daily"]))
         self.assertEqual(response.status_code, 200)
         return response.json()
 
@@ -178,7 +178,7 @@ class RemoteCollectionInTheEDRMetadataPlaneTests(RemoteCollectionMixin, TestCase
         response = self.client.get(reverse("edr:collection-list"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("chirps-daily", {c["id"] for c in response.json()["collections"]})
+        self.assertIn("chirps.chirps-daily", {c["id"] for c in response.json()["collections"]})
 
     def test_it_is_described_with_its_variable_and_remote_timesteps(self):
         body = self.detail()
@@ -256,7 +256,7 @@ class RemoteCollectionVisibilityTests(IsolatedCapabilitiesCache, RemoteCollectio
     def test_a_private_collection_is_in_stac_and_edr_for_members_only(self):
         self.set_visibility(Collection.Visibility.PRIVATE)
         stac = reverse("stac:item-detail", args=["chirps", "chirps-daily", "rain", "20260301T000000Z"])
-        edr = reverse("edr:collection-detail", args=["chirps-daily"])
+        edr = reverse("edr:collection-detail", args=["chirps.chirps-daily"])
 
         self.assertEqual([self.client.get(stac).status_code, self.client.get(edr).status_code], [404, 404])
 
@@ -266,5 +266,6 @@ class RemoteCollectionVisibilityTests(IsolatedCapabilitiesCache, RemoteCollectio
     def test_no_other_organisation_s_host_serves_it(self):
         dial_org(self.client, "uganda")
 
-        self.assertEqual(self.client.get(reverse("edr:collection-detail", args=["chirps-daily"])).status_code, 404)
+        edr = reverse("edr:collection-detail", args=["chirps.chirps-daily"])
+        self.assertEqual(self.client.get(edr).status_code, 404)
         self.assertEqual(self.gate(HTTP_HOST=org_host("uganda")), 403)

@@ -185,11 +185,12 @@ class CrossOrgPublicApiTests(TestCase):
         self.assertEqual(response.json()["collections"], [])
 
     def test_edr_collection_only_another_organisation_has_is_not_found(self):
-        url = reverse("edr:collection-detail", args=[UGANDA_ONLY_SLUG])
-        self.assertEqual(self.client.get(url).status_code, 404)
+        for collection_id in (f"{UGANDA_ONLY_SLUG}.{UGANDA_ONLY_SLUG}", UGANDA_ONLY_SLUG):
+            url = reverse("edr:collection-detail", args=[collection_id])
+            self.assertEqual(self.client.get(url).status_code, 404, url)
 
     def test_the_colliding_edr_collection_serves_this_organisations_row(self):
-        response = self.client.get(reverse("edr:collection-detail", args=[SHARED_SLUG]))
+        response = self.client.get(reverse("edr:collection-detail", args=[f"{SHARED_SLUG}.{SHARED_SLUG}"]))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Uganda")
 
@@ -329,6 +330,11 @@ class PublicApiUrlSweepTests(TestCase):
     def setUp(self):
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
 
+    #: What each swept converter is filled with. Uganda's catalog and collection
+    #: share ``UGANDA_ONLY_SLUG``, so an EDR collection id (``{catalog}.{collection}``,
+    #: ADR 0045) is that slug twice.
+    _SWEEP_FILLS = {"slug": UGANDA_ONLY_SLUG, "edrid": f"{UGANDA_ONLY_SLUG}.{UGANDA_ONLY_SLUG}"}
+
     def _foreign_api_urls(self):
         """Every ``/api/`` route whose parameters are all slugs, filled with Uganda's."""
         urls = []
@@ -337,9 +343,9 @@ class PublicApiUrlSweepTests(TestCase):
             if not route.startswith("api/") or route.startswith(self._SWEEP_EXEMPT_PREFIXES):
                 continue
             params = re.findall(r"<([a-z]+):(\w+)>", route)
-            if not params or any(converter != "slug" for converter, _ in params):
+            if not params or any(converter not in self._SWEEP_FILLS for converter, _ in params):
                 continue
-            urls.append("/" + re.sub(r"<[^>]+>", UGANDA_ONLY_SLUG, route))
+            urls.append("/" + re.sub(r"<([a-z]+):\w+>", lambda match: self._SWEEP_FILLS[match.group(1)], route))
         return urls
 
     def test_no_public_api_url_serves_another_organisations_row(self):

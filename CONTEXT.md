@@ -768,7 +768,8 @@ One Organisation's whole public service, served at its own host: `<org-host>/api
 `/api/analysis/`, `/api/datasets/`. Self-contained — conformance, search, queryables and every self/root/child link
 resolve on the host they were requested from, and no root ever names or reaches another Organisation's rows. Ids
 stay bare (`Catalog.slug`, `Collection.slug`) and may collide across Organisations; the Organisation lives in the
-hostname, never in a path segment or query parameter. Two deliberate exceptions: `/api/jobs/` is mounted on every
+hostname, never in a path segment or query parameter. One qualification: an **EDR collection id** is
+`{catalog}.{collection}`, because a collection slug is unique only within its catalog (ADR 0045). Two deliberate exceptions: `/api/jobs/` is mounted on every
 host and org-agnostic, guarded by unguessable job ids rather than tenancy; and the **machine plane** below, which
 has no hostname to read and so carries the Organisation in the path instead.
 _Avoid_: org path prefix, namespaced STAC id, tenant-qualified id

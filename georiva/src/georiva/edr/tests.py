@@ -14,6 +14,8 @@ from georiva.core.models import Catalog, Collection, Item
 from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.testing import dial_org, make_organisation
 
+from .ids import edr_collection_id
+
 
 class EDRVisibilityTests(TestCase):
     def setUp(self):
@@ -41,20 +43,20 @@ class EDRVisibilityTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         ids = {c["id"] for c in response.json()["collections"]}
-        self.assertIn("tas", ids)
-        self.assertNotIn("tas-anomaly", ids)
+        self.assertIn("cmip6.tas", ids)
+        self.assertNotIn("cmip6.tas-anomaly", ids)
 
     def test_collection_detail_404_for_internal(self):
-        ok = self.client.get(reverse("edr:collection-detail", args=["tas"]))
+        ok = self.client.get(reverse("edr:collection-detail", args=["cmip6.tas"]))
         self.assertEqual(ok.status_code, 200)
 
-        hidden = self.client.get(reverse("edr:collection-detail", args=["tas-anomaly"]))
+        hidden = self.client.get(reverse("edr:collection-detail", args=["cmip6.tas-anomaly"]))
         self.assertEqual(hidden.status_code, 404)
 
     def test_collection_advertises_no_data_query_it_cannot_serve(self):
         # EDR is metadata-only: a client reads data_queries to decide what a
         # collection supports, so listing one with no route sends it to a 404.
-        body = self.client.get(reverse("edr:collection-detail", args=["tas"])).json()
+        body = self.client.get(reverse("edr:collection-detail", args=["cmip6.tas"])).json()
         self.assertEqual(body["data_queries"], {})
 
 
@@ -72,7 +74,7 @@ class EDRStyledParameterTests(TestCase):
         tree["collection"].save()
 
     def _x_georiva(self):
-        response = self.client.get(reverse("edr:collection-detail", args=[self.variable.collection.slug]))
+        response = self.client.get(reverse("edr:collection-detail", args=[edr_collection_id(self.variable.collection)]))
         self.assertEqual(response.status_code, 200)
         return response.json()["parameter_names"][self.variable.slug]["x-georiva"]
 
@@ -113,7 +115,7 @@ class EDRStyledParameterTests(TestCase):
             stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}],
         )
         make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
-        response = self.client.get(reverse("edr:collection-detail", args=[self.variable.collection.slug]))
+        response = self.client.get(reverse("edr:collection-detail", args=[edr_collection_id(self.variable.collection)]))
         parameter = response.json()["parameter_names"][self.variable.slug]
         x_georiva = parameter["x-georiva"]
         self.assertEqual(x_georiva["palette"], [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]])
@@ -160,7 +162,7 @@ class EDRRunsBoundTests(TestCase):
                 )
 
     def _body(self, **params):
-        url = reverse("edr:collection-detail", args=[self.collection.slug])
+        url = reverse("edr:collection-detail", args=[edr_collection_id(self.collection)])
         response = self.client.get(url, params)
         self.assertEqual(response.status_code, 200)
         return response.json()
@@ -235,3 +237,136 @@ class EDRRunsBoundTests(TestCase):
         with CaptureQueriesContext(connection) as large:
             self._body()
         self.assertEqual(len(large), len(small))
+
+
+class EDRQualifiedCollectionIdTests(TestCase):
+    """An EDR collection id is ``{catalog}.{collection}`` (#687).
+
+    A collection slug is unique only within its catalog, so one organisation can
+    hold two collections of the same slug — two feeds of one plugin in two
+    catalogs. The bare slug still answers while it names one collection, by
+    redirecting to the qualified id; when it names more, a 404 lists them.
+    """
+
+    def setUp(self):
+        dial_org(self.client)
+        organisation = make_organisation()
+        self.gfs = Catalog.objects.create(organisation=organisation, name="GFS", slug="gfs", file_format="grib2")
+        self.mirror = Catalog.objects.create(
+            organisation=organisation, name="GFS mirror", slug="gfs-mirror", file_format="grib2"
+        )
+        self.forecast = Collection.objects.create(
+            catalog=self.gfs, name="Forecast", slug="forecast", visibility=Collection.Visibility.PUBLIC
+        )
+        self.only = Collection.objects.create(
+            catalog=self.gfs, name="Analysis", slug="analysis", visibility=Collection.Visibility.PUBLIC
+        )
+
+    def _twin(self, visibility=Collection.Visibility.PUBLIC):
+        return Collection.objects.create(catalog=self.mirror, name="Forecast", slug="forecast", visibility=visibility)
+
+    def _detail(self, collection_id, **params):
+        return self.client.get(reverse("edr:collection-detail", args=[collection_id]), params)
+
+    def test_a_collection_answers_at_its_qualified_id(self):
+        response = self._detail("gfs.forecast")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["id"], "gfs.forecast")
+        self_link = next(link for link in body["links"] if link["rel"] == "self")
+        self.assertTrue(self_link["href"].endswith("/api/edr/collections/gfs.forecast/"), self_link)
+
+    def test_the_list_names_each_collection_by_its_qualified_id(self):
+        self._twin()
+        response = self.client.get(reverse("edr:collection-list"))
+        collections = response.json()["collections"]
+        self.assertEqual(
+            sorted(c["id"] for c in collections),
+            ["gfs-mirror.forecast", "gfs.analysis", "gfs.forecast"],
+        )
+        for collection in collections:
+            hrefs = [link["href"] for link in collection["links"]]
+            self.assertTrue(any(href.endswith(f"/collections/{collection['id']}/") for href in hrefs), hrefs)
+
+    def test_two_collections_sharing_a_slug_each_answer_at_their_own_id(self):
+        twin = self._twin()
+        first = self._detail("gfs.forecast").json()
+        second = self._detail("gfs-mirror.forecast").json()
+        self.assertEqual(first["x-georiva"]["catalog_slug"], "gfs")
+        self.assertEqual(second["x-georiva"]["catalog_slug"], twin.catalog.slug)
+
+    def test_a_bare_slug_naming_two_collections_is_a_404_naming_both(self):
+        self._twin()
+        response = self._detail("forecast")
+        self.assertEqual(response.status_code, 404)
+        ids = [candidate["id"] for candidate in response.json()["collections"]]
+        self.assertEqual(sorted(ids), ["gfs-mirror.forecast", "gfs.forecast"])
+
+    def test_a_bare_slug_unique_in_the_organisation_redirects_to_its_qualified_id(self):
+        response = self._detail("analysis", runs_limit=2)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/api/edr/collections/gfs.analysis/?runs_limit=2")
+
+    def test_a_collection_the_caller_cannot_see_does_not_make_a_slug_ambiguous(self):
+        # Nor does the 404 leak the id of a collection this caller may not read.
+        self._twin(visibility=Collection.Visibility.INTERNAL)
+        response = self._detail("forecast")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/api/edr/collections/gfs.forecast/")
+
+    def test_an_unknown_id_is_a_404(self):
+        self.assertEqual(self._detail("nothing").status_code, 404)
+        self.assertEqual(self._detail("gfs.nothing").status_code, 404)
+        self.assertEqual(self._detail("nothing.forecast").status_code, 404)
+        # Not an id at all: no route matches it.
+        self.assertEqual(self.client.get("/api/edr/collections/gfs.forecast.extra/").status_code, 404)
+
+    def test_another_organisations_collection_is_never_reached(self):
+        other = make_organisation("elsewhere")
+        other_catalog = Catalog.objects.create(organisation=other, name="GFS", slug="gfs", file_format="grib2")
+        Collection.objects.create(
+            catalog=other_catalog, name="Hidden", slug="hidden", visibility=Collection.Visibility.PUBLIC
+        )
+        Collection.objects.create(
+            catalog=other_catalog, name="Their forecast", slug="forecast", visibility=Collection.Visibility.PUBLIC
+        )
+        # Its qualified id is free on this host, and its slug does not collide here.
+        self.assertEqual(self._detail("gfs.hidden").status_code, 404)
+        self.assertEqual(self._detail("hidden").status_code, 404)
+        self.assertEqual(self._detail("forecast").status_code, 302)
+        self.assertEqual(self._detail("gfs.forecast").json()["title"], "Forecast")
+
+
+class EDRBareSlugSubRouteTests(TestCase):
+    """The redirect keeps whatever follows the collection id, so a sub-route
+    (``position``, ``area``, …) reached by its bare slug lands on the same
+    sub-route of the qualified id."""
+
+    def setUp(self):
+        self.organisation = make_organisation()
+        catalog = Catalog.objects.create(organisation=self.organisation, name="GFS", slug="gfs", file_format="grib2")
+        self.collection = Collection.objects.create(
+            catalog=catalog, name="Forecast", slug="forecast", visibility=Collection.Visibility.PUBLIC
+        )
+
+    def _resolve(self, path, collection_id):
+        from django.contrib.auth.models import AnonymousUser
+        from django.test import RequestFactory
+
+        from .views import resolve_edr_collection
+
+        # What OrganisationMiddleware attaches for an anonymous caller.
+        request = RequestFactory().get(path)
+        request.user = AnonymousUser()
+        request.active_org = self.organisation
+        request.active_org_role = None
+        return resolve_edr_collection(request, collection_id, Collection.objects.all())
+
+    def test_a_sub_route_redirects_with_its_path_and_query(self):
+        response = self._resolve("/api/edr/collections/forecast/position/?coords=POINT(1 2)", "forecast")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/api/edr/collections/gfs.forecast/position/?coords=POINT(1%202)")
+
+    def test_a_qualified_id_resolves_to_the_collection(self):
+        resolved = self._resolve("/api/edr/collections/gfs.forecast/position/", "gfs.forecast")
+        self.assertEqual(resolved, self.collection)
