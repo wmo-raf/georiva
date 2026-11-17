@@ -32,6 +32,7 @@ from django.db import transaction
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
+from georiva.analysis.zonal_stats.tasks import computes_boundary_stats, enqueue_boundary_stats
 from georiva.core.machine_plane.remote_assets import publish_variable
 from georiva.core.storage.asset_location import remote_q, store_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
@@ -183,6 +184,13 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     indexed = _Index(collection, reach)
     jurisdiction = _Jurisdiction(feed, collection, reach)
     created_items = []
+    # Boundary statistics follow each Remote COG this run creates or re-syncs,
+    # enqueued as it commits (#639): only what the run writes, so only what is
+    # in the window, never the Upstream's depth; an unchanged asset is not
+    # written and not enqueued again; and a run that stops part-way has still
+    # enqueued what it wrote, which a retry would find current. A Store asset
+    # has no file to compute them from (ADR 0044). Nothing renders from them.
+    backfill = not reach.is_store and computes_boundary_stats(collection)
     # What the Upstream still has: the times of its items — each a run, where it
     # has runs, and a valid time — and the places, a time and a Variable, its
     # mapped assets fill.
@@ -217,7 +225,10 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
                 judged.add(place)
                 if mine.is_current(item, asset) or refused(key, asset, item):
                     continue
-                result.updated += jurisdiction.resync(mine, asset, item)
+                rewritten = jurisdiction.resync(mine, asset, item)
+                result.updated += rewritten
+                if rewritten and backfill:
+                    enqueue_boundary_stats(mine.pk)
             elif not indexed.has_asset(at, variable) and not refused(key, asset, item):
                 admitted.append((variable, asset))
 
@@ -228,7 +239,11 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
         with transaction.atomic():
             row, created = indexed.item_for(item, feed)
             for variable, asset in admitted:
-                result.indexed += _create_asset(row, variable, asset, item, feed, reach.format)
+                created_pk = _create_asset(row, variable, asset, item, feed, reach.format)
+                if created_pk is not None:
+                    result.indexed += 1
+                    if backfill:
+                        enqueue_boundary_stats(created_pk)
                 indexed.note_asset(at, variable)
         if created:
             created_items.append(row)
@@ -619,19 +634,19 @@ def _lifted(asset, item: UpstreamItem, *, kept: dict | None = None) -> dict:
     }
 
 
-def _create_asset(row, variable, asset, item: UpstreamItem, feed, format: str) -> int:
+def _create_asset(row, variable, asset, item: UpstreamItem, feed, format: str) -> int | None:
     """Index one Remote asset — of a store, a Store asset — in `format`. Returns
-    how many rows that created: 1, or 0 when another asset took its place since
+    the pk of the row it created, or None when another asset took its place since
     the collection was read."""
     from georiva.core.models import Asset
 
-    _, created = Asset.objects.get_or_create(
+    row_asset, created = Asset.objects.get_or_create(
         item=row,
         variable=variable,
         format=format,
         defaults={**_lifted(asset, item), "roles": [Asset.Role.DATA], "harvested_by": feed},
     )
-    return int(created)
+    return row_asset.pk if created else None
 
 
 def _describe(collection, described, feed) -> None:
