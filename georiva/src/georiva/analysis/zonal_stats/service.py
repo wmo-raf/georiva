@@ -168,7 +168,10 @@ def persist_stats(
         objects,
         update_conflicts=True,
         unique_fields=["time", "item", "variable", "boundary"],
-        update_fields=["mean", "min", "max", "sum", "std", "count"],
+        # `modified` too: a row's age says whether it is older than its asset's
+        # last re-sync, and so stale (#717). The insert stamps it, and a
+        # conflict takes the stamp of the row that would have been inserted.
+        update_fields=["mean", "min", "max", "sum", "std", "count", "modified"],
     )
     return len(objects)
 

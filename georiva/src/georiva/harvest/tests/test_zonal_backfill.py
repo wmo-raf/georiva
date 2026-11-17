@@ -66,6 +66,11 @@ class DispatchRecorder:
             self.harvest(**kwargs)
         return sorted(call.args[0] for call in delay.call_args_list)
 
+    def resync_upstream(self, n):
+        """The Upstream changes its item on day `n`: a new href, and a later `updated`."""
+        self.upstream.drop_item(day(n))
+        self.upstream.add_item(day(n), {"rainfall": rain_href(n).replace(".tif", "-v2.tif")}, updated=day(20))
+
     def asset_pks_at(self, *days):
         return sorted(Asset.objects.filter(item__time__in=[day(n) for n in days]).values_list("pk", flat=True))
 
@@ -98,8 +103,7 @@ class AHarvestEnqueuesZonalStatisticsTests(DispatchRecorder, HarvestFeedMixin, T
 
     def test_a_resynced_asset_is_enqueued_again_and_only_it(self):
         self.harvest_and_dispatch()
-        self.upstream.drop_item(day(2))
-        self.upstream.add_item(day(2), {"rainfall": rain_href(2).replace(".tif", "-v2.tif")}, updated=day(20))
+        self.resync_upstream(2)
 
         self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(2))
 
@@ -185,6 +189,23 @@ class AHarvestRecoversLostStatisticsTests(DispatchRecorder, HarvestFeedMixin, Te
 
         self.assertEqual(self.harvest_and_dispatch(), [])
 
+    def test_an_asset_whose_rows_are_older_than_its_resync_is_enqueued_again(self):
+        # The re-sync's own run was lost: its rows are still the old bytes' (#717).
+        self.give_stats(1, 2, 3)
+        self.resync_upstream(1)
+        self.harvest_and_dispatch()
+        self.forget_claims()
+
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(1))
+
+    def test_rows_recomputed_since_the_resync_are_not_stale(self):
+        self.resync_upstream(1)
+        self.harvest_and_dispatch()
+        self.give_stats(1, 2, 3)  # computed after the re-sync
+        self.forget_claims()
+
+        self.assertEqual(self.harvest_and_dispatch(), [])
+
     def test_an_asset_missing_one_configured_level_is_enqueued_again(self):
         load_boundary(level=2)
         Collection.objects.filter(pk=self.feed.ensure_collection().pk).update(boundary_stats_levels=[1, 2])
@@ -214,8 +235,7 @@ class AHarvestRecoversLostStatisticsTests(DispatchRecorder, HarvestFeedMixin, Te
     def test_a_resynced_asset_is_enqueued_though_it_is_claimed(self):
         self.harvest_and_dispatch()
         self.give_stats(1, 3)
-        self.upstream.drop_item(day(1))
-        self.upstream.add_item(day(1), {"rainfall": rain_href(1).replace(".tif", "-v2.tif")}, updated=day(20))
+        self.resync_upstream(1)
 
         self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(1))
 
@@ -262,10 +282,13 @@ class RecoveryAndTheSweepTests(DispatchRecorder, HarvestFeedMixin, TestCase):
         asset = Asset.objects.get()
         Asset.objects.filter(pk=asset.pk).update(created=timezone.now() - timedelta(hours=1))
 
+        # The sweep's own claim, which may linger from an earlier run that had this pk.
+        sweep_claim = f"zonal-stats-redispatch:{asset.pk}"
+        cache.delete(sweep_claim)
+        self.addCleanup(cache.delete, sweep_claim)
         delay = zonal_tasks.compute_boundary_zonal_stats.delay
         delay.reset_mock()
         zonal_tasks.sweep_missing_boundary_stats()
-        self.addCleanup(cache.delete, f"zonal-stats-redispatch:{asset.pk}")
 
         delay.assert_called_once_with(asset.pk)
 
