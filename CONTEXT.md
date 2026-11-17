@@ -511,6 +511,12 @@ _Avoid_: ownership (that is the Organisation's), scope
 The durable mark on a harvested row naming the Harvest feed that created it. Survives Materialization as history.
 _Avoid_: source tag, origin, lineage (that is Derivation's)
 
+**Provenance** (derivation):
+The durable mark on a Collection naming the type of the **Recipe** whose output it was created to hold
+(`derived_by_recipe`), set once when the recipe or its **DerivedProduct** creates the row. With harvest Provenance, it
+is how a collection says its Variables are not read from files, so they need no sources.
+_Avoid_: lineage (per-Item, that is the DerivationLink's), derived flag
+
 **Materialize**:
 Fetching a window of a Remote collection's bytes into local storage through the normal Fetch → Ingestion path, on
 the same feed. The asset becomes local and leaves the Mirror's Jurisdiction.

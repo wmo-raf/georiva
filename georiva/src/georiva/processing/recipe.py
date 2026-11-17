@@ -172,6 +172,12 @@ class BaseRecipe(ABC):
 
     type: str = ""
     version: str = "1"
+    #: Whether this recipe creates the Variables of the collections it writes
+    #: into. Only then is an output collection stamped with Provenance
+    #: (``Collection.derived_by_recipe``, #711) and its Variables exempt from
+    #: needing sources; a recipe that copies into a collection of file-read
+    #: Variables (promotion) says False.
+    creates_output_variables: bool = True
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

@@ -195,6 +195,7 @@ def materialise_output_collections(feed, definition):
     """
     from georiva.core.models import Collection
 
+    provenance = _derivation_provenance(definition)
     collections = []
     for ref in definition.outputs:
         collection, _created = Collection.objects.get_or_create(
@@ -204,10 +205,25 @@ def materialise_output_collections(feed, definition):
                 "name": ref.title or ref.collection,
                 "description": ref.description,
                 "visibility": ref.visibility,
+                # Provenance (derivation), on the row this creates only.
+                "derived_by_recipe": provenance,
             },
         )
         collections.append(collection)
     return collections
+
+
+def _derivation_provenance(definition) -> str:
+    """The ``derived_by_recipe`` a product's new output collection is created
+    with: its recipe type when that recipe creates the output's Variables, else
+    blank — a promotion output holds the feed's file-read Variables (#711). An
+    unregistered recipe stamps nothing: unmarked is file-read, the strict side."""
+    from georiva.processing.registry import recipe_registry
+
+    recipe = recipe_registry.get(definition.recipe_type)
+    if recipe is None or not recipe.creates_output_variables:
+        return ""
+    return definition.recipe_type
 
 
 def is_orphaned(product) -> bool:
