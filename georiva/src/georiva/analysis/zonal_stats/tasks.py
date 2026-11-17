@@ -78,7 +78,8 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
     try:
         # Opening is reading now (by range, ADR 0043 §7), so an unopenable COG
         # surfaces here as a RasterioError and takes the not-computable path
-        # below, while an I/O failure on the way is retried.
+        # below — unless it is Remote and the error is I/O, which is retried
+        # like any I/O failure on the way.
         band = read_band(asset.location)
         for level, boundaries in boundaries_by_level.items():
             stats_rows = compute_stats_from_band(band, boundaries)
@@ -95,7 +96,17 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
                 level,
                 asset_id,
             )
-    except RasterioError:
+    except RasterioError as exc:
+        if asset.location.is_remote and isinstance(exc, OSError):
+            # An Upstream that does not answer — a 5xx, a timeout — is not a bad
+            # COG: the read is retried under the same bound as a MinIO hiccup.
+            # Nothing here wrote a catalog row, so a failure changes none (#639).
+            logger.warning(
+                "compute_boundary_zonal_stats: upstream read of asset %d failed (will retry): %s",
+                asset_id,
+                exc,
+            )
+            raise self.retry(exc=exc) from exc
         # An unreadable COG fails the same way every time — retrying only burns
         # the budget.  The sweep re-issues it, and it surfaces in the log.
         logger.exception("compute_boundary_zonal_stats: asset %d is not computable", asset_id)
@@ -105,6 +116,40 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         # sweep_missing_boundary_stats picks the asset up.
         logger.warning("compute_boundary_zonal_stats: asset %d failed (will retry): %s", asset_id, exc)
         raise self.retry(exc=exc) from exc
+
+
+def computes_boundary_stats(collection) -> bool:
+    """
+    Whether a run of ``compute_boundary_zonal_stats`` over ``collection`` could
+    write a row: it computes some boundary level, and boundaries of one of
+    those levels are loaded. Asked once by a writer before it enqueues.
+    """
+    from adminboundarymanager.models import AdminBoundary
+
+    levels = getattr(collection, "boundary_stats_levels", None)
+    return bool(levels) and AdminBoundary.objects.filter(level__in=levels).exists()
+
+
+def enqueue_boundary_stats(asset_id: int) -> None:
+    """
+    Enqueue ``compute_boundary_zonal_stats`` for one asset once the caller's
+    writes commit — for a writer that is not ingestion, such as a harvest of
+    Remote assets (#639), having asked :func:`computes_boundary_stats` first.
+
+    Enqueue failure is logged, never raised: the writer must not fail over
+    bookkeeping. ``sweep_missing_boundary_stats`` re-issues a dropped run within
+    its recency window only; older than that, a dropped run is the
+    ``compute_boundary_stats`` command's to backfill.
+    """
+    from django.db import transaction
+
+    def dispatch():
+        try:
+            compute_boundary_zonal_stats.delay(asset_id)
+        except Exception as exc:
+            logger.warning("enqueue_boundary_stats: enqueue failed for asset %d: %s", asset_id, exc)
+
+    transaction.on_commit(dispatch)
 
 
 @app.task(
