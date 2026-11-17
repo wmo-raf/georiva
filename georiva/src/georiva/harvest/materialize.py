@@ -175,7 +175,7 @@ def materialize(asset_id: int, *, upstream=None, writer=None) -> str:
     with tempfile.TemporaryDirectory(prefix="georiva_materialize_", dir=settings.GEORIVA_TEMP_DIR) as folder:
         path = Path(folder) / "asset.tif"
         try:
-            upstream.fetch_asset(asset.href, path, admits=lambda url: allowlist.refusal(url) is None)
+            upstream.fetch_asset(asset.href, path, addresses=allowlist.addresses)
             extracted = _read(path)
         except UpstreamUnreachable as unreachable:
             logger.warning("Harvest %s: asset %s not kept locally — %s", feed.name, asset.pk, unreachable)

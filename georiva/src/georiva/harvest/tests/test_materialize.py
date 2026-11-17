@@ -373,9 +373,9 @@ class OnlyWhatIsStillDueIsMaterializedTests(MaterializeMixin, TestCase):
         self.assertEqual(self.upstream.fetched, [])
 
     def test_an_asset_that_leaves_the_jurisdiction_while_its_bytes_are_fetched_is_not_written(self):
-        def gone_meanwhile(href, dest, *, admits):
+        def gone_meanwhile(href, dest, *, addresses):
             Asset.objects.filter(pk=self.asset.pk).delete()
-            return fetch(href, dest, admits=admits)
+            return fetch(href, dest, addresses=addresses)
 
         fetch = self.upstream.fetch_asset
         with mock.patch.object(self.upstream, "fetch_asset", side_effect=gone_meanwhile):
