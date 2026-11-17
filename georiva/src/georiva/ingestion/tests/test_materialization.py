@@ -7,14 +7,22 @@ Mirrors processing/tests/test_engine.py: mock the writer, assert on records.
 """
 
 from datetime import UTC, datetime
+from unittest import mock
 from unittest.mock import MagicMock
 
 import numpy as np
+from adminboundarymanager.models import AdminBoundary
+from django.contrib.gis.geos import MultiPolygon, Polygon
+from django.db import connection
 from django.test import TestCase
+from wagtail import hooks
 
+from georiva.analysis.zonal_stats import tasks as zonal_tasks
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 from georiva.ingestion.materialization import AssetMaterializer
 from georiva.organisations.testing import make_organisation
+from georiva.virtual_zarr.models import VirtualZarrManifest
 
 
 def _mock_writer():
@@ -176,3 +184,80 @@ class ClipArrayTests(MaterializerFixture):
         )
         self.assertEqual(data.shape, (10, 10))
         self.assertEqual(list(bounds), [10, -5, 20, 5])
+
+
+class AfterSaveAssetHookTests(MaterializerFixture):
+    """Every ``GEORIVA_AFTER_SAVE_ASSET`` hook runs for a saved asset (#715)."""
+
+    def _register(self, fn):
+        self.enterContext(hooks.register_temporarily(GEORIVA_AFTER_SAVE_ASSET, fn))
+
+    def test_every_registered_hook_runs(self):
+        first, second = mock.Mock(return_value=None), mock.Mock(return_value=None)
+        self._register(first)
+        self._register(second)
+
+        (asset,) = self._materialize()
+
+        first.assert_called_once_with(asset)
+        second.assert_called_once_with(asset)
+
+    def test_a_hook_that_raises_is_logged_and_the_next_still_runs(self):
+        after = mock.Mock(return_value=None)
+        self._register(mock.Mock(side_effect=RuntimeError("boom")))
+        self._register(after)
+
+        with self.assertLogs("georiva.ingestion.materialization", level="WARNING") as logged:
+            (asset,) = self._materialize()
+
+        after.assert_called_once_with(asset)
+        self.assertIn("boom", "\n".join(logged.output))
+        self.assertTrue(Asset.objects.filter(pk=asset.pk).exists())
+
+    def test_a_hook_whose_query_fails_inside_a_transaction_leaves_the_next_able_to_query(self):
+        # A derivation materializes inside transaction.atomic(), as every test here runs.
+        def broken(asset):
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT * FROM no_such_table_715")
+
+        seen = []
+        self._register(broken)
+        self._register(lambda asset: seen.append(Asset.objects.filter(pk=asset.pk).exists()))
+
+        with self.assertLogs("georiva.ingestion.materialization", level="WARNING"):
+            self._materialize()
+
+        self.assertEqual(seen, [True])
+        self.assertTrue(Asset.objects.exists())
+
+    def test_a_saved_cog_both_marks_its_manifest_stale_and_enqueues_its_zonal_statistics(self):
+        AdminBoundary.objects.create(
+            name_0="Testland", gid_0="TST", level=1, geom=MultiPolygon(Polygon.from_bbox((10, -5, 20, 5)))
+        )
+        Collection.objects.filter(pk=self.collection.pk).update(boundary_stats_levels=[1])
+        self.item.collection.refresh_from_db()
+        manifest = VirtualZarrManifest.objects.create(variable=self.variable, status=VirtualZarrManifest.Status.READY)
+
+        with (
+            mock.patch.object(zonal_tasks.compute_boundary_zonal_stats, "delay") as delay,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            (asset,) = self._materialize()
+            # Not before the asset's row commits: a worker would not find it.
+            delay.assert_not_called()
+
+        delay.assert_called_once_with(asset.pk)
+        manifest.refresh_from_db()
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.STALE)
+
+    def test_no_zonal_statistics_are_enqueued_where_no_boundaries_are_loaded(self):
+        Collection.objects.filter(pk=self.collection.pk).update(boundary_stats_levels=[1])
+        self.item.collection.refresh_from_db()
+
+        with (
+            mock.patch.object(zonal_tasks.compute_boundary_zonal_stats, "delay") as delay,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            self._materialize()
+
+        delay.assert_not_called()
