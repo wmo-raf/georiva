@@ -51,6 +51,16 @@
                     {% endif %}
                 </td>
             </tr>
+            {% if feed.materializes %}
+                <tr>
+                    <th scope="row">{% trans "Local copy" %}</th>
+                    <td>
+                        {% if feed.materialize_start %}{{ feed.materialize_start }}{% else %}{% trans "the upstream's beginning" %}{% endif %}
+                        →
+                        {% if feed.materialize_end %}{{ feed.materialize_end }}{% else %}{% trans "open" %}{% endif %}
+                    </td>
+                </tr>
+            {% endif %}
             <tr>
                 <th scope="row">{% trans "Asset host allowlist" %}</th>
                 <td>

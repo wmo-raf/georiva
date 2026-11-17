@@ -20,6 +20,10 @@ is gone upstream loses its rows here, and what changed upstream is re-synced.
 Both happen only once the whole window has been listed, and only within the
 Mirror's Jurisdiction (§7) — the assets that bear this feed's Provenance and
 are still Remote. Every other row is left exactly as it is.
+
+What the feed keeps local — its materialization window — a harvest does not
+fetch: it sends those Remote assets to the ingestion queue (`materialize`),
+which makes them local and so takes them out of the Jurisdiction (§8).
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
 from . import runs
 from .asset_hosts import AssetHostAllowlist, PinnedBuckets
+from .materialize import enqueue_due as enqueue_materialization
 from .survey import store_fields, store_media_type
 from .upstream import (
     UpstreamAsset,
@@ -273,6 +278,15 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     # once, here, where the window's Remote assets now are (ADR 0043 §3).
     for variable in variables.values():
         publish_variable(variable)
+
+    # The window the feed keeps local goes to the ingestion queue, as the run's
+    # writes commit (ADR 0042 §8): what is already local, and what has left the
+    # Jurisdiction, is no longer Remote and not sent. Bookkeeping of the run's,
+    # never its failure.
+    try:
+        enqueue_materialization(feed, collection)
+    except Exception:
+        logger.exception("Harvest %s: its local window could not be sent to be fetched", feed.name)
 
     # A run lost since an earlier harvest enqueued it is enqueued again, however
     # old its item: the sweep reaches back only days, and an archive is older

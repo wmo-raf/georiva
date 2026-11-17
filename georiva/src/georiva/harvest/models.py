@@ -4,6 +4,8 @@ The Harvest feed: a pull feed of the harvesting kind (ADR 0042 §2).
 It is a `DataFeed` species, so it is still its catalog's one Feed (ADR 0034) and
 its runs are `FetchRun`s on the shared run spine. What it does in a run is its
 own: it copies an Upstream's index into Published rows and fetches no file.
+What a feed keeps local — its materialization window — its runs send to the
+ingestion queue, which fetches those files (ADR 0042 §8).
 """
 
 from datetime import timedelta
@@ -83,6 +85,22 @@ class HarvestFeed(DataFeed):
         null=True,
         blank=True,
         help_text=_("Only upstream items at or before this time are indexed. Blank: no end, the window stays open."),
+    )
+
+    materialize_start = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Keep a local copy from"),
+        help_text=_(
+            "Items at or after this time have their files copied into our storage by the feed's runs, and are "
+            "served from there. Blank, with no end either: nothing is copied, and every file is read upstream."
+        ),
+    )
+    materialize_end = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Keep a local copy until"),
+        help_text=_("Items at or before this time are copied. Blank: no end, newer items are copied as they arrive."),
     )
 
     rolling_window_days = models.PositiveIntegerField(
@@ -178,6 +196,15 @@ class HarvestFeed(DataFeed):
             [FieldPanel("window_start"), FieldPanel("window_end"), FieldPanel("rolling_window_days")],
             heading=_("Time window"),
         ),
+        MultiFieldPanel(
+            # A copy, once made, is ours: moving the window later leaves it local (ADR 0042 §8).
+            [FieldPanel("materialize_start"), FieldPanel("materialize_end")],
+            heading=_("Local copy"),
+            help_text=_(
+                "Keep the files of a window of time in our own storage while the rest is read upstream. A file "
+                "copied stays copied, even when the window moves or the upstream removes it."
+            ),
+        ),
         InlinePanel(
             "variable_mappings",
             heading=_("Variable mapping"),
@@ -210,6 +237,23 @@ class HarvestFeed(DataFeed):
         if self.rolling_window_days:
             return (timezone.now() - timedelta(days=self.rolling_window_days), None)
         return (self.window_start, self.window_end)
+
+    @property
+    def materializes(self) -> bool:
+        """Whether the feed keeps a window local (ADR 0042 §8): one is set, and
+        its assets are files. A Store asset is a slice of a store, not a file."""
+        return not self.is_store and (self.materialize_start is not None or self.materialize_end is not None)
+
+    @property
+    def materialization_window(self):
+        """The window whose Remote assets this feed's runs copy into our storage."""
+        return (self.materialize_start, self.materialize_end)
+
+    def materializes_at(self, when) -> bool:
+        """Whether an asset at valid time `when` belongs in the local window."""
+        from .upstream import in_window
+
+        return self.materializes and when is not None and in_window(when, self.materialization_window)
 
     @property
     def allowed_asset_hosts(self) -> set[str]:

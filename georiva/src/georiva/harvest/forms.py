@@ -2,7 +2,8 @@
 The Harvest feed's admin form: what an operator may change once a feed exists (ADR 0042 §2–3).
 
 A harvest feed is created by the Harvest Feed Wizard and nowhere else, so this
-form only edits: the feed's name, cadence and window, and its Variable mapping.
+form only edits: the feed's name, cadence and window, the window it keeps a
+local copy of, and its Variable mapping.
 Its Upstream, upstream collection and the shape it was set up for are fixed —
 another one is another feed — and where its files are read from is confirmed
 on the feed's page, from what a re-check of the Upstream proposes, never typed
@@ -27,6 +28,10 @@ class HarvestFeedForm(DataFeedForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._keep_one_window()
+        if self.instance.is_store:
+            # A Store asset is a slice of a store, not a file to copy (ADR 0044).
+            for local in ("materialize_start", "materialize_end"):
+                self.fields.pop(local, None)
         if self.instance.pk:
             # Its collection, and every row harvested so far, is in this catalog.
             self.fields["catalog"].disabled = True
@@ -111,6 +116,9 @@ class HarvestFeedForm(DataFeedForm):
         start, end = cleaned.get("window_start"), cleaned.get("window_end")
         if start and end and end < start:
             self.add_error("window_end", _("The window ends before it starts."))
+        start, end = cleaned.get("materialize_start"), cleaned.get("materialize_end")
+        if start and end and end < start:
+            self.add_error("materialize_end", _("The local copy's window ends before it starts."))
         self._check_mapping()
         return cleaned
 

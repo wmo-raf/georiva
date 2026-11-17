@@ -91,6 +91,18 @@ class FakeUpstream:
         #: The files opened, in order, each with whether a value range was asked for.
         self.probed: list[tuple[str, bool]] = []
 
+        # What only a materialization asks: a file's whole bytes.
+        #: The pixels of each file, by href; one not here is an 8×8 grid of 7.0 over the items' usual box.
+        self.rasters: dict = {}
+        #: Where each href redirects to, when it does.
+        self.redirects: dict[str, str] = {}
+        #: Why a file cannot be had, by href.
+        self.unfetchable: dict[str, str] = {}
+        #: The hrefs whose bytes are not a raster at all.
+        self.garbage: set[str] = set()
+        #: The addresses whose bytes were copied, in order: an href, or where it redirected to.
+        self.fetched: list[str] = []
+
         # What only an Upstream store answers.
         #: The codecs each store's arrays name, by the store's address and the array's path.
         self.stores: dict[str, dict[str, tuple[str, ...]]] = {}
@@ -292,6 +304,44 @@ class FakeUpstream:
     def resolve_host(self, host: str) -> list[str]:
         self.hosts_resolved.append(host)
         return self.addresses.get(host, [PUBLIC_ADDRESS])
+
+    def fetch_asset(self, href: str, dest, *, admits) -> int:
+        import numpy
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        url = href
+        while url in self.redirects:
+            url = self.redirects[url]
+            if not admits(url):
+                raise UpstreamUnreachable(f"upstream file redirects to an address not allowed: {url}")
+        if href in self.unfetchable:
+            raise UpstreamUnreachable(self.unfetchable[href])
+        self.fetched.append(url)
+        if href in self.garbage:
+            with open(dest, "wb") as out:
+                out.write(b"<html>not found</html>")
+            return 22
+        data = self.rasters.get(href)
+        if data is None:
+            data = numpy.full((8, 8), 7.0, dtype="float32")
+        height, width = data.shape
+        with rasterio.open(
+            dest,
+            "w",
+            driver="GTiff",
+            width=width,
+            height=height,
+            count=1,
+            dtype=str(data.dtype),
+            crs="EPSG:4326",
+            nodata=-9999.0,
+            transform=from_bounds(33.0, -5.0, 42.0, 5.0, width, height),
+        ) as out:
+            out.write(data, 1)
+        from pathlib import Path
+
+        return Path(dest).stat().st_size
 
     def describe_root(self) -> UpstreamRoot:
         self.roots_read += 1
