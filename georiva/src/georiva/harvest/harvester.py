@@ -116,6 +116,10 @@ def harvest(
     before any row is touched, so an outage never reads as "everything was
     deleted". The feed's own Collection is its setup, not the Upstream's
     content, and is there from the first run however that run ends.
+
+    At most one harvest of a feed runs at a time: while another is running,
+    `FeedAlreadyRunning` is raised and nothing is harvested. Closing a run
+    counts rows, and must not count those another harvest has yet to commit (#683).
     """
     upstream = upstream or feed.upstream_client()
     collection = feed.ensure_collection()
@@ -130,6 +134,7 @@ def harvest(
         data_feed=feed,
         collection=collection,
         resumed_from=resumed_from,
+        exclusive=True,
         logger=logger,
     )
 

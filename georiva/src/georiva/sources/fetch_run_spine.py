@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,15 @@ class RunStopped(Exception):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+class FeedAlreadyRunning(Exception):
+    """Raised instead of beginning an exclusive run while another run of its
+    feed is still running: no run begins, and nothing is recorded (#683)."""
+
+    def __init__(self, running):
+        super().__init__(f"FetchRun {running.pk} of feed {running.data_feed_id} is still running")
+        self.running = running
 
 
 @dataclass
@@ -87,6 +97,7 @@ def run_tracked(
     collection,
     resumed_from=None,
     settle: Callable | None = None,
+    exclusive: bool = False,
     logger: logging.Logger = logger,
 ) -> RunResult:
     """
@@ -105,13 +116,21 @@ def run_tracked(
     `resumed_from` is the run this one retries. With no `data_feed` there is
     nothing to track: the loop runs with `fetch_run=None` and only `result`
     says how it went.
+
+    `exclusive` runs at most one run of the feed at a time: while another is
+    running, `FeedAlreadyRunning` is raised and no run begins. The running run
+    is the claim, so a worker that dies holding it holds the feed until the
+    stale-run sweep interrupts it (#683).
     """
     from georiva.sources.models import FetchRun
 
     fetch_run = None
     began_at = timezone.now()
     if data_feed:
-        fetch_run = FetchRun.begin(data_feed=data_feed, collection=collection, resumed_from=resumed_from)
+        with transaction.atomic():
+            if exclusive:
+                _claim(data_feed)
+            fetch_run = FetchRun.begin(data_feed=data_feed, collection=collection, resumed_from=resumed_from)
         began_at = fetch_run.started_at
 
     try:
@@ -149,6 +168,18 @@ def run_tracked(
             data_feed._update_run_stats(result, collection, started_at=began_at)
 
     return result
+
+
+def _claim(data_feed) -> None:
+    """Hold the feed's row until the caller's transaction ends, and refuse if a
+    run of the feed is running. Two claims of one feed are serialised by the
+    lock, so the second sees the first's run once it has begun."""
+    from georiva.sources.models import DataFeed, FetchRun
+
+    DataFeed.objects.non_polymorphic().select_for_update().filter(pk=data_feed.pk).values_list("pk").first()
+    running = FetchRun.objects.filter(data_feed_id=data_feed.pk, status=FetchRun.Status.RUNNING).first()
+    if running is not None:
+        raise FeedAlreadyRunning(running)
 
 
 def record_not_attempted(
