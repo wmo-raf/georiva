@@ -32,7 +32,11 @@ from django.db import transaction
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
-from georiva.analysis.zonal_stats.tasks import computes_boundary_stats, enqueue_boundary_stats
+from georiva.analysis.zonal_stats.tasks import (
+    computes_boundary_stats,
+    enqueue_harvested_boundary_stats,
+    enqueue_lost_boundary_stats,
+)
 from georiva.core.machine_plane.remote_assets import publish_variable
 from georiva.core.storage.asset_location import remote_q, store_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
@@ -188,8 +192,10 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     # enqueued as it commits (#639): only what the run writes, so only what is
     # in the window, never the Upstream's depth; an unchanged asset is not
     # written and not enqueued again; and a run that stops part-way has still
-    # enqueued what it wrote, which a retry would find current. A Store asset
-    # has no file to compute them from (ADR 0044). Nothing renders from them.
+    # enqueued what it wrote, which a retry would find current. Each enqueue
+    # claims its asset, so the recovery below does not take a run still queued
+    # for a lost one. A Store asset has no file to compute them from (ADR 0044).
+    # Nothing renders from them.
     backfill = not reach.is_store and computes_boundary_stats(collection)
     # What the Upstream still has: the times of its items — each a run, where it
     # has runs, and a valid time — and the places, a time and a Variable, its
@@ -228,7 +234,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
                 rewritten = jurisdiction.resync(mine, asset, item)
                 result.updated += rewritten
                 if rewritten and backfill:
-                    enqueue_boundary_stats(mine.pk)
+                    enqueue_harvested_boundary_stats(mine.pk)
             elif not indexed.has_asset(at, variable) and not refused(key, asset, item):
                 admitted.append((variable, asset))
 
@@ -243,7 +249,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
                 if created_pk is not None:
                     result.indexed += 1
                     if backfill:
-                        enqueue_boundary_stats(created_pk)
+                        enqueue_harvested_boundary_stats(created_pk)
                 indexed.note_asset(at, variable)
         if created:
             created_items.append(row)
@@ -267,6 +273,16 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     # once, here, where the window's Remote assets now are (ADR 0043 §3).
     for variable in variables.values():
         publish_variable(variable)
+
+    # A run lost since an earlier harvest enqueued it is enqueued again, however
+    # old its item: the sweep reaches back only days, and an archive is older
+    # (#716). Only the Jurisdiction's, in the window — what this feed governs.
+    # Last, and never the harvest's failure: it is bookkeeping.
+    if backfill:
+        try:
+            enqueue_lost_boundary_stats(collection, jurisdiction.judged_rows(), window=reach.window)
+        except Exception:
+            logger.exception("Harvest %s: lost boundary statistics could not be re-enqueued", feed.name)
 
 
 def _points_elsewhere(feed, collection, reach: _Reach) -> bool:
@@ -511,12 +527,17 @@ class _Jurisdiction:
         #: By place: the asset's run, or none, its valid time and its Variable's pk.
         self.assets = {
             (run, when, variable_pk): _Mine(pk, extra_fields, href, store_array)
-            for pk, run, when, variable_pk, extra_fields, href, store_array in self._rows()
-            .filter(reach.judged_q("item__"), item__collection=collection, format=reach.format)
-            .values_list(
+            for pk, run, when, variable_pk, extra_fields, href, store_array in self.judged_rows().values_list(
                 "pk", "item__reference_time", "item__time", "variable_id", "extra_fields", "href", "store_array"
             )
         }
+
+    def judged_rows(self):
+        """The Jurisdiction's rows the Mirror judges: mine, still Remote, of the
+        harvest's kind, in this collection and in the window."""
+        return self._rows().filter(
+            self.reach.judged_q("item__"), item__collection=self.collection, format=self.reach.format
+        )
 
     def _rows(self):
         """Mine, and still Remote: the test every read, rewrite and delete goes through."""
