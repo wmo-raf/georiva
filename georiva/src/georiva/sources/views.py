@@ -53,6 +53,7 @@ def _run_words(real_feed):
             "run": _("Fetch run"),
             "run_now": _("Fetch now"),
             "started": _("Fetch started for '%s'."),
+            "already_running": _("A fetch of '%s' is already running, so another was not started."),
             "no_runs": _("No fetch runs yet for this feed."),
             "recover": _("Recover fetch run"),
         }
@@ -62,6 +63,7 @@ def _run_words(real_feed):
         "run": _("Harvest run"),
         "run_now": _("Harvest now"),
         "started": _("Harvest started for '%s'."),
+        "already_running": _("A harvest of '%s' is already running, so another was not started."),
         "no_runs": _("No harvest runs yet for this feed."),
         "recover": _("Recover harvest run"),
     }
@@ -1900,8 +1902,13 @@ def data_feed_fetch_runs(request, feed_pk):
     run_words = _run_words(real_feed)
 
     if request.method == "POST" and request.POST.get("action") == "fetch_now":
-        real_feed.run_now(user=request.user)
-        messages.success(request, run_words["started"] % feed.name)
+        running = FetchRun.objects.filter(data_feed=feed, status=FetchRun.Status.RUNNING)
+        if real_feed.runs_one_at_a_time and running.exists():
+            # Its task would not start another either (#683): say so rather than claim one started.
+            messages.warning(request, run_words["already_running"] % feed.name)
+        else:
+            real_feed.run_now(user=request.user)
+            messages.success(request, run_words["started"] % feed.name)
         return redirect("data_feed_fetch_runs", feed_pk=feed.pk)
 
     # Synchronous, ephemeral dry run (PRD #217): results render on this POST

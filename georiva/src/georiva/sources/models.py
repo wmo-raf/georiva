@@ -147,6 +147,8 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     #: harvest, ADR 0042 §4) has no `FetchedFile` rows, and the dashboard and run
     #: pages show its own counts where they would show file counts.
     fetches_files = True
+    # Whether a run of the feed waits for none of its others to be running (#683).
+    runs_one_at_a_time = False
 
     #: The dashboard panel showing what this feed is set up to bring in. A feed
     #: whose collections are not definition-driven names its own template, which

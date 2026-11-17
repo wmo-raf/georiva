@@ -134,7 +134,7 @@ def harvest(
         data_feed=feed,
         collection=collection,
         resumed_from=resumed_from,
-        exclusive=True,
+        exclusive=feed.runs_one_at_a_time,
         logger=logger,
     )
 
