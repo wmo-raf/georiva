@@ -53,6 +53,9 @@ class PromotionRecipe(BaseRecipe):
     #     and south-up staging rasters are flipped north-up on read.
     # Bumping the version re-derives already-promoted items on the next sweep.
     version = "4"
+    # Promotion writes into the published collection a feed's Loader provisioned,
+    # whose Variables are read from files and keep their sources.
+    creates_output_variables = False
 
     # ---- declarative surface ------------------------------------------------
 

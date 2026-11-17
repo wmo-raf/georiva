@@ -221,6 +221,17 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
 
     sort_order = models.PositiveIntegerField(default=0)
 
+    # Provenance (derivation): the recipe whose output this collection is, set
+    # once, when a recipe or its product creates the row, and never rewritten —
+    # the derivation counterpart of ``harvested_by``. Blank: no recipe made it.
+    derived_by_recipe = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
+        help_text="The type of the recipe that created this collection to hold its output, if one did.",
+    )
+
     boundary_stats_levels = ArrayField(
         models.IntegerField(choices=ADM_LEVEL_CHOICES),
         blank=True,
@@ -305,17 +316,13 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
 
         - a harvested collection (``harvested_by``, ADR 0042 §7): each Variable
           is reached through the feed's Variable mapping, not a band;
-        - a derived product's output (a ``DerivedProductOutput`` binding,
-          ADR 0010 §2): its Variables are written by a recipe.
+        - a recipe's output (``derived_by_recipe``, ADR 0010 §2): its Variables
+          are written by the recipe.
 
-        A new way of feeding a collection that is not file reading adds its mark
-        here.
+        Both are Provenance, set when the row is created — a new way of feeding a
+        collection that is not file reading adds its mark here.
         """
-        if self.pk is None:
-            return True
-        if self.harvested_by_id is not None:
-            return False
-        return not self.derived_product_outputs.exists()
+        return self.harvested_by_id is None and not self.derived_by_recipe
 
     @property
     def spatial_extent(self) -> list | None:

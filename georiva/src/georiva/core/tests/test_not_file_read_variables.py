@@ -3,22 +3,31 @@
 Only a Variable read out of ingested files names its bands (`sources`), a
 transform over them, and the unit they arrive in. A harvested collection's
 Variables are reached through the feed's Variable mapping (ADR 0042 §7), and a
-derived product's output Variables are written by a recipe (ADR 0010 §2) — so
-neither must be refused for having no source, and the collection editor does
-not offer those fields for them.
+recipe's output Variables are written by the recipe (ADR 0010 §2) — so neither
+must be refused for having no source, and the collection editor does not offer
+those fields for them. Each says so by its Provenance: ``harvested_by``, or
+``derived_by_recipe`` (#711).
 """
 
+import importlib
+
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from wagtail.test.utils.form_data import inline_formset, nested_form_data
 
+from georiva.core.derived_products import DerivedProductDefinition, OutputRef
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.core.models.collection import FILE_READ_VARIABLE_FIELDS
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.organisations.tests.factories import PASSWORD, grant_everything, make_user
+from georiva.processing.recipes.climatology import ClimatologyRecipe
 from georiva.sources.models import DataFeed, DerivedProduct, DerivedProductOutput
+from georiva.sources.product_service import materialise_output_collections
+
+backfill = importlib.import_module("georiva.core.migrations.0022_collection_derived_by_recipe")
 
 
 class NotFileReadFixture:
@@ -38,11 +47,9 @@ class NotFileReadFixture:
         cls.harvested = Collection.objects.create(
             catalog=cls.catalog, name="Harvested", slug="harvested", harvested_by=cls.feed
         )
-        cls.derived = Collection.objects.create(catalog=cls.catalog, name="Derived", slug="derived")
-        product = DerivedProduct.objects.create(
-            data_feed=cls.feed, definition_key="clim", recipe_type="climatology", title="Climatology"
+        cls.derived = Collection.objects.create(
+            catalog=cls.catalog, name="Derived", slug="derived", derived_by_recipe="climatology"
         )
-        DerivedProductOutput.objects.create(product=product, role="value", output_key="derived", collection=cls.derived)
 
     def sourceless(self, collection, slug="tas"):
         return Variable(collection=collection, name=slug, slug=slug, unit=self.unit)
@@ -55,8 +62,20 @@ class ReadsVariablesFromFilesTests(NotFileReadFixture, TestCase):
     def test_a_harvested_collection_does_not(self):
         self.assertFalse(self.harvested.reads_variables_from_files)
 
-    def test_a_derived_products_output_does_not(self):
+    def test_a_recipes_output_does_not(self):
         self.assertFalse(self.derived.reads_variables_from_files)
+
+    def test_a_binding_alone_is_not_provenance(self):
+        """A product bound to a collection it did not create — an operator's,
+        say — leaves that collection's Variables file-read (#711)."""
+        product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="clim", recipe_type="climatology", title="Climatology"
+        )
+        DerivedProductOutput.objects.create(
+            product=product, role="value", output_key="files", collection=self.file_read
+        )
+
+        self.assertTrue(self.file_read.reads_variables_from_files)
 
     def test_an_unsaved_collection_reads_from_files(self):
         self.assertTrue(Collection(catalog=self.catalog, name="New", slug="new").reads_variables_from_files)
@@ -173,3 +192,83 @@ class CollectionEditorTests(NotFileReadFixture, TestCase):
         for child in [*form.formsets["variables"].forms, form.formsets["variables"].empty_form]:
             for name in FILE_READ_VARIABLE_FIELDS:
                 self.assertIn(name, child.fields)
+
+
+class DerivationProvenanceTests(NotFileReadFixture, TestCase):
+    """Who stamps ``derived_by_recipe``, and only on a row they create."""
+
+    def definition(self, slug, recipe_type="climatology"):
+        return DerivedProductDefinition(
+            key="clim",
+            recipe_type=recipe_type,
+            label="Clim",
+            description="",
+            config_schema=(),
+            inputs=(),
+            outputs=(OutputRef(role="climatology", collection=slug),),
+            trigger_mode="scheduled",
+        )
+
+    def test_materialising_a_product_stamps_the_output_it_creates(self):
+        (collection,) = materialise_output_collections(self.feed, self.definition("normals"))
+
+        self.assertEqual(collection.derived_by_recipe, "climatology")
+        self.assertFalse(collection.reads_variables_from_files)
+
+    def test_a_promotion_output_is_not_stamped(self):
+        """Promotion copies into the feed's published collection, whose
+        Variables are file-read and keep their sources — the #710 regression."""
+        (collection,) = materialise_output_collections(self.feed, self.definition("published", "promotion"))
+
+        self.assertEqual(collection.derived_by_recipe, "")
+        self.assertTrue(collection.reads_variables_from_files)
+
+    def test_an_unregistered_recipes_output_is_not_stamped(self):
+        (collection,) = materialise_output_collections(self.feed, self.definition("orphan", "no-such-recipe"))
+
+        self.assertEqual(collection.derived_by_recipe, "")
+
+    def test_materialising_onto_an_existing_collection_leaves_it_as_it_is(self):
+        (collection,) = materialise_output_collections(self.feed, self.definition("files"))
+
+        self.assertEqual(collection.pk, self.file_read.pk)
+        self.assertEqual(collection.derived_by_recipe, "")
+
+    def test_the_core_climatology_recipe_stamps_the_collection_it_creates(self):
+        unit = {"source_collection": "tas", "season": "DJF", "quantity": "value", "baseline": None}
+
+        collection = ClimatologyRecipe()._published_collection(unit, self.catalog)
+
+        self.assertEqual(collection.derived_by_recipe, "climatology")
+        self.assertFalse(collection.reads_variables_from_files)
+
+    def test_the_backfill_stamps_a_bound_output_with_its_products_recipe(self):
+        bound = Collection.objects.create(catalog=self.catalog, name="Bound", slug="bound")
+        product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="anom", recipe_type="chirps-anomaly", title="Anomaly"
+        )
+        DerivedProductOutput.objects.create(product=product, role="anomaly", output_key="bound", collection=bound)
+
+        backfill.stamp_bound_outputs(apps, None)
+
+        bound.refresh_from_db()
+        self.assertEqual(bound.derived_by_recipe, "chirps-anomaly")
+        self.file_read.refresh_from_db()
+        self.assertEqual(self.file_read.derived_by_recipe, "")
+        self.derived.refresh_from_db()
+        self.assertEqual(self.derived.derived_by_recipe, "climatology")
+
+    def test_the_backfill_leaves_a_promotion_output_unstamped(self):
+        published = Collection.objects.create(catalog=self.catalog, name="Published", slug="published")
+        product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="promote", recipe_type="promotion", title="Promotion"
+        )
+        DerivedProductOutput.objects.create(
+            product=product, role="served", output_key="published", collection=published
+        )
+
+        backfill.stamp_bound_outputs(apps, None)
+
+        published.refresh_from_db()
+        self.assertEqual(published.derived_by_recipe, "")
+        self.assertTrue(published.reads_variables_from_files)

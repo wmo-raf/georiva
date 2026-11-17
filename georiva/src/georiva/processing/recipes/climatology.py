@@ -260,7 +260,7 @@ class ClimatologyRecipe(BaseRecipe):
         collection, _ = Collection.objects.get_or_create(
             catalog=catalog,
             slug=slug,
-            defaults={"name": slug},
+            defaults={"name": slug, "derived_by_recipe": self.type},
         )
         return collection
 
