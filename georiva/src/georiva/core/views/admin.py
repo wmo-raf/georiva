@@ -276,6 +276,8 @@ def collection_items_list(request, collection_pk):
         "variable_count": len(variable_list),
         "active_var_slug": active_var_slug,
         "active_variable": active_variable,
+        # Two items of different runs share a valid time; the data, not the forecast flag, says it has runs (#685).
+        "has_runs": collection.has_runs(),
         "page_obj": page_obj,
         "paginator": paginator,
         "elided_page_range": elided_page_range,

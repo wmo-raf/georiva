@@ -103,7 +103,12 @@ async def rasterio_io_error_handler(request: Request, exc: RasterioIOError) -> J
         logger.warning("COG not found: %s", request.url)
         return JSONResponse(
             status_code=404,
-            content={"detail": "File not found in storage — check that the time/reftime parameters are correct."},
+            # A step with no row is resolved to our storage whatever the collection is read
+            # from, so the words name the time asked for, never a file (#685).
+            content={
+                "detail": "No data for this time — check that time (and reftime, for a run) name one the "
+                "collection has."
+            },
             headers=_NEVER_CACHED,
         )
     logger.error("RasterioIOError: %s | path: %s", msg, request.url)

@@ -152,6 +152,9 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     settled = set() if whole_window else runs.settled_runs(collection, mapped, reach.runs_q())
     described, undescribed = _description(feed, upstream)
     try:
+        if feed.is_store and described is None and undescribed:
+            # The catalog was not reached: it was never asked what the store is (#685).
+            raise RunStopped(f"source unavailable — {undescribed}")
         listed, expected = _listed(feed, upstream, described, reach.window, list(variables), settled)
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable

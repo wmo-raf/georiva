@@ -134,5 +134,5 @@ fetch(EDR)
 <ul class="gr-sidepanel-steps">
     <li>{% blocktrans %}<strong>422</strong>: a required parameter, usually <code>time</code>, is missing.{% endblocktrans %}</li>
     <li>{% blocktrans %}<strong>400</strong>: the timestamp is not ISO 8601 UTC, often a <code>+</code> that became a space.{% endblocktrans %}</li>
-    <li>{% blocktrans %}<strong>404 "File not found in storage"</strong>: no item has exactly this time{% endblocktrans %}{% if has_runs %} {% trans "and run" %}{% endif %}. {% trans "Take it from the items list." %}</li>
+    <li>{% blocktrans %}<strong>404 "No data for this time"</strong>: no item has exactly this time{% endblocktrans %}{% if has_runs %} {% trans "and run" %}{% endif %}. {% trans "Take it from the items list." %}</li>
 </ul>

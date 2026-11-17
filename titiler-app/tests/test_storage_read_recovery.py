@@ -173,6 +173,20 @@ class TestFailureResponses:
         assert response.status_code == 404
         assert response.headers["cache-control"] == "no-store"
 
+    def test_a_missing_timestep_is_described_whatever_the_collection_is_read_from(self, client, fake_redis):
+        """A step with no row reads as absent here for a store's collection too:
+        the words may not speak of storage or files (#685)."""
+        fake_redis.store[f"georiva:palette:{ORG}:{CATALOG}:{COLLECTION}:{VARIABLE}"] = json.dumps(TILE_CONFIG)
+
+        response = client.get(
+            f"/{ORG}/{CATALOG}/{COLLECTION}/{VARIABLE}/tiles/WebMercatorQuad/0/0/0.png",
+            params={"time": TIME},
+        )
+
+        detail = response.json()["detail"]
+        assert "storage" not in detail.lower() and "file" not in detail.lower()
+        assert "time" in detail.lower(), "the WMTS shim blames TIME by this word"
+
     def test_the_wmts_exception_report_is_never_cached_either(self, client, fake_redis):
         """The surface #400 was reported on speaks XML, not the JSON above.
 

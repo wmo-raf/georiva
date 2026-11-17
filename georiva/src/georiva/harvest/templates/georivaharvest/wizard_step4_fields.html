@@ -57,6 +57,10 @@
             border-bottom: 0;
         }
 
+        .hwiz-reading {
+            font-weight: 600;
+        }
+
         .hwiz-unoffered {
             margin-top: 1em;
         }
@@ -69,7 +73,7 @@
 {% endblock %}
 
 {% block wizard_content %}
-    <form method="post" action="">
+    <form method="post" action="" id="hwiz-fields">
         {% csrf_token %}
         <div class="hwiz-panel">
             <div class="hwiz-panel__header">{% trans "What to show" %}</div>
@@ -207,6 +211,10 @@
             </div>
         </div>
 
+        {# Shown as the form is sent when a map is to be read: from a far store that takes a while (#685). #}
+        <p class="hwiz-note hwiz-reading" data-hwiz-reading role="status" hidden>
+            {% trans "GeoRiva is reading one map of each new kind you chose from the provider. This can take a minute: keep this page open." %}
+        </p>
         <div class="hwiz-actions">
             <button type="submit" class="button bicolor button--icon">
                 {% icon name="arrow-right" wrapped=1 %}
@@ -221,6 +229,29 @@
     {{ block.super }}
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            // A ticked field with no row of values yet is one GeoRiva is about to read.
+            const form = document.getElementById('hwiz-fields');
+            const reading = document.querySelector('[data-hwiz-reading]');
+            if (form && reading) {
+                // A page brought back by the browser's Back button is not reading anything.
+                window.addEventListener('pageshow', function () {
+                    reading.hidden = true;
+                    form.querySelectorAll('button[type="submit"]').forEach(function (button) {
+                        button.disabled = false;
+                    });
+                });
+                form.addEventListener('submit', function () {
+                    const unread = Array.from(form.querySelectorAll('input[name^="use_"]:checked')).some(function (box) {
+                        return !form.querySelector('[name="name_' + box.name.slice(4) + '"]');
+                    });
+                    if (!unread) return;
+                    reading.hidden = false;
+                    form.querySelectorAll('button[type="submit"]').forEach(function (button) {
+                        button.disabled = true;
+                    });
+                });
+            }
+
             const search = document.getElementById('hwiz-search');
             if (!search) return;
             const rows = document.querySelectorAll('[data-search]');

@@ -712,10 +712,13 @@
                     <dt class="gr-item-panel__label">Time</dt>
                     <dd class="gr-item-panel__value">{{ item.time|date:"M d, Y H:i" }} UTC</dd>
                 </div>
-                <div>
-                    <dt class="gr-item-panel__label">Grid</dt>
-                    <dd class="gr-item-panel__value">{{ item.width }}×{{ item.height }}</dd>
-                </div>
+                {% if item.width and item.height %}
+                    {# A Store asset's grid is the store's: its item has no size of its own (#685). #}
+                    <div>
+                        <dt class="gr-item-panel__label">Grid</dt>
+                        <dd class="gr-item-panel__value">{{ item.width }}×{{ item.height }}</dd>
+                    </div>
+                {% endif %}
                 <div>
                     <dt class="gr-item-panel__label">CRS</dt>
                     <dd class="gr-item-panel__value">{{ item.crs }}</dd>

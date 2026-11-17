@@ -37,3 +37,8 @@ class ItemPreviewTests(TestCase):
         # A Zarr that is no Upstream store has no tile route to ask.
         response = self._preview("kenya/gfs/t2m/2026/11/16/t2m.zarr", Asset.Format.ZARR)
         self.assertContains(response, 'data-visualizable="false"')
+
+    def test_a_store_assets_grid_is_not_said_to_be_none(self):
+        # A Store asset's grid is the store's; the row has no width or height of its own (#685).
+        response = self._preview(STORE, Asset.Format.ZARR)
+        self.assertNotContains(response, "None×None")
