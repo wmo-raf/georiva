@@ -206,6 +206,9 @@ def enqueue_lost_boundary_stats(collection, assets, *, window) -> int:
     one of ``collection``'s loaded levels — a run that was lost: never enqueued,
     dropped by the broker, or out of retries (#716). Returns how many.
 
+    A row computed before its asset was last written counts as no row: a
+    re-sync whose own run was lost left the old bytes' statistics (#717).
+
     For a harvest, which calls it with the Remote COGs of its Jurisdiction in
     its ``window`` (``(start, end)``, either end open), so the work is bounded
     by the window and not by an item's age: a harvested archive is mostly past
@@ -218,7 +221,7 @@ def enqueue_lost_boundary_stats(collection, assets, *, window) -> int:
         return 0
 
     start, end = window
-    missing = _missing_a_level(assets, levels, since=start, until=end)
+    missing = _missing_a_level(assets, levels, since=start, until=end, newer_than_asset=True)
     sent = 0
     for asset_id in missing.order_by("-item__time", "pk").values_list("pk", flat=True)[:HARVEST_RECOVERY_SCAN]:
         if sent >= MISSING_STATS_BATCH:
@@ -232,12 +235,23 @@ def enqueue_lost_boundary_stats(collection, assets, *, window) -> int:
     return sent
 
 
-def _missing_a_level(assets, levels, *, since=None, until=None):
+def _missing_a_level(assets, levels, *, since=None, until=None, newer_than_asset=False):
     """
     The assets of ``assets`` missing a ``BoundaryZonalStats`` row at any of
     ``levels`` — a run that died between levels leaves the earlier ones
     written. ``since`` and ``until`` bound the rows' ``time`` (an item's), which
     keeps the hypertable scan to the chunks that can hold them.
+
+    With ``newer_than_asset``, a row counts only if it was written since its
+    asset last was: an older one is the statistics of bytes the asset no
+    longer points at (#717). Only a Remote asset is rewritten in place without
+    its statistics following through a save, so only a harvest asks this.
+
+    "Last written" is ``Asset.modified``: a harvest's re-sync, and any other
+    save of the row — an admin saving its item re-saves it — which costs one
+    needless recompute, under the caller's claim. A run that read the asset
+    before a re-sync and wrote its rows after leaves rows that look fresh; it
+    takes the re-sync's own run being lost as well for them to stand.
     """
     from django.db.models import Exists, OuterRef, Q
 
@@ -252,6 +266,8 @@ def _missing_a_level(assets, levels, *, since=None, until=None):
         rows = rows.filter(time__gte=since)
     if until is not None:
         rows = rows.filter(time__lte=until)
+    if newer_than_asset:
+        rows = rows.filter(modified__gte=OuterRef("modified"))
 
     missing = Q()
     for level in levels:

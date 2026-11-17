@@ -69,6 +69,13 @@ class SweepMissingBoundaryStatsTests(TestCase):
         self.give_stats()
         self.assertEqual(self.sweep(), [])
 
+    def test_an_asset_saved_after_its_rows_is_left_alone(self):
+        # Staleness is the harvest's recovery to judge (#717): a local asset
+        # is recomputed by its own save.
+        self.give_stats()
+        Asset.objects.filter(pk=self.asset.pk).update(modified=timezone.now() + timedelta(minutes=5))
+        self.assertEqual(self.sweep(), [])
+
     def test_a_just_saved_asset_is_given_time_for_its_own_run(self):
         self.age(self.asset, minutes=1)
         self.assertEqual(self.sweep(), [])
