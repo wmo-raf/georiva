@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
     # stops that fan-out delaying the next file to be extracted (#398).
     # Idempotent — persist_stats upserts on its unique constraint — so it is
     # safe on a multi-slot worker.  A dropped run is re-issued by
-    # sweep_missing_boundary_stats (#402).
+    # sweep_missing_boundary_stats (#402) and, for a harvested asset of any
+    # age, by the next harvest of its feed (#716).
     queue="georiva-bookkeeping",
 )
 def compute_boundary_zonal_stats(self, asset_id: int) -> None:
@@ -118,6 +119,19 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         raise self.retry(exc=exc) from exc
 
 
+def loaded_levels(collection) -> list[int]:
+    """
+    The boundary levels ``collection`` computes that have boundaries loaded:
+    the only ones a run of ``compute_boundary_zonal_stats`` can write a row at.
+    """
+    from adminboundarymanager.models import AdminBoundary
+
+    levels = getattr(collection, "boundary_stats_levels", None)
+    if not levels:
+        return []
+    return sorted(set(AdminBoundary.objects.filter(level__in=levels).values_list("level", flat=True)))
+
+
 def computes_boundary_stats(collection) -> bool:
     """
     Whether a run of ``compute_boundary_zonal_stats`` over ``collection`` could
@@ -134,14 +148,14 @@ def enqueue_boundary_stats(asset_id: int) -> None:
     """
     Enqueue ``compute_boundary_zonal_stats`` for one asset once the caller's
     writes commit, having asked :func:`computes_boundary_stats` first. Used by
-    the after-save hook of a materialized COG (#715) and by a harvest of
-    Remote assets (#639); a worker that ran before the commit would not find
-    the asset.
+    the after-save hook of a materialized COG (#715) and, through
+    :func:`enqueue_harvested_boundary_stats`, by a harvest of Remote assets
+    (#639); a worker that ran before the commit would not find the asset.
 
     Enqueue failure is logged, never raised: the writer must not fail over
-    bookkeeping. ``sweep_missing_boundary_stats`` re-issues a dropped run within
-    its recency window only; older than that, a dropped run is the
-    ``compute_boundary_stats`` command's to backfill.
+    bookkeeping. A dropped run is re-issued by ``sweep_missing_boundary_stats``
+    within its recency window, and for a harvested asset by the next harvest
+    (:func:`enqueue_lost_boundary_stats`), however old.
     """
     from django.db import transaction
 
@@ -152,6 +166,97 @@ def enqueue_boundary_stats(asset_id: int) -> None:
             logger.warning("enqueue_boundary_stats: enqueue failed for asset %d: %s", asset_id, exc)
 
     transaction.on_commit(dispatch)
+
+
+#: How long a harvest leaves an asset it enqueued before its recovery may
+#: enqueue it again (#716): long enough for a deep bookkeeping backlog to drain,
+#: short enough that a lost run is not lost for long. An upstream file that is
+#: dead for good costs its bounded retries once per period, not once per harvest.
+HARVEST_STATS_CLAIM = timedelta(hours=6)
+
+#: How many missing assets one recovery reads, newest first, looking for unclaimed
+#: ones to enqueue. The database is asked for at most this many — its cursors are
+#: not server-side behind PgBouncer — so more claimed ones than this, say a whole
+#: dead upstream, can hold the older ones back until their claims lapse.
+HARVEST_RECOVERY_SCAN = 5000
+
+
+def harvest_claim_key(asset_id: int) -> str:
+    """The cache key a harvest claims an asset under. Its own, not the sweep's:
+    a harvest's claim must not hold the sweep back from a recent asset."""
+    return f"zonal-stats-harvest-claim:{asset_id}"
+
+
+def enqueue_harvested_boundary_stats(asset_id: int) -> None:
+    """
+    Enqueue the statistics of a Remote asset a harvest has just created or
+    re-synced, claiming it for ``HARVEST_STATS_CLAIM`` — afresh, though a claim
+    is there: the asset was just written. The claim keeps the harvest's own
+    recovery from taking a run still waiting in the queue for a lost one. It is
+    taken before the commit, so a write that rolls back holds an asset no
+    longer there, harmlessly, for one claim period.
+    """
+    _hold_claim(harvest_claim_key(asset_id), HARVEST_STATS_CLAIM)
+    enqueue_boundary_stats(asset_id)
+
+
+def enqueue_lost_boundary_stats(collection, assets, *, window) -> int:
+    """
+    Enqueue again the assets of ``assets`` with no ``BoundaryZonalStats`` row at
+    one of ``collection``'s loaded levels — a run that was lost: never enqueued,
+    dropped by the broker, or out of retries (#716). Returns how many.
+
+    For a harvest, which calls it with the Remote COGs of its Jurisdiction in
+    its ``window`` (``(start, end)``, either end open), so the work is bounded
+    by the window and not by an item's age: a harvested archive is mostly past
+    the sweep's reach. An asset claimed within ``HARVEST_STATS_CLAIM`` is
+    skipped, and at most ``MISSING_STATS_BATCH`` are enqueued per call, so a
+    deep backlog drains over several harvests.
+    """
+    levels = loaded_levels(collection)
+    if not levels:
+        return 0
+
+    start, end = window
+    missing = _missing_a_level(assets, levels, since=start, until=end)
+    sent = 0
+    for asset_id in missing.order_by("-item__time", "pk").values_list("pk", flat=True)[:HARVEST_RECOVERY_SCAN]:
+        if sent >= MISSING_STATS_BATCH:
+            break
+        if not _try_claim(harvest_claim_key(asset_id), HARVEST_STATS_CLAIM):
+            continue
+        enqueue_boundary_stats(asset_id)
+        sent += 1
+    if sent:
+        logger.info("enqueue_lost_boundary_stats: re-enqueued %d run(s) for collection %s", sent, collection.slug)
+    return sent
+
+
+def _missing_a_level(assets, levels, *, since=None, until=None):
+    """
+    The assets of ``assets`` missing a ``BoundaryZonalStats`` row at any of
+    ``levels`` — a run that died between levels leaves the earlier ones
+    written. ``since`` and ``until`` bound the rows' ``time`` (an item's), which
+    keeps the hypertable scan to the chunks that can hold them.
+    """
+    from django.db.models import Exists, OuterRef, Q
+
+    from .models import BoundaryZonalStats
+
+    # A row's time is its item's (persist_stats): matching it lets the unique
+    # index, which leads with time, answer each probe in one chunk.
+    rows = BoundaryZonalStats.objects.filter(
+        time=OuterRef("item__time"), item=OuterRef("item"), variable=OuterRef("variable")
+    )
+    if since is not None:
+        rows = rows.filter(time__gte=since)
+    if until is not None:
+        rows = rows.filter(time__lte=until)
+
+    missing = Q()
+    for level in levels:
+        missing |= Q(pk__in=assets.exclude(Exists(rows.filter(boundary__level=level))).values("pk"))
+    return assets.filter(missing)
 
 
 @app.task(
@@ -196,8 +301,10 @@ def sweep_stale_boundary_stats() -> None:
         logger.info("sweep_stale_boundary_stats: pruned %d stale row(s)", pruned)
 
 
-#: How far back the recovery sweep looks.  Bounds the NOT EXISTS scan; older
-#: gaps are the ``compute_boundary_stats`` backfill's job.
+#: How far back the recovery sweep looks.  Bounds the NOT EXISTS scan.  A
+#: harvested asset older than this is recovered by its feed's next harvest
+#: (``enqueue_lost_boundary_stats``, #716); any other older gap is the
+#: ``compute_boundary_stats`` command's.
 MISSING_STATS_WINDOW = timedelta(days=7)
 
 #: An asset younger than this still has its own after-save run in flight.
@@ -230,15 +337,17 @@ def sweep_missing_boundary_stats() -> None:
 
     Retention comes from ``retained_items_q``, the rule the pruner deletes by.
 
+    Only the last ``MISSING_STATS_WINDOW`` of items is looked at. A harvested
+    asset older than that is recovered by its feed's next harvest
+    (``enqueue_lost_boundary_stats``, #716), under a claim of its own, so
+    neither recovery holds the other back.
+
     Runs every 5 minutes via django-celery-beat.
     """
-    from adminboundarymanager.models import AdminBoundary
-    from django.db.models import Exists, OuterRef, Q
     from django.utils import timezone
 
     from georiva.core.models import Asset, Collection
 
-    from .models import BoundaryZonalStats
     from .service import retained_items_q
 
     now = timezone.now()
@@ -256,11 +365,7 @@ def sweep_missing_boundary_stats() -> None:
 
         # Levels with no boundaries loaded can never produce a row; without
         # this every pass would re-dispatch the same futile runs.
-        levels = sorted(
-            set(
-                AdminBoundary.objects.filter(level__in=collection.boundary_stats_levels).values_list("level", flat=True)
-            )
-        )
+        levels = loaded_levels(collection)
         if not levels:
             continue
 
@@ -273,20 +378,7 @@ def sweep_missing_boundary_stats() -> None:
             created__lte=settled,
         )
 
-        # Missing if ANY configured level has no row — a run that died between
-        # levels leaves the earlier ones written.
-        missing = Q()
-        for level in levels:
-            has_level = Exists(
-                BoundaryZonalStats.objects.filter(
-                    item=OuterRef("item"),
-                    variable=OuterRef("variable"),
-                    time__gte=since,
-                    boundary__level=level,
-                )
-            )
-            missing |= Q(pk__in=assets.exclude(has_level).values("pk"))
-        assets = assets.filter(missing)
+        assets = _missing_a_level(assets, levels, since=since)
 
         latest_ref = (
             collection.items.order_by("-reference_time").values_list("reference_time", flat=True).first()
@@ -316,15 +408,30 @@ def _claim_redispatch(asset_id: int) -> bool:
     True if no sweep has re-dispatched this asset within ``MISSING_STATS_CLAIM``.
 
     Without it, a deep ``georiva-bookkeeping`` backlog would receive the same
-    asset every 5 minutes.  A cache outage fails open: a duplicate run is
-    harmless, a skipped recovery is not.
+    asset every 5 minutes.
     """
+    return _try_claim(f"zonal-stats-redispatch:{asset_id}", MISSING_STATS_CLAIM)
+
+
+def _try_claim(key: str, period: timedelta) -> bool:
+    """Claim ``key`` for ``period`` unless it is claimed already; True if claimed.
+    A cache outage fails open: a duplicate run is harmless, a skipped recovery is not."""
     from django.core.cache import cache
 
     try:
-        return cache.add(f"zonal-stats-redispatch:{asset_id}", 1, timeout=int(MISSING_STATS_CLAIM.total_seconds()))
+        return cache.add(key, 1, timeout=int(period.total_seconds()))
     except Exception:
         return True
+
+
+def _hold_claim(key: str, period: timedelta) -> None:
+    """Claim ``key`` for ``period`` from now, whatever claim was there."""
+    from django.core.cache import cache
+
+    try:
+        cache.set(key, 1, timeout=int(period.total_seconds()))
+    except Exception:
+        logger.warning("zonal stats: could not claim %s", key)
 
 
 @app.on_after_finalize.connect

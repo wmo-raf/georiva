@@ -10,21 +10,25 @@ small GeoTIFFs on local disk opened through the one seam that opens an asset.
 """
 
 import json
+from datetime import timedelta
 from unittest import mock
 
 import numpy
 from adminboundarymanager.models import AdminBoundary
 from celery.exceptions import Retry
 from django.contrib.gis.geos import MultiPolygon, Polygon
+from django.core.cache import cache
 from django.core.management import call_command
-from django.db import connection
+from django.db import OperationalError, connection
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rasterio.transform import from_bounds
 
 from georiva.analysis.zonal_stats import tasks as zonal_tasks
 from georiva.analysis.zonal_stats.models import BoundaryZonalStats
 from georiva.analysis.zonal_stats.service import compute_stats_from_array
 from georiva.core.models import Asset, Collection, Item
+from georiva.sources.models import FetchRun
 
 from .support import HarvestFeedMixin, RemoteCollectionMixin, day, rain_href, stamp
 from .test_read_plane_timeseries import BOUNDS, NODATA, SIZE, UpstreamBytes, grid
@@ -44,7 +48,15 @@ class DispatchRecorder:
 
     def record_dispatches(self):
         self.enterContext(mock.patch.object(zonal_tasks.compute_boundary_zonal_stats, "delay"))
+        # A harvest's enqueue claims its asset in the cache, which outlives the test's transaction.
+        self.addCleanup(self.forget_claims)
         return zonal_tasks.compute_boundary_zonal_stats.delay
+
+    def forget_claims(self):
+        """As if every claim period had passed."""
+        keys = [zonal_tasks.harvest_claim_key(pk) for pk in Asset.objects.values_list("pk", flat=True)]
+        if keys:
+            cache.delete_many(keys)
 
     def harvest_and_dispatch(self, **kwargs):
         """Harvest, and return the asset pks whose statistics it enqueued."""
@@ -138,6 +150,134 @@ class TheBackfillIsBoundedByTheFeedsWindowTests(DispatchRecorder, HarvestFeedMix
 
         self.assertEqual(dispatched, self.asset_pks_at(2, 3, 4))
         self.assertEqual(len(dispatched), 3)
+
+
+class AHarvestRecoversLostStatisticsTests(DispatchRecorder, HarvestFeedMixin, TestCase):
+    """A run lost between enqueue and rows is enqueued again by a later harvest,
+    however old its item: a harvested archive is past the sweep's reach (#716).
+
+    Every item here is in March 2026, months before the sweep's 7-day window.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.boundary = load_boundary()
+        self.record_dispatches()
+        self.map_variable("rainfall")
+        for n in range(1, 4):
+            self.upstream.add_item(day(n), {"rainfall": rain_href(n)})
+        self.harvest_and_dispatch()
+        self.forget_claims()
+
+    def give_stats(self, *days):
+        for asset in Asset.objects.filter(item__time__in=[day(n) for n in days]).select_related("item"):
+            BoundaryZonalStats.objects.create(
+                time=asset.item.time, item=asset.item, variable=asset.variable, boundary=self.boundary, mean=1.0
+            )
+
+    def test_an_asset_with_no_statistics_is_enqueued_again_by_a_later_harvest(self):
+        self.give_stats(1, 3)
+
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(2))
+
+    def test_an_asset_with_its_statistics_is_not_enqueued_again(self):
+        self.give_stats(1, 2, 3)
+
+        self.assertEqual(self.harvest_and_dispatch(), [])
+
+    def test_an_asset_missing_one_configured_level_is_enqueued_again(self):
+        load_boundary(level=2)
+        Collection.objects.filter(pk=self.feed.ensure_collection().pk).update(boundary_stats_levels=[1, 2])
+        self.give_stats(1, 2, 3)
+
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(1, 2, 3))
+
+    def test_a_level_with_no_boundaries_loaded_does_not_count_as_missing(self):
+        Collection.objects.filter(pk=self.feed.ensure_collection().pk).update(boundary_stats_levels=[1, 2])
+        self.give_stats(1, 2, 3)
+
+        self.assertEqual(self.harvest_and_dispatch(), [])
+
+    def test_an_asset_whose_runs_keep_failing_is_enqueued_at_most_once_per_claim_period(self):
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(1, 2, 3))
+
+        self.assertEqual(self.harvest_and_dispatch(), [])
+
+    def test_what_a_harvest_just_enqueued_is_not_taken_for_lost_by_the_next(self):
+        # The first harvest's runs may still be queued: its own enqueue is a claim.
+        self.upstream.add_item(day(4), {"rainfall": rain_href(4)})
+        self.give_stats(1, 2, 3)
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(4))
+
+        self.assertEqual(self.harvest_and_dispatch(), [])
+
+    def test_a_resynced_asset_is_enqueued_though_it_is_claimed(self):
+        self.harvest_and_dispatch()
+        self.give_stats(1, 3)
+        self.upstream.drop_item(day(1))
+        self.upstream.add_item(day(1), {"rainfall": rain_href(1).replace(".tif", "-v2.tif")}, updated=day(20))
+
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(1))
+
+    def test_nothing_outside_the_window_is_enqueued(self):
+        self.feed.window_start, self.feed.window_end = day(2), day(3)
+        self.feed.save()
+
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(2, 3))
+
+    def test_an_asset_outside_the_jurisdiction_is_not_enqueued(self):
+        Asset.objects.filter(item__time=day(2)).update(href="org/chirps/chirps-daily/rain/2026/03/02/rain.tif")
+
+        self.assertEqual(self.harvest_and_dispatch(), self.asset_pks_at(1, 3))
+
+    def test_a_harvest_that_could_not_list_its_window_recovers_nothing(self):
+        self.upstream.unreachable = "down"
+
+        self.assertEqual(self.harvest_and_dispatch(), [])
+
+    def test_a_collection_computing_no_levels_recovers_nothing(self):
+        Collection.objects.filter(pk=self.feed.ensure_collection().pk).update(boundary_stats_levels=[])
+
+        self.assertEqual(self.harvest_and_dispatch(), [])
+
+    def test_recovery_is_capped_per_harvest(self):
+        with mock.patch.object(zonal_tasks, "MISSING_STATS_BATCH", 2):
+            self.assertEqual(len(self.harvest_and_dispatch()), 2)
+            self.assertEqual(len(self.harvest_and_dispatch()), 1)
+
+
+class RecoveryAndTheSweepTests(DispatchRecorder, HarvestFeedMixin, TestCase):
+    """The harvest's recovery is bookkeeping beside the sweep, not in its way (#716)."""
+
+    def setUp(self):
+        super().setUp()
+        load_boundary()
+        self.record_dispatches()
+        self.map_variable("rainfall")
+        self.yesterday = (timezone.now() - timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
+        self.upstream.add_item(self.yesterday, {"rainfall": rain_href(1)})
+
+    def test_the_sweep_still_recovers_a_recent_harvested_asset_the_harvest_has_claimed(self):
+        self.harvest_and_dispatch()
+        asset = Asset.objects.get()
+        Asset.objects.filter(pk=asset.pk).update(created=timezone.now() - timedelta(hours=1))
+
+        delay = zonal_tasks.compute_boundary_zonal_stats.delay
+        delay.reset_mock()
+        zonal_tasks.sweep_missing_boundary_stats()
+        self.addCleanup(cache.delete, f"zonal-stats-redispatch:{asset.pk}")
+
+        delay.assert_called_once_with(asset.pk)
+
+    def test_a_recovery_that_fails_neither_fails_the_harvest_nor_keeps_titiler_from_being_told(self):
+        with (
+            mock.patch("georiva.harvest.harvester.enqueue_lost_boundary_stats", side_effect=OperationalError("down")),
+            mock.patch("georiva.harvest.harvester.publish_variable") as published,
+        ):
+            self.harvest_and_dispatch()
+
+        self.assertEqual(FetchRun.objects.get().status, FetchRun.Status.COMPLETED)
+        published.assert_called_once()
 
 
 class ComputingARemoteAssetsStatisticsTests(RemoteCollectionMixin, TestCase):
