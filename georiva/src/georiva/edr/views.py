@@ -36,6 +36,9 @@ Future additions:
 
 from django.db.models import Exists, OuterRef
 from django.http import Http404, HttpResponseRedirect
+from django.urls import reverse
+from django.utils.encoding import iri_to_uri
+from rest_framework.exceptions import NotFound
 from rest_framework.parsers import JSONParser
 from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
@@ -50,7 +53,7 @@ from georiva.organisations.access import (
     scoped_queryset,
 )
 
-from .ids import edr_collection_id, split_edr_collection_id
+from .ids import edr_collection_href, edr_collection_id, split_edr_collection_id
 from .renderers import EDRJSONRenderer
 from .serializers import (
     EDRCollectionSerializer,
@@ -69,7 +72,7 @@ def _org_collections(request: Request, queryset=None):
 
 
 def resolve_edr_collection(request, collection_id: str, queryset=None):
-    """The collection ``collection_id`` names on this host, or the response that says where it is.
+    """The collection ``collection_id`` names on this host, or the redirect to its qualified id.
 
     A qualified id (``{catalog}.{collection}``) is the collection or a 404. A
     bare slug is the legacy form: when it names exactly one collection this
@@ -92,27 +95,25 @@ def resolve_edr_collection(request, collection_id: str, queryset=None):
     if not matches:
         raise Http404(f"No collection {collection_id!r}.")
     if len(matches) == 1:
-        segment = f"/collections/{collection_id}/"
-        target = request.get_full_path().replace(segment, f"/collections/{edr_collection_id(matches[0])}/", 1)
-        return HttpResponseRedirect(target)
+        # Whatever follows the id — a sub-route, a query string — is kept.
+        bare_prefix = reverse("edr:collection-detail", args=[collection_id])
+        rest = request.path.removeprefix(bare_prefix) if request.path.startswith(bare_prefix) else ""
+        target = reverse("edr:collection-detail", args=[edr_collection_id(matches[0])]) + rest
+        query = request.META.get("QUERY_STRING", "")
+        return HttpResponseRedirect(f"{target}?{iri_to_uri(query)}" if query else target)
 
     base_url = get_full_url_by_request(request, "/api/edr/")
-    return Response(
+    raise NotFound(
         {
             "detail": (
                 f"{collection_id!r} names {len(matches)} collections; an EDR collection id is "
                 "'{catalog}.{collection}'. Use one of these."
             ),
             "collections": [
-                {
-                    "id": edr_collection_id(match),
-                    "title": match.name,
-                    "href": f"{base_url}collections/{edr_collection_id(match)}/",
-                }
+                {"id": edr_collection_id(match), "title": match.name, "href": edr_collection_href(base_url, match)}
                 for match in matches
             ],
-        },
-        status=404,
+        }
     )
 
 
@@ -321,7 +322,7 @@ class EDRCollectionDetailView(EDRAPIView):
                 "variables__styles__ramp",
             ),
         )
-        if not isinstance(collection, Collection):
+        if isinstance(collection, HttpResponseRedirect):
             return collection
 
         data = EDRCollectionSerializer(
