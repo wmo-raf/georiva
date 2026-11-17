@@ -233,6 +233,13 @@
             const form = document.getElementById('hwiz-fields');
             const reading = document.querySelector('[data-hwiz-reading]');
             if (form && reading) {
+                // A page brought back by the browser's Back button is not reading anything.
+                window.addEventListener('pageshow', function () {
+                    reading.hidden = true;
+                    form.querySelectorAll('button[type="submit"]').forEach(function (button) {
+                        button.disabled = false;
+                    });
+                });
                 form.addEventListener('submit', function () {
                     const unread = Array.from(form.querySelectorAll('input[name^="use_"]:checked')).some(function (box) {
                         return !form.querySelector('[name="name_' + box.name.slice(4) + '"]');

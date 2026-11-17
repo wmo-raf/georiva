@@ -152,7 +152,10 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     settled = set() if whole_window else runs.settled_runs(collection, mapped, reach.runs_q())
     described, undescribed = _description(feed, upstream)
     try:
-        listed, expected = _listed(feed, upstream, described, reach.window, list(variables), settled, undescribed)
+        if feed.is_store and described is None and undescribed:
+            # The catalog was not reached: it was never asked what the store is (#685).
+            raise RunStopped(f"source unavailable — {undescribed}")
+        listed, expected = _listed(feed, upstream, described, reach.window, list(variables), settled)
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable
     # An empty window is believed only of a collection something vouched for.
@@ -284,13 +287,7 @@ def _description(feed, upstream):
 
 
 def _listed(
-    feed,
-    upstream,
-    described,
-    window: Window,
-    mapped: list[str],
-    settled: set = frozenset(),
-    undescribed: str | None = None,
+    feed, upstream, described, window: Window, mapped: list[str], settled: set = frozenset()
 ) -> tuple[list[UpstreamItem], dict]:
     """What the Upstream has in `window`, as items with their assets, and how
     many steps a store expects of each run it holds a step of: the one place a
@@ -308,9 +305,6 @@ def _listed(
 
     # Which of an array's axes is its run, its step or its time is the
     # collection's to say, so a store whose collection is not described cannot be listed.
-    if described is None and undescribed:
-        # The catalog was not reached: it was never asked what the store is (#685).
-        raise RunStopped(f"source unavailable — {undescribed}")
     if described is None or described.cube is None:
         raise RunStopped(
             f"source unavailable — upstream does not describe the data store of collection "

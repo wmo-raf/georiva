@@ -82,9 +82,14 @@ STORE_CADENCES = [
 DEFAULT_STORE_CADENCE = 60
 
 
-def _cadences(store) -> tuple[list, int]:
-    """The cadences an operator may choose from for this feed, and the one chosen for them."""
-    return (STORE_CADENCES, DEFAULT_STORE_CADENCE) if store else (CADENCES, DEFAULT_CADENCE)
+def _cadences(store) -> list[tuple[int, str]]:
+    """The cadences an operator may choose from for this feed."""
+    return STORE_CADENCES if store else CADENCES
+
+
+def _default_cadence(store) -> int:
+    """The cadence chosen for an operator who chooses none."""
+    return DEFAULT_STORE_CADENCE if store else DEFAULT_CADENCE
 
 
 def _chrome(step, *, store=False):
@@ -506,8 +511,13 @@ def _offered(store: dict) -> list[dict]:
 
 def _spelt(path: str) -> str:
     """A field's path as words: `temperature_max_2m` is "Temperature max 2m"."""
-    words = re.sub(r"[_/.\-]+", " ", path).strip()
+    words = " ".join(_path_words(path))
     return words[:1].upper() + words[1:]
+
+
+def _path_words(path: str) -> list[str]:
+    """The words of a field's path: `pressure_level/temperature` is pressure, level, temperature."""
+    return [word for word in re.split(r"[_/.\-]+", path) if word]
 
 
 def _chunk_places(store: dict) -> list[dict]:
@@ -747,7 +757,7 @@ def _is_component(array: dict) -> bool:
     """Whether a field is one component of a vector: so its name says, or its path has a lone `u` or `v`."""
     if "component" in f"{array['title']} {array['description']}".lower():
         return True
-    return bool({"u", "v"} & set(re.split(r"[_/.\-]+", array["path"].lower())))
+    return bool({"u", "v"} & set(_path_words(array["path"].lower())))
 
 
 def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict], list[str], bool]:
@@ -804,7 +814,6 @@ def harvest_wizard_step5(request):
     store = session["survey"]["store"]
     # A forecast store's window rolls on run time; any other feed's is fixed (ADR 0044 §7).
     rolling = bool(store) and store["has_runs"]
-    cadences, default_cadence = _cadences(store)
     form = {
         "catalog_mode": "create",
         "catalog_id": None,
@@ -815,7 +824,7 @@ def harvest_wizard_step5(request):
         "window_start": "",
         "window_end": "",
         "rolling_window_days": str(DEFAULT_ROLLING_WINDOW_DAYS),
-        "interval_minutes": default_cadence,
+        "interval_minutes": _default_cadence(store),
     }
 
     if request.method == "POST":
@@ -858,7 +867,7 @@ def harvest_wizard_step5(request):
             "session": session,
             "form": form,
             "catalogs": catalogs,
-            "cadences": cadences,
+            "cadences": _cadences(store),
             "chosen": session["chosen"],
             "confirmed": session.get("confirmed", []),
             "store": store,
@@ -906,7 +915,7 @@ def _plan(form: dict, session: dict) -> tuple[FeedPlan | None, list[str]]:
         elif start and end and end < start:
             errors.append(_("The last date is before the first."))
     interval = _whole(form["interval_minutes"])
-    if interval not in dict(_cadences(store)[0]):
+    if interval not in dict(_cadences(store)):
         errors.append(_("Please choose how often to look for new data."))
     catalog_id = _whole(form["catalog_id"]) if form["catalog_mode"] == "select" else None
     if form["catalog_mode"] == "select" and catalog_id is None:
