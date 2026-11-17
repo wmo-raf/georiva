@@ -18,6 +18,7 @@ from georiva.harvest.models import HarvestFeed, VariableMapping
 from georiva.harvest.tasks import run_harvest
 from georiva.harvest.upstream import StacApiClient
 from georiva.ingestion.models import LoaderJob
+from georiva.organisations.testing import make_organisation
 from georiva.sources.acquisition_recovery import RETRY_QUEUED, dispatch_due_retries, dispatch_retry
 from georiva.sources.models import DataFeed, FetchRun
 
@@ -168,3 +169,96 @@ class HarvestRetryTests(HarvestFeedMixin, TestCase):
         run_harvest(self.feed.pk, resume_of_run_id=self.failed.pk)
 
         self.assertEqual(FetchRun.objects.count(), 2)
+
+
+class OneHarvestOfAFeedAtATimeTests(HarvestFeedMixin, TestCase):
+    """At most one harvest of a feed runs at a time, and a retry a later harvest
+    has already done the work of is not run (#683)."""
+
+    def setUp(self):
+        super().setUp()
+        self.map_variable("rainfall")
+        self.upstream.add_item(day(1), {"rainfall": rain_href(1)})
+        patcher = mock.patch.object(HarvestFeed, "upstream_client", lambda feed: self.upstream)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fail_a_harvest(self):
+        self.upstream.unreachable = "upstream catalog unreachable: timed out"
+        self.harvest()
+        self.upstream.unreachable = None
+        return FetchRun.objects.order_by("-pk").first()
+
+    def a_harvest_is_running(self):
+        return FetchRun.objects.create(data_feed=self.feed, status=FetchRun.Status.RUNNING)
+
+    def test_a_harvest_does_not_start_while_another_of_the_feed_is_running(self):
+        running = self.a_harvest_is_running()
+
+        self.assertIsNone(run_harvest(self.feed.pk, scheduled=False))
+
+        self.assertEqual(list(FetchRun.objects.all()), [running])
+        self.assertFalse(Asset.objects.exists())
+
+    def test_a_retry_does_not_start_while_a_later_harvest_is_running_and_stays_due(self):
+        failed = self.fail_a_harvest()
+        self.a_harvest_is_running()
+
+        self.assertIsNone(run_harvest(self.feed.pk, resume_of_run_id=failed.pk))
+
+        failed.refresh_from_db()
+        self.assertFalse(failed.resumes.exists())
+        self.assertIsNotNone(failed.retry_due_at)
+
+    def test_a_running_harvest_of_another_feed_does_not_hold_this_one_back(self):
+        other = self.make_feed(organisation=make_organisation("elsewhere"))
+        FetchRun.objects.create(data_feed=other, status=FetchRun.Status.RUNNING)
+
+        outcome = run_harvest(self.feed.pk, scheduled=False)
+
+        self.assertEqual(outcome["status"], "success")
+
+    def test_a_finished_harvest_does_not_hold_the_next_one_back(self):
+        self.fail_a_harvest()
+
+        outcome = run_harvest(self.feed.pk, scheduled=False)
+
+        self.assertEqual(outcome["status"], "success")
+
+    def test_a_retry_is_skipped_once_a_later_harvest_has_succeeded(self):
+        failed = self.fail_a_harvest()
+        run_harvest(self.feed.pk, scheduled=False)
+
+        self.assertIsNone(run_harvest(self.feed.pk, resume_of_run_id=failed.pk))
+
+        self.assertEqual(FetchRun.objects.count(), 2)
+        failed.refresh_from_db()
+        self.assertIsNone(failed.retry_due_at)
+
+    def test_the_sweep_dispatches_no_retry_a_later_harvest_has_superseded(self):
+        failed = self.fail_a_harvest()
+        run_harvest(self.feed.pk, scheduled=False)
+        run_harvest(self.feed.pk, resume_of_run_id=failed.pk)
+
+        with mock.patch.object(run_harvest, "delay") as delay:
+            dispatch_due_retries(now=timezone.now() + timedelta(days=1))
+
+        delay.assert_not_called()
+
+    def test_of_two_failed_harvests_only_the_first_retry_runs_once_it_succeeds(self):
+        first = self.fail_a_harvest()
+        second = self.fail_a_harvest()
+
+        run_harvest(self.feed.pk, resume_of_run_id=first.pk)
+        self.assertIsNone(run_harvest(self.feed.pk, resume_of_run_id=second.pk))
+
+        self.assertEqual(FetchRun.objects.count(), 3)
+        self.assertEqual(FetchRun.objects.filter(resumed_from__isnull=False).get().resumed_from, first)
+
+    def test_a_retry_still_runs_when_the_later_harvest_failed_too(self):
+        failed = self.fail_a_harvest()
+        self.fail_a_harvest()
+
+        outcome = run_harvest(self.feed.pk, resume_of_run_id=failed.pk)
+
+        self.assertEqual(outcome["status"], "success")

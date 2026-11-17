@@ -147,6 +147,8 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     #: harvest, ADR 0042 §4) has no `FetchedFile` rows, and the dashboard and run
     #: pages show its own counts where they would show file counts.
     fetches_files = True
+    # Whether a run of the feed waits for none of its others to be running (#683).
+    runs_one_at_a_time = False
 
     #: The dashboard panel showing what this feed is set up to bring in. A feed
     #: whose collections are not definition-driven names its own template, which
@@ -963,6 +965,25 @@ class FetchRun(models.Model):
         self.retry_due_at = None
         self.parked = True
         type(self).objects.filter(pk=self.pk).update(retry_due_at=None, parked=True)
+
+    def superseded(self) -> bool:
+        """Whether a run of this feed begun after this one has completed: what
+        a retry that repeats the whole run, as a harvest's does, would redo (#683)."""
+        return (
+            type(self)
+            .objects.filter(
+                data_feed_id=self.data_feed_id,
+                started_at__gt=self.started_at,
+                status=self.Status.COMPLETED,
+            )
+            .exists()
+        )
+
+    def drop_retry(self):
+        """No retry is due any more: a later run has done its work. Not parked —
+        the run left no gap (#683)."""
+        self.retry_due_at = None
+        type(self).objects.filter(pk=self.pk).update(retry_due_at=None)
 
     @property
     def retry_number(self):

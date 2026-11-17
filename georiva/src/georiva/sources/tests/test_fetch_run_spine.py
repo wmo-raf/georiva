@@ -12,7 +12,13 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
 from georiva.organisations.testing import make_organisation
-from georiva.sources.fetch_run_spine import RunResult, RunStopped, record_not_attempted, run_tracked
+from georiva.sources.fetch_run_spine import (
+    FeedAlreadyRunning,
+    RunResult,
+    RunStopped,
+    record_not_attempted,
+    run_tracked,
+)
 from georiva.sources.models import (
     DataFeed,
     DataFeedCollectionLink,
@@ -208,6 +214,34 @@ class RunTrackedTests(TestCase):
         self.assertEqual(seen, [None])
         self.assertIsNotNone(result.finished_at)
         self.assertFalse(FetchRun.objects.exists())
+
+    # ── one run of the feed at a time (#683) ────────────────────────────────
+
+    def test_an_exclusive_run_does_not_begin_while_another_of_the_feed_is_running(self):
+        running = FetchRun.objects.create(data_feed=self.feed, status=FetchRun.Status.RUNNING)
+        walked = []
+
+        with self.assertRaises(FeedAlreadyRunning) as raised:
+            self._run(walked.append, exclusive=True)
+
+        self.assertEqual(raised.exception.running, running)
+        self.assertEqual(walked, [])
+        self.assertEqual(list(FetchRun.objects.all()), [running])
+        self.assertFalse(FetchRunStarted.objects.exists())
+
+    def test_an_exclusive_run_begins_once_the_feeds_other_runs_have_ended(self):
+        FetchRun.objects.create(data_feed=self.feed, status=FetchRun.Status.FAILED)
+
+        self._run(lambda fetch_run: None, exclusive=True)
+
+        self.assertEqual(FetchRun.objects.filter(status=FetchRun.Status.COMPLETED).count(), 1)
+
+    def test_a_run_that_is_not_exclusive_begins_beside_a_running_one(self):
+        FetchRun.objects.create(data_feed=self.feed, status=FetchRun.Status.RUNNING)
+
+        self._run(lambda fetch_run: None)
+
+        self.assertEqual(FetchRun.objects.count(), 2)
 
 
 class RecordNotAttemptedTests(TestCase):

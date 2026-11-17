@@ -23,10 +23,16 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
     no file waits on it (ADR 0042 §11). Not retried by Celery — a harvest that
     stops is due its retry on the run itself, and the recovery sweep dispatches
     it here with `resume_of_run_id` (ADR 0031).
+
+    One harvest of a feed at a time: while another runs, this one does not
+    start — a retry stays due, for the sweep to dispatch again. A retry is not
+    run at all once a later harvest has succeeded: a retry harvests the whole
+    window again, which that harvest has already done (#683).
     """
     from georiva.events.context import update_context
     from georiva.harvest.harvester import harvest
     from georiva.harvest.models import HarvestFeed
+    from georiva.sources.fetch_run_spine import FeedAlreadyRunning
     from georiva.sources.models import FetchRun
 
     try:
@@ -50,6 +56,11 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
         if resumed_from is None or resumed_from.resumes.exists():
             logger.info("run_harvest: run %s already retried or gone — not retrying", resume_of_run_id)
             return None
+        if resumed_from.superseded():
+            # Not due any more: the sweep would otherwise dispatch it again at every pass.
+            resumed_from.drop_retry()
+            logger.info("run_harvest: run %s superseded by a later successful harvest — not retrying", resumed_from.pk)
+            return None
 
     # An entry point: the chain this harvest starts belongs to the feed's organisation.
     update_context(organisation_id=feed.catalog.organisation_id)
@@ -57,7 +68,11 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
     # An operator's own run re-checks a store's closed runs too: how a step gone
     # from one is found (ADR 0044 §6). A schedule and a retry ask only open ones.
     recheck = not scheduled and resume_of_run_id is None
-    return harvest(feed, resumed_from=resumed_from, recheck=recheck).to_dict()
+    try:
+        return harvest(feed, resumed_from=resumed_from, recheck=recheck).to_dict()
+    except FeedAlreadyRunning as busy:
+        logger.info("run_harvest: harvest feed %s not harvested — run %s is still running", feed.pk, busy.running.pk)
+        return None
 
 
 @app.task(

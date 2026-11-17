@@ -131,6 +131,17 @@ class HarvestRunListTests(HarvestRunPagesMixin, TestCase):
         delay.assert_called_once_with(self.feed.pk, scheduled=False)
         self.assertContains(response, "Harvest started")
 
+    def test_harvest_now_while_a_harvest_is_running_says_so_and_starts_nothing(self):
+        FetchRun.objects.create(data_feed=self.feed, status=FetchRun.Status.RUNNING)
+        url = reverse("data_feed_fetch_runs", kwargs={"feed_pk": self.feed.pk})
+
+        with mock.patch.object(run_harvest, "delay") as delay:
+            response = self.client.post(url, {"action": "fetch_now"}, follow=True)
+
+        delay.assert_not_called()
+        self.assertContains(response, "already running")
+        self.assertNotContains(response, "Harvest started")
+
     def test_there_are_no_new_files_to_check_for(self):
         url = reverse("data_feed_fetch_runs", kwargs={"feed_pk": self.feed.pk})
 

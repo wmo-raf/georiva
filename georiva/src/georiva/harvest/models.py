@@ -156,6 +156,8 @@ class HarvestFeed(DataFeed):
 
     # A harvest writes rows, not objects: its runs have no files to count or list.
     fetches_files = False
+    # Closing a store's runs counts rows: another harvest's uncommitted ones must not be among them (#683).
+    runs_one_at_a_time = True
     setup_panel_template = "georivaharvest/includes/feed_setup_panel.html"
 
     base_form_class = HarvestFeedForm
