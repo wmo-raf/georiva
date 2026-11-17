@@ -3,6 +3,7 @@ from app.logging_config import configure_logging
 configure_logging()
 
 import logging
+from contextlib import asynccontextmanager
 
 import numpy as np
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response
@@ -13,6 +14,7 @@ from starlette.middleware.cors import CORSMiddleware
 from titiler.core.factory import TilerFactory
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+from app import warm
 from app.boundary import crop
 from app.config import TTL_ROOT_PATH
 from app.dependencies import (
@@ -55,7 +57,16 @@ cog = TilerFactory(
 # Application
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="GeoRiva Tile Server", root_path=TTL_ROOT_PATH)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Each worker starts opening its Upstream stores as it comes up, in the
+    background, and is ready for every other tile at once (#684)."""
+    warm.start()
+    yield
+
+
+app = FastAPI(title="GeoRiva Tile Server", root_path=TTL_ROOT_PATH, lifespan=lifespan)
 
 app.add_middleware(PreviewCacheMiddleware)
 app.add_middleware(RequestLoggingMiddleware)

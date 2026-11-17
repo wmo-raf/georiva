@@ -110,7 +110,8 @@ georiva/src/georiva/          # Main Django application
 **Other top-level directories:**
 
 - `titiler-app/` — Custom Titiler tile server (FastAPI); `app/store.py` reads a Store asset's field from its
-  Upstream store, following only the feed's pinned places (ADR 0044 §9, §11)
+  Upstream store, following only the feed's pinned places (ADR 0044 §9, §11); `app/warm.py` opens each published
+  store as a worker starts, in the background (#684; `GEORIVA_STORE_WARM`)
 - `source-plugin-boilerplate/` — Cookiecutter template for new source plugins
 - `docs/` — Architecture docs, plugin guides, data model guide
 - `deploy/` — Nginx config, plugin installation scripts

@@ -364,6 +364,9 @@ services:
       # Megabytes of decoded store fields each worker keeps, so a map view reads
       # its field upstream once (#663). Memory: this × TTL_WORKERS. 0 keeps none.
       GEORIVA_STORE_FIELD_CACHE_MB: ${GEORIVA_STORE_FIELD_CACHE_MB:-128}
+      # Each worker opens the published stores as it starts, in the background,
+      # so the first map after a restart does not wait for it (#684). 0 is off.
+      GEORIVA_STORE_WARM: ${GEORIVA_STORE_WARM:-1}
 
   georiva-stac-browser:
     # Built with a GeoRiva config module that derives the catalog URL from the

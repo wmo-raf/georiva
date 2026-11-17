@@ -211,7 +211,7 @@ def remote_source(
 
     if entry is not None:
         # A malformed entry raises StoreError, answered by the app's handler like any store failure.
-        return StoreSlice.published(entry if isinstance(entry, dict) else {}, time_dt, reftime_dt)
+        return StoreSlice.published(entry, time_dt, reftime_dt)
     if value is None:
         return None
     if not value.startswith(("https://", "http://")):

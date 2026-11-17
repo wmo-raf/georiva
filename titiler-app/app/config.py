@@ -43,3 +43,8 @@ STORE_MISS_TTL = float(os.getenv("GEORIVA_STORE_MISS_TTL", "60"))
 #: a count would bound memory only for the grid it was chosen for. 0 keeps none.
 #: Set in megabytes (``GEORIVA_STORE_FIELD_CACHE_MB``), held here in bytes.
 STORE_FIELD_CACHE_BYTES = int(float(os.getenv("GEORIVA_STORE_FIELD_CACHE_MB", "128")) * 2**20)
+#: Whether each worker opens the stores of published Store assets as it starts,
+#: in the background, so a user's first map of one does not wait 27 s for it
+#: (#684). Costs each worker an open store's memory whether or not it is asked
+#: for one. ``0`` leaves every store to be opened by its first tile.
+STORE_WARM = os.getenv("GEORIVA_STORE_WARM", "1").strip().lower() not in ("0", "false", "no", "off", "")

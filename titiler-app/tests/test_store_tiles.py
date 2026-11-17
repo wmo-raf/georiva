@@ -26,7 +26,10 @@ import icechunk
 import numpy
 import pytest
 import zarr
+from app import config, dependencies, warm
 from app import store as store_reader
+from app.main import app
+from fastapi.testclient import TestClient
 from gribberish.zarr import GribberishCodec
 from rasterio.io import MemoryFile
 
@@ -1082,3 +1085,173 @@ class TestDecodedFieldsAreKept:
 
         assert store_reader.STORE_FIELD_CACHE_BYTES is config.STORE_FIELD_CACHE_BYTES
         assert store_reader._fields.capacity == config.STORE_FIELD_CACHE_BYTES
+
+
+# ---------------------------------------------------------------------------
+# Each worker opens the published stores at start (#684)
+# ---------------------------------------------------------------------------
+
+#: Another Variable of the same collection, read from the same store.
+OTHER_HASH = f"georiva:remote-assets:{ORG}:{CATALOG}:{COLLECTION}:wind"
+#: A COG timestep of this module's Variable: absent from its hash, so read from our storage.
+COG_TIME = "2026-03-23T12:00:00Z"
+
+
+def wait_for_warm_up() -> None:
+    """Wait for a warm-up the app started to finish, so a test's teardown never runs under it."""
+    for thread in threading.enumerate():
+        if thread.name == warm.THREAD_NAME:
+            thread.join(timeout=30)
+
+
+class TestStoresAreWarmedAtStart:
+    def test_after_warming_the_first_tile_opens_no_store(self, client, rendering, upstream_store, opens):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        warm.warm_stores()
+        assert len(opens) == 1
+
+        response = tile(client)
+
+        assert response.status_code == 200, response.text
+        assert len(opens) == 1
+
+    def test_a_warmed_store_has_its_published_arrays_and_their_coordinates(self, rendering, upstream_store):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        warm.warm_stores()
+
+        opened = store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))
+        assert set(opened._arrays) == {"temperature_2m"}
+        assert set(opened._coordinates) >= {"init_time", "lead_time", "latitude", "longitude"}
+
+    def test_a_store_published_under_the_same_pins_is_opened_once(self, rendering, upstream_store, opens):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        rendering.hashes[OTHER_HASH] = {FIELD: published(upstream_store.href), "published": "1"}
+
+        warm.warm_stores()
+
+        assert opens == [((ECMWF, ""),)]
+
+    def test_the_same_store_under_other_pins_is_opened_for_each(self, rendering, upstream_store, opens):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        rendering.hashes[OTHER_HASH] = {
+            FIELD: published(upstream_store.href, {ECMWF: "", GFS: "us-east-1"}),
+            "published": "1",
+        }
+
+        warm.warm_stores()
+
+        assert sorted(opens) == [((ECMWF, ""),), ((ECMWF, ""), (GFS, "us-east-1"))]
+
+    def test_remote_cogs_and_malformed_entries_are_passed_over(self, client, rendering, upstream_store, opens):
+        rendering.hashes[OTHER_HASH] = {
+            FIELD: "https://upstream.example/field.tif",
+            LATE: json.dumps({"store": "file:///etc/", "array": "temperature_2m"}),
+            LOST: "{not json",
+            "published": "1",
+        }
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        warm.warm_stores()
+
+        assert opens == [((ECMWF, ""),)]
+        assert tile(client).status_code == 200
+        assert len(opens) == 1
+
+    def test_a_store_that_will_not_open_does_not_stop_the_next(
+        self, client, rendering, upstream_store, producer, opens
+    ):
+        _, base = producer
+        rendering.hashes[OTHER_HASH] = {FIELD: published(f"{base}/no-such-store/v0.icechunk"), "published": "1"}
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        warm.warm_stores()
+
+        assert tile(client).status_code == 200
+        assert len(opens) == 2, "the unreachable store's attempt, and the good one's open; none by the tile"
+
+    def test_an_array_that_will_not_open_does_not_stop_the_others(self, rendering, upstream_store):
+        rendering.hashes[OTHER_HASH] = {FIELD: published(upstream_store.href, array="no_such_array"), "published": "1"}
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        warm.warm_stores()
+
+        assert "temperature_2m" in store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))._arrays
+
+    def test_a_key_that_is_not_a_hash_costs_only_that_key(self, rendering, upstream_store, opens, monkeypatch):
+        rendering.hashes[OTHER_HASH] = {}
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        hgetall = rendering.hgetall
+
+        def wrong_type(key):
+            if key == OTHER_HASH:
+                raise TypeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+            return hgetall(key)
+
+        monkeypatch.setattr(rendering, "hgetall", wrong_type)
+
+        warm.warm_stores()
+
+        assert opens == [((ECMWF, ""),)]
+
+    def test_redis_that_cannot_be_read_ends_the_warm_up_quietly(self, monkeypatch, opens):
+        class Down:
+            def scan_iter(self, *args, **kwargs):
+                raise ConnectionError("Redis is not there")
+
+        monkeypatch.setattr(dependencies, "redis_client", Down())
+
+        warm.warm_stores()
+
+        assert opens == []
+
+    def test_the_app_answers_while_a_store_is_still_opening(
+        self, fake_redis, django_configs, rendering, upstream_store, seed_cog, monkeypatch
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        seed_cog(time=COG_TIME)
+        entered, release = threading.Event(), threading.Event()
+        opened = []
+        real = store_reader.open_repository
+
+        def slow_open(*args):
+            opened.append(args[1])
+            entered.set()
+            release.wait(timeout=30)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", slow_open)
+
+        try:
+            with TestClient(app) as started:
+                assert entered.wait(timeout=10), "the warm-up never began opening the store"
+
+                assert started.get("/healthz").status_code == 200
+                cog = started.get(f"{ROUTE}/tiles/WebMercatorQuad/0/0/0.png", params={"time": COG_TIME})
+                assert cog.status_code == 200, cog.text
+
+                drawn = {}
+                waiting = threading.Thread(target=lambda: drawn.setdefault("response", tile(started)))
+                waiting.start()
+                clock.sleep(0.3)
+                assert "response" not in drawn, "the store tile waits on the open under way"
+                release.set()
+                waiting.join(timeout=30)
+        finally:
+            release.set()
+            wait_for_warm_up()
+
+        assert drawn["response"].status_code == 200, drawn["response"].text
+        assert len(opened) == 1
+
+    def test_warming_can_be_switched_off(self, django_configs, rendering, upstream_store, opens, monkeypatch):
+        monkeypatch.setattr(warm, "STORE_WARM", False)
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        with TestClient(app) as started:
+            assert started.get("/healthz").status_code == 200
+        wait_for_warm_up()
+
+        assert opens == []
+
+    def test_the_switch_is_a_setting(self):
+        assert warm.STORE_WARM is config.STORE_WARM

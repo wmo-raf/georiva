@@ -18,6 +18,10 @@ of opening a store are recorded under Context and Consequences; a cache shared a
 decided against, with the numbers, under Out of scope. That last one settles what was left open; nothing else is
 reversed.
 
+Amended when the open was warmed in advance (wmo-raf/georiva#684): each tile server worker now opens the stores of
+published Store assets as it starts, in the background, so the cost recorded under Consequences falls on the worker
+rather than a user's first map. Nothing is reversed.
+
 ## Context
 
 Some Upstreams publish no items at all. dynamical.org's catalog is static JSON with 43 collections, each one a single
@@ -166,7 +170,10 @@ the store, and Titiler draws maps by reading the store itself.**
 - The first tile after new data arrives pays a reopen, in each worker separately. An animation across a run reads
   every field of it once. Both are what pointing costs. Measured on GFS: a worker's first tile ever takes 27 s (9 s
   on AIFS), a reopen on a miss 3.5 s, the first tile of another Variable 3.5 s, the next step of one already shown
-  0.5 s, and a tile of a field already read 0.1 s.
+  0.5 s, and a tile of a field already read 0.1 s. The first of these is paid as a worker starts, not by a user:
+  each worker opens every published store, and every array published from it, in the background before a tile asks
+  (#684). A store first published while a worker runs, or one whose pins a re-check changed, is still opened by its
+  first tile.
 - The cache is memory: its size times 8 MB or so, times the tile server's workers, on machines that are often small.
   Each open store costs memory of its own besides, outside the cache's bound: measured with the default 128 MB, a
   worker went from 155 MB idle to 427 MB after its first field and settled at 570 MB with two stores open.

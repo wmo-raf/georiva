@@ -42,6 +42,14 @@ REMOTE ASSETS (range-read from their upstream, ADR 0043; no byte cache):
   GDAL_INGESTED_BYTES_AT_OPEN         Bytes read on open, to take a COG's header in
                                       one request (compose: 32768)
 
+UPSTREAM STORES (read from the store itself, ADR 0044):
+  GEORIVA_STORE_READ_TIMEOUT     Seconds to open a store or read one field (compose: 30)
+  GEORIVA_STORE_CONNECT_TIMEOUT  Seconds to connect to a store (compose: 5)
+  GEORIVA_STORE_MISS_TTL         Seconds a step still missing after a reopen is remembered (compose: 60)
+  GEORIVA_STORE_FIELD_CACHE_MB   Megabytes of decoded fields each worker keeps (compose: 128)
+  GEORIVA_STORE_WARM             Open the published stores as each worker starts, in the
+                                 background (compose: 1; 0 is off)
+
   help : Show this message
 """
 }
