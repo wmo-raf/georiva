@@ -80,7 +80,9 @@ never copied.**
    Remote COGs of its Jurisdiction inside it to `georiva-ingestion`, one asset per task, and stays on
    `georiva-default` itself. The task fetches the bytes through the Upstream catalog client — the href, and every
    redirect, judged by the feed's Asset host allowlist as at harvest time, and connected to at the very address the
-   allowlist judged, never a second lookup of the host (#723) — reads them as ingestion reads a
+   allowlist judged, never a second lookup of the host (#723): IPv4 first, then each judged address in turn, and
+   through no proxy, since a proxy would look the host up again; a deployment whose only way out is a proxy cannot
+   materialize — reads them as ingestion reads a
    GeoTIFF, and hands them to ingestion's own write step (`AssetMaterializer`), which rewrites the same `Asset` in
    place and runs the after-save hooks (zonal statistics, virtual-Zarr manifest). It does not take the Loader's
    bucket round-trip: ingestion from a file ingests every Variable that names a source in it, and a harvested

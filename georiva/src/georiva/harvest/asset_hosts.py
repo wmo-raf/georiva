@@ -172,6 +172,8 @@ class AssetHostAllowlist:
         try:
             parts = urlsplit(href)
             host = (parts.hostname or "").lower().rstrip(".")
+            # Read now, so a port out of range is refused here and not by whatever opens the href.
+            parts.port  # noqa: B018
         except ValueError:
             return "href is not a URL"
         if "@" in parts.netloc:

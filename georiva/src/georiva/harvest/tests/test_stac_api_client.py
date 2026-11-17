@@ -12,6 +12,7 @@ import time
 from datetime import UTC, datetime
 
 import requests
+import urllib3
 from django.test import SimpleTestCase
 
 from georiva.harvest.upstream import (
@@ -585,13 +586,13 @@ class _Streamed:
         self.status = status
         self.headers = headers or {}
         self.body = body
-        self.released = False
+        self.closed = False
 
     def stream(self, amount):
         yield self.body
 
-    def release_conn(self):
-        self.released = True
+    def close(self):
+        self.closed = True
 
 
 class FetchAssetConnectsOnlyToJudgedAddressesTests(SimpleTestCase):
@@ -611,9 +612,18 @@ class FetchAssetConnectsOnlyToJudgedAddressesTests(SimpleTestCase):
         self.opened: list[tuple[str, str]] = []
         self.answers: dict[str, _Streamed] = {}
 
+        #: Addresses that refuse every connection, as an unreachable network would.
+        self.unreachable: set[str] = set()
+
         def opener(url, address, *, timeout):
             self.opened.append((url, address))
-            return self.answers.get(url) or _Streamed()
+            if address in self.unreachable:
+                raise urllib3.exceptions.NewConnectionError(None, f"cannot reach {address}")
+            answer = self.answers.get(url) or _Streamed()
+            self.given.append(answer)
+            return answer
+
+        self.given: list[_Streamed] = []
 
         self.client = StacApiClient(API, opener=opener)
 
@@ -687,6 +697,50 @@ class FetchAssetConnectsOnlyToJudgedAddressesTests(SimpleTestCase):
             self.fetch(self.allowlist([[self.PUBLIC], ["127.0.0.1"]]))
 
         self.assertEqual(self.opened, [(self.HREF, self.PUBLIC)])
+
+    def test_a_host_with_ipv6_and_ipv4_addresses_is_tried_on_ipv4_first(self):
+        allowlist = self.allowlist([["2606:4700::6810:84e5", self.PUBLIC]])
+
+        self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC)])
+
+    def test_each_judged_address_is_tried_in_turn_until_one_answers(self):
+        self.unreachable.add(self.PUBLIC)
+        allowlist = self.allowlist([["2606:4700::6810:84e5", self.PUBLIC]])
+
+        self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC), (self.HREF, "2606:4700::6810:84e5")])
+        self.assertEqual(self.dest.read_bytes(), b"GTIFF-bytes")
+
+    def test_a_host_none_of_whose_addresses_answers_is_unreachable(self):
+        self.unreachable |= {self.PUBLIC, "93.184.216.35"}
+
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(self.allowlist([[self.PUBLIC, "93.184.216.35"]]))
+
+        self.assertFalse(self.dest.exists())
+
+    def test_every_connection_is_closed_after_a_redirect_a_failure_or_a_copy(self):
+        target = "https://mirror.upstream.example/3.tif"
+        self.answers[self.HREF] = _Streamed(status=302, headers={"Location": target})
+        self.fetch(self.allowlist([[self.PUBLIC], ["93.184.216.35"]]))
+
+        self.answers[self.HREF] = _Streamed(status=503)
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(self.allowlist([[self.PUBLIC]]))
+
+        self.assertEqual([answer.closed for answer in self.given], [True, True, True])
+
+    def test_an_href_whose_port_is_not_a_port_is_refused_and_never_opened(self):
+        href = "https://data.upstream.example:99999/3.tif"
+        allowlist = self.allowlist([[self.PUBLIC]])
+
+        self.assertIn("not a URL", allowlist.refusal(href))
+        with self.assertRaises(UpstreamUnreachable):
+            self.client.fetch_asset(href, self.dest, addresses=allowlist.addresses)
+        self.assertEqual(self.opened, [])
 
     def test_an_answer_other_than_ok_leaves_nothing_behind(self):
         self.answers[self.HREF] = _Streamed(status=503)

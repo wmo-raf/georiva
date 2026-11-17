@@ -1210,7 +1210,7 @@ class StacApiClient:
         timeout: float = 30,
         page_size: int = 200,
         listing_timeout: float = 15,
-        opener: Callable = None,
+        opener: Callable | None = None,
     ):
         self.url = url.rstrip("/")
         #: How a materialization connects to a file: `pinned_open`, unless a test says otherwise.
@@ -1327,11 +1327,12 @@ class StacApiClient:
                 judged = addresses(url)
                 if not judged:
                     raise UpstreamUnreachable(f"upstream file is at an address not allowed: {url}")
-                response = self._open(url, judged[0], timeout=self.timeout)
+                response = self._open_any(url, judged)
                 location = response.headers.get("Location") if response.status in _REDIRECTS else None
                 if not location:
                     break
-                response.release_conn()
+                # Closed, not returned to a pool: each hop's pool is its own, and is dropped.
+                response.close()
                 url = urljoin(url, str(location))
             else:
                 raise UpstreamUnreachable(f"upstream file keeps redirecting, last to {url}")
@@ -1348,7 +1349,7 @@ class StacApiClient:
                         out.write(chunk)
                         written += len(chunk)
             finally:
-                response.release_conn()
+                response.close()
             return written
         except urllib3.exceptions.TimeoutError as exc:
             Path(dest).unlink(missing_ok=True)
@@ -1359,6 +1360,19 @@ class StacApiClient:
         except UpstreamUnreachable:
             Path(dest).unlink(missing_ok=True)
             raise
+
+    def _open_any(self, url: str, judged: list[str]):
+        """Open `url` at the first of its judged addresses that answers,
+        IPv4 first: a deployment without IPv6 must still reach a dual-stack
+        host, as a client that looks the host up itself would. Only a failure
+        to connect moves on to the next address; any other is the answer."""
+        last = None
+        for address in sorted(judged, key=lambda found: ":" in found):
+            try:
+                return self._open(url, address, timeout=self.timeout)
+            except (urllib3.exceptions.NewConnectionError, urllib3.exceptions.ConnectTimeoutError) as failed:
+                last = failed
+        raise UpstreamUnreachable(f"upstream file unreachable at any of its addresses: {last}") from last
 
     def describe_root(self) -> UpstreamRoot:
         if self._root is None:
