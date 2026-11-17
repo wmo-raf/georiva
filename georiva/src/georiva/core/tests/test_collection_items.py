@@ -86,3 +86,30 @@ class CollectionItemsIngestionBadgeTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content.decode().count('class="w-status w-status--primary ci-log-tag"'), 2)
+
+
+class CollectionItemsRunColumnTests(TestCase):
+    """Items that share a valid time are told apart by their run, whatever the
+    collection's forecast flag says: the data's own answer decides (#685)."""
+
+    def setUp(self):
+        dial_org(self.client)
+        self.client.force_login(User.objects.create_superuser("admin_runs", "runs@test.com", "pw"))
+        self.catalog, self.collection = _setup()
+        self.url = reverse("collection_items_list", args=[self.collection.pk])
+
+    def test_a_collection_with_runs_shows_each_items_run(self):
+        valid = datetime(2026, 12, 2, tzinfo=UTC)
+        for run in (datetime(2026, 12, 1, 12, tzinfo=UTC), datetime(2026, 12, 1, 18, tzinfo=UTC)):
+            Item.objects.create(collection=self.collection, time=valid, reference_time=run)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "Reference time")
+        self.assertContains(response, "2026-12-01 12:00")
+        self.assertContains(response, "2026-12-01 18:00")
+
+    def test_a_collection_without_runs_has_no_run_column(self):
+        _make_item(self.collection, "")
+
+        self.assertNotContains(self.client.get(self.url), "Reference time")

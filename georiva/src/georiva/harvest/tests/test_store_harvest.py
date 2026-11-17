@@ -367,6 +367,19 @@ class StoreMirrorTests(StoreFeedMixin, TestCase):
         self.assertEqual(FetchRun.objects.latest("pk").status, FetchRun.Status.FAILED)
         self.assertEqual(Asset.objects.count(), 1)
 
+    def test_a_catalog_that_cannot_be_reached_is_said_to_be_unreachable(self):
+        # Not "does not describe the data store": it was never asked (#685).
+        self.hold("temperature_2m", 0)
+        self.harvest()
+        self.upstream.collections_unreachable = "upstream catalog unreachable: connection refused"
+
+        self.harvest()
+
+        failed = FetchRun.objects.latest("pk")
+        self.assertEqual(failed.status, FetchRun.Status.FAILED)
+        self.assertEqual(failed.stopped_early, "source unavailable — upstream catalog unreachable: connection refused")
+        self.assertEqual(Asset.objects.count(), 1)
+
 
 class AnalysisStoreHarvestTests(StoreFeedMixin, TestCase):
     """A store with no runs: one time axis, and the fixed window."""

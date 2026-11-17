@@ -14,7 +14,7 @@ data lives in turn, and reads one map of each chosen field with the places
 confirmed and no others: that read is where a Variable's value range comes
 from and the proof that the store can be read at all (§11, §12). Step 5 gives
 a forecast store a Rolling window (§7). Its first harvest starts as it is
-saved, like any other feed's; the operator is told its maps cannot be drawn yet.
+saved, like any other feed's, and its maps can be shown as their steps are listed.
 
 A collection's survey runs off the request, and step 3 waits for it, saying
 what it is waiting on: opening a large store takes longer than a web request
@@ -26,7 +26,9 @@ What an operator reads here is in their words: no "STAC", "S3" or "COG", and
 of a store no "Zarr", "chunk" or "codec".
 """
 
+import re
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
@@ -68,6 +70,21 @@ CADENCES = [
     (10080, _("Once a week")),
 ]
 DEFAULT_CADENCE = 1440
+#: A store's: a forecast has several runs a day, each arriving step by step
+#: over hours, and asking which steps it holds costs one small read (#685).
+STORE_CADENCES = [
+    (15, _("Every 15 minutes")),
+    (30, _("Every 30 minutes")),
+    (60, _("Every hour")),
+    (180, _("Every 3 hours")),
+    *CADENCES,
+]
+DEFAULT_STORE_CADENCE = 60
+
+
+def _cadences(store) -> tuple[list, int]:
+    """The cadences an operator may choose from for this feed, and the one chosen for them."""
+    return (STORE_CADENCES, DEFAULT_STORE_CADENCE) if store else (CADENCES, DEFAULT_CADENCE)
 
 
 def _chrome(step, *, store=False):
@@ -472,8 +489,25 @@ _NAMED_IN_A_MESSAGE = 5
 
 
 def _offered(store: dict) -> list[dict]:
-    """The store's arrays that can become Variables, each with its place in the survey's list."""
-    return [{**array, "index": index} for index, array in enumerate(store["arrays"]) if array["offered"]]
+    """The store's arrays that can become Variables, each with its place in the
+    survey's list and the name it is shown by.
+
+    A store with levels names dozens of its fields alike — "Temperature",
+    "Pressure" — and tells them apart only by their paths (#685). A field whose
+    own name another offered field shares is shown by its path, spelt as words.
+    """
+    offered = [{**array, "index": index} for index, array in enumerate(store["arrays"]) if array["offered"]]
+    titles = Counter(array["title"] for array in offered if array["title"])
+    for array in offered:
+        title = array["title"]
+        array["label"] = title if title and titles[title] == 1 else _spelt(array["path"]) or array["path"]
+    return offered
+
+
+def _spelt(path: str) -> str:
+    """A field's path as words: `temperature_max_2m` is "Temperature max 2m"."""
+    words = re.sub(r"[_/.\-]+", " ", path).strip()
+    return words[:1].upper() + words[1:]
 
 
 def _chunk_places(store: dict) -> list[dict]:
@@ -602,7 +636,7 @@ def _read_samples(session: dict, ticked: list[dict], allowed: list[dict], places
     elsewhere: dict[str, list[str]] = {}
     errors = []
     for array in wanted:
-        sample, name = read.get(array["path"]), array["title"] or array["path"]
+        sample, name = read.get(array["path"]), array["label"]
         if sample is not None and sample.readable:
             samples[array["path"]] = {"low": sample.value_min, "high": sample.value_max, "places": sorted(following)}
             continue
@@ -664,10 +698,10 @@ def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> li
     for array in offered:
         index = array["index"]
         use = bool(posted.get(f"use_{index}")) if posted is not None else array["path"] in earlier
-        row = {**array, "use": use, "label": array["title"] or array["path"], "detailed": False}
+        row = {**array, "use": use, "detailed": False}
         sample = samples.get(array["path"])
         if use and sample:
-            low, high = _nice_bounds(sample["low"], sample["high"])
+            low, high = _field_bounds(array, sample["low"], sample["high"])
             row.update(
                 detailed=True,
                 name=row["label"],
@@ -697,6 +731,25 @@ def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> li
     return rows
 
 
+def _field_bounds(array: dict, low: float, high: float) -> tuple[float, float]:
+    """The range a field is coloured by, from the one map of it that was read:
+    rounded outward, and for one component of a vector — a wind's U or V — the
+    same either side of zero. One map of U may blow mostly east and one of V
+    mostly south; read alone each would lean its own way (#685)."""
+    low, high = _nice_bounds(low, high)
+    if _is_component(array) and low < 0 < high:
+        widest = max(-low, high)
+        return -widest, widest
+    return low, high
+
+
+def _is_component(array: dict) -> bool:
+    """Whether a field is one component of a vector: so its name says, or its path has a lone `u` or `v`."""
+    if "component" in f"{array['title']} {array['description']}".lower():
+        return True
+    return bool({"u", "v"} & set(re.split(r"[_/.\-]+", array["path"].lower())))
+
+
 def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict], list[str], bool]:
     """`(the fields chosen, what is wrong with any of them, whether one has
     not been put to the operator yet)`. A field ticked for the first time comes
@@ -708,7 +761,7 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
     chosen, errors = [], []
     for array in ticked:
         index = array["index"]
-        name = posted.get(f"name_{index}", "").strip() or array["title"] or array["path"]
+        name = posted.get(f"name_{index}", "").strip() or array["label"]
         unit_id = _whole(posted.get(f"unit_{index}"))
         low, high = _number(posted.get(f"low_{index}")), _number(posted.get(f"high_{index}"))
         if unit_id is None or not Unit.objects.filter(pk=unit_id).exists():
@@ -751,6 +804,7 @@ def harvest_wizard_step5(request):
     store = session["survey"]["store"]
     # A forecast store's window rolls on run time; any other feed's is fixed (ADR 0044 §7).
     rolling = bool(store) and store["has_runs"]
+    cadences, default_cadence = _cadences(store)
     form = {
         "catalog_mode": "create",
         "catalog_id": None,
@@ -761,7 +815,7 @@ def harvest_wizard_step5(request):
         "window_start": "",
         "window_end": "",
         "rolling_window_days": str(DEFAULT_ROLLING_WINDOW_DAYS),
-        "interval_minutes": DEFAULT_CADENCE,
+        "interval_minutes": default_cadence,
     }
 
     if request.method == "POST":
@@ -780,12 +834,12 @@ def harvest_wizard_step5(request):
             # The first harvest, so the operator's next look at the feed shows data.
             transaction.on_commit(feed.run_now)
             if feed.is_store:
-                # Its steps are listed from now on; drawing them is the tile server's to learn (ADR 0044 §9).
+                # Its steps are listed from now on, and the tile server draws each from the store (ADR 0044 §9).
                 messages.success(
                     request,
                     _(
                         "“%(name)s” is set up. GeoRiva is now listing what the data store holds; nothing is being "
-                        "copied. Its maps cannot be drawn yet: that is still being built."
+                        "copied. Its maps can be shown as soon as their steps are listed."
                     )
                     % {"name": feed.name},
                 )
@@ -804,7 +858,7 @@ def harvest_wizard_step5(request):
             "session": session,
             "form": form,
             "catalogs": catalogs,
-            "cadences": CADENCES,
+            "cadences": cadences,
             "chosen": session["chosen"],
             "confirmed": session.get("confirmed", []),
             "store": store,
@@ -852,7 +906,7 @@ def _plan(form: dict, session: dict) -> tuple[FeedPlan | None, list[str]]:
         elif start and end and end < start:
             errors.append(_("The last date is before the first."))
     interval = _whole(form["interval_minutes"])
-    if interval not in dict(CADENCES):
+    if interval not in dict(_cadences(store)[0]):
         errors.append(_("Please choose how often to look for new data."))
     catalog_id = _whole(form["catalog_id"]) if form["catalog_mode"] == "select" else None
     if form["catalog_mode"] == "select" and catalog_id is None:

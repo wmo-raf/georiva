@@ -430,7 +430,7 @@
             <thead>
             <tr>
                 <th>{% trans "Valid time" %}</th>
-                {% if collection.is_forecast %}
+                {% if has_runs %}
                     <th>{% trans "Reference time" %}</th>
                 {% endif %}
                 <th>{% trans "Assets" %}</th>
@@ -443,7 +443,7 @@
                 <tr>
                     <td class="w-text-14 w-font-mono">{{ item.time|date:"Y-m-d H:i" }}</td>
 
-                    {% if collection.is_forecast %}
+                    {% if has_runs %}
                         <td class="w-text-14 w-font-mono">
                             {% if item.reference_time %}
                                 {{ item.reference_time|date:"Y-m-d H:i" }}

@@ -199,7 +199,29 @@ class WizardSetsUpAStoreFeedTests(StoreWizardMixin, TestCase):
         self.run_now.assert_called_once_with()
         page = self.client.get(response.url)
         self.assertContains(page, "is now listing what the data store holds")
-        self.assertContains(page, "maps cannot be drawn yet")
+        # Titiler draws a Store asset (ADR 0044 §9): nothing is "still being built" (#685).
+        self.assertContains(page, "Its maps can be shown as soon as their steps are listed")
+        self.assertNotContains(page, "cannot be drawn")
+
+    def test_a_store_feed_looks_for_new_steps_every_hour_unless_told_otherwise(self):
+        # A forecast's steps arrive over hours, four runs a day (#685).
+        self.reach_fields()
+        self.choose_temperature()
+
+        page = self.client.get(step(5))
+
+        self.assertEqual(page.context["form"]["interval_minutes"], 60)
+        self.assertIn(60, dict(page.context["cadences"]))
+        self.assertLess(min(dict(page.context["cadences"])), 60)
+        self.assertContains(page, '<option value="60" selected>')
+
+    def test_a_store_feed_may_look_more_often_than_a_catalog_feed(self):
+        self.reach_fields()
+        self.choose_temperature()
+
+        self.save_store(interval_minutes="15")
+
+        self.assertEqual(HarvestFeed.objects.get().interval_minutes, 15)
 
     def test_the_feed_it_saves_harvests(self):
         self.reach_fields()
@@ -295,6 +317,39 @@ class WizardOffersAStoresFieldsTests(StoreWizardMixin, TestCase):
         self.assertEqual((row["low"], row["high"]), (-40.0, 50.0), "from one map that was read, rounded outward")
         self.assertIn("read one map", self.errors(page))
         self.assertRedirects(self.client.get(step(5)), step(4), msg_prefix="shown before it is taken")
+
+    def test_fields_sharing_a_name_are_told_apart_by_more_than_their_key(self):
+        # A store with levels names dozens of fields "Temperature" (#685).
+        self.arrays = {
+            "temperature_2m": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "Temperature"}),
+            "temperature_max_2m": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "Temperature"}),
+            "wind_u_10m": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "U component of wind"}),
+        }
+        self.store()
+
+        page = self.reach_fields()
+
+        self.assertEqual(
+            [row["label"] for row in page.context["rows"]],
+            ["Temperature 2m", "Temperature max 2m", "U component of wind"],
+        )
+        chosen = self.tick(0, 1)
+        self.assertEqual([row["name"] for row in chosen.context["details"]], ["Temperature 2m", "Temperature max 2m"])
+
+    def test_a_wind_components_range_is_the_same_either_side_of_zero(self):
+        # Read from one map, U and V would each lean one way: −10…20 and −20…10 (#685).
+        self.upstream.field_ranges["wind_u_10m"] = (-8.3, 17.9)
+        self.reach_fields()
+
+        (row,) = self.tick(1).context["details"]
+
+        self.assertEqual((row["low"], row["high"]), (-20.0, 20.0))
+
+    def test_the_operator_is_told_reading_a_map_takes_a_while_as_it_starts(self):
+        page = self.reach_fields()
+
+        self.assertContains(page, "data-hwiz-reading")
+        self.assertContains(page, "can take a minute")
 
     def test_the_map_read_is_one_of_each_chosen_field_with_which_axis_is_which(self):
         self.reach_fields()
