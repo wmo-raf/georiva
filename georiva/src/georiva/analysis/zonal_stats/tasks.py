@@ -133,8 +133,10 @@ def computes_boundary_stats(collection) -> bool:
 def enqueue_boundary_stats(asset_id: int) -> None:
     """
     Enqueue ``compute_boundary_zonal_stats`` for one asset once the caller's
-    writes commit — for a writer that is not ingestion, such as a harvest of
-    Remote assets (#639), having asked :func:`computes_boundary_stats` first.
+    writes commit, having asked :func:`computes_boundary_stats` first. Used by
+    the after-save hook of a materialized COG (#715) and by a harvest of
+    Remote assets (#639); a worker that ran before the commit would not find
+    the asset.
 
     Enqueue failure is logged, never raised: the writer must not fail over
     bookkeeping. ``sweep_missing_boundary_stats`` re-issues a dropped run within

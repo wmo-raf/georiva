@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+from django.db import transaction
 from wagtail import hooks
 
 from georiva.core.models import Asset, Item
@@ -210,11 +211,18 @@ class AssetMaterializer:
     # =========================================================================
 
     def _after_save_asset(self, asset: Asset) -> None:
-        try:
-            for fn in hooks.get_hooks(GEORIVA_AFTER_SAVE_ASSET):
-                return fn(asset)
-        except Exception as e:
-            logger.warning("Post-save hook failed for asset %s: %s", asset.pk, e)
+        """Run every ``GEORIVA_AFTER_SAVE_ASSET`` hook (#715). Each is
+        bookkeeping nothing waits on, so one that fails is logged and neither
+        fails the asset nor keeps the hooks after it from running. Each runs in
+        a savepoint: a derivation materializes inside a transaction, and a hook
+        whose query fails would otherwise abort it for everything after."""
+        for fn in hooks.get_hooks(GEORIVA_AFTER_SAVE_ASSET):
+            try:
+                with transaction.atomic():
+                    fn(asset)
+            except Exception as e:
+                hook = getattr(fn, "__qualname__", fn)
+                logger.warning("Post-save hook %s failed for asset %s: %s", hook, asset.pk, e)
 
     def _get_file_size(self, path: str) -> int | None:
         try:
