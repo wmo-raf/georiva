@@ -16,9 +16,10 @@ from __future__ import annotations
 import logging
 import re
 import socket
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
@@ -256,6 +257,12 @@ class UpstreamCatalogClient(Protocol):
 
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
+
+    def fetch_asset(self, href: str, dest: Path, *, admits: Callable[[str], bool]) -> int:
+        """Copy the file at `href` to `dest`, for a materialization (ADR 0042 §8),
+        and say how many bytes it was. A redirect is followed only to an address
+        `admits`; `href` itself is the caller's to have judged. Raises
+        `UpstreamUnreachable` when the file cannot be had, leaving nothing at `dest`."""
 
     # What only the Upstream survey asks, before a feed exists.
 
@@ -1146,6 +1153,9 @@ class StacApiClient:
     #: How many redirects one request may take before the Upstream is going nowhere.
     MAX_REDIRECTS = 5
 
+    #: How long copying one file for a materialization may take in all, however it trickles in.
+    ASSET_FETCH_SECONDS = 900
+
     #: How many of a catalog of plain files' collection documents are read at once.
     LISTING_CONCURRENCY = 8
 
@@ -1250,6 +1260,52 @@ class StacApiClient:
         except OSError:
             return []
         return sorted({info[4][0] for info in found})
+
+    def fetch_asset(self, href: str, dest: Path, *, admits: Callable[[str], bool]) -> int:
+        """Streamed to `dest`, each redirect judged by `admits` before it is
+        followed: the Upstream's answer never decides where our servers connect
+        (ADR 0042 §9). Bounded by `ASSET_FETCH_SECONDS` in all."""
+        import time
+
+        import requests
+
+        deadline = time.monotonic() + self.ASSET_FETCH_SECONDS
+        url = href
+        try:
+            for _hop in range(self.MAX_REDIRECTS + 1):
+                response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True)
+                location = response.headers.get("Location") if response.status_code in _REDIRECTS else None
+                if not location:
+                    break
+                response.close()
+                target = urljoin(url, str(location))
+                if not admits(target):
+                    raise UpstreamUnreachable(f"upstream file redirects to an address not allowed: {target}")
+                url = target
+            else:
+                raise UpstreamUnreachable(f"upstream file keeps redirecting, last to {url}")
+            with response:
+                if response.status_code != 200:
+                    raise UpstreamUnreachable(f"upstream answered {response.status_code} for {url}")
+                written = 0
+                with open(dest, "wb") as out:
+                    for chunk in response.iter_content(chunk_size=1 << 16):
+                        if time.monotonic() > deadline:
+                            raise UpstreamTimedOut(
+                                f"upstream file took longer than {self.ASSET_FETCH_SECONDS} seconds: {url}"
+                            )
+                        out.write(chunk)
+                        written += len(chunk)
+            return written
+        except requests.Timeout as exc:
+            Path(dest).unlink(missing_ok=True)
+            raise UpstreamTimedOut(f"upstream file did not answer within {self.timeout:g} seconds: {url}") from exc
+        except requests.RequestException as exc:
+            Path(dest).unlink(missing_ok=True)
+            raise UpstreamUnreachable(f"upstream file unreachable: {exc}") from exc
+        except UpstreamUnreachable:
+            Path(dest).unlink(missing_ok=True)
+            raise
 
     def describe_root(self) -> UpstreamRoot:
         if self._root is None:

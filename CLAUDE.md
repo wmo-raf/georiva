@@ -81,6 +81,9 @@ georiva/src/georiva/          # Main Django application
 │   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows. `_listed` is the one
 │   │                         #   place it asks which shape its Upstream is: a store's Held steps become items, each
 │   │                         #   with a Store asset (`format=ZARR`, `store_array`) per array held there (ADR 0044 §6)
+│   ├── materialize.py        # A feed's materialization window: each harvest sends its in-window Remote COGs to
+│   │                         #   `georiva-ingestion`, which fetches them past the allowlist and rewrites the same
+│   │                         #   Asset local via `AssetMaterializer`; it leaves the Jurisdiction (ADR 0042 §8)
 │   └── testing.py            # FakeUpstream — the one fake a harvest test needs; `become_store` makes it an Upstream
 │                             #   store, and `hold` / `release` say which steps it holds
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)

@@ -40,6 +40,9 @@ TIME_CRITICAL = {
     "georiva.ingestion.tasks.process_staging_file",
     "georiva.sources.tasks.run_data_feed_loader",
     "georiva.sources.tasks.retry_fetched_file",
+    # A Harvest feed's materialization window: one Remote COG fetched and
+    # ingested into our storage (ADR 0042 §8, #640). The harvest stays off it.
+    "georiva.harvest.tasks.materialize_harvested_asset",
 }
 
 #: Bookkeeping derived from an ingested COG. Nothing a reader can observe waits

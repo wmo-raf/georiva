@@ -6,6 +6,7 @@ Upstream, where its files are — is not retyped on this form (ADR 0042 §2).
 Driven through the admin's own add and edit views. The Upstream is the fake.
 """
 
+from datetime import date
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -202,6 +203,22 @@ class EditHarvestFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
 
         self.assertIn("ends before it starts", self.errors(response))
 
+    def test_an_operator_sets_a_window_to_keep_a_local_copy_of(self):
+        response = self.edit(materialize_start="2026-03-01 00:00", materialize_end="2026-03-31 00:00")
+
+        self.assertRedirects(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
+        self.feed.refresh_from_db()
+        self.assertTrue(self.feed.materializes)
+        window = (self.feed.materialize_start.date(), self.feed.materialize_end.date())
+        self.assertEqual(window, (date(2026, 3, 1), date(2026, 3, 31)))
+
+    def test_a_local_copy_window_that_ends_before_it_starts_is_refused(self):
+        response = self.edit(materialize_start="2026-03-01 00:00", materialize_end="2026-01-01 00:00")
+
+        self.assertIn("ends before it starts", self.errors(response))
+        self.feed.refresh_from_db()
+        self.assertFalse(self.feed.materializes)
+
     def test_a_feed_whose_upstream_is_down_can_still_be_paused(self):
         self.upstream.unreachable = "upstream catalog unreachable: timed out"
 
@@ -271,6 +288,17 @@ class EditStoreFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
         self.edit(window_start="2026-01-01 00:00", window_end="2026-02-01 00:00")
         self.feed.refresh_from_db()
         self.assertEqual((self.feed.window_start, self.feed.window_end), (None, None))
+
+    def test_it_has_no_local_copy_window_to_set(self):
+        """A Store asset is a slice of a store, not a file to fetch (ADR 0044)."""
+        fields = self.form().fields
+
+        self.assertNotIn("materialize_start", fields)
+        self.assertNotIn("materialize_end", fields)
+
+        self.edit(materialize_start="2026-01-01 00:00")
+        self.feed.refresh_from_db()
+        self.assertIsNone(self.feed.materialize_start)
 
     def test_a_rolling_window_cannot_be_emptied_or_be_no_days_at_all(self):
         for days in ("", "0", "5000"):

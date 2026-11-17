@@ -20,6 +20,7 @@ its bounds, and its Variable exist.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
@@ -38,6 +39,17 @@ if TYPE_CHECKING:
     from georiva.ingestion.clipper import BoundaryClipper
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class WrittenCog:
+    """A COG ``AssetMaterializer.write_cog`` has put in storage, and what its row will say of it."""
+
+    href: str
+    width: int
+    height: int
+    bounds: list
+    stats: dict
 
 
 class AssetMaterializer:
@@ -101,10 +113,40 @@ class AssetMaterializer:
         checksum: str = "",
     ) -> list[Asset]:
         """
-        Run the shared materialization sequence for one variable's array.
+        Run the shared materialization sequence for one variable's array:
+        ``write_cog`` then ``record_cog``.
 
         ``clipper`` applies the precise boundary geometry mask — window
         cropping is the caller's job (``clip_array`` for full-grid arrays).
+        """
+        written = self.write_cog(
+            item=item,
+            variable=variable,
+            data=data,
+            bounds=bounds,
+            crs=crs,
+            timestamp=timestamp,
+            clipper=clipper,
+            stats=stats,
+        )
+        return self.record_cog(item=item, variable=variable, written=written, timestamp=timestamp, checksum=checksum)
+
+    def write_cog(
+        self,
+        *,
+        item: Item,
+        variable: "Variable",
+        data: np.ndarray,
+        bounds: list | tuple,
+        crs: str,
+        timestamp: datetime,
+        clipper: Optional["BoundaryClipper"] = None,
+        stats: dict | None = None,
+    ) -> "WrittenCog":
+        """
+        The storage half: mask the array, compute its statistics and write
+        its COG to storage. Touches no row, so a caller may do it before
+        taking a lock and record it after (the harvest's materialization does).
         """
         bounds = normalize_bounds(bounds)
 
@@ -114,40 +156,67 @@ class AssetMaterializer:
         if stats is None:
             stats = compute_stats(data)
 
-        assets = self._save_assets(
-            item=item,
-            variable=variable,
-            data=data,
-            stats=stats,
-            bounds=bounds,
-            crs=crs,
-            timestamp=timestamp,
-            checksum=checksum,
-        )
+        height, width = data.shape[:2]
+        path = self.cog_path(item, variable, timestamp)
+        try:
+            stored = self.writer.write_cog(data, path, tuple(bounds), crs)
+        except Exception as e:
+            logger.error("COG save failed for %s: %s", variable.slug, e)
+            raise
+        return WrittenCog(href=stored, width=width, height=height, bounds=list(bounds), stats=stats)
 
-        self.extent_handler.expand(item.collection, timestamp, bounds)
-        return assets
-
-    # =========================================================================
-    # Asset writing + DB records
-    # =========================================================================
-
-    def _save_assets(
+    def record_cog(
         self,
         *,
         item: Item,
         variable: "Variable",
-        data: np.ndarray,
-        stats: dict,
-        bounds: list,
-        crs: str,
+        written: "WrittenCog",
         timestamp: datetime,
         checksum: str = "",
     ) -> list[Asset]:
         """
-        Write the COG to storage and upsert its Asset row.
+        The database half: upsert the Asset row for a COG ``write_cog`` stored,
+        run the after-save hooks and expand the owning Collection's extent.
         """
-        height, width = data.shape[:2]
+        stats = written.stats
+        cog_defaults = {
+            "href": written.href,
+            "media_type": ("image/tiff; application=geotiff; profile=cloud-optimized"),
+            "roles": ["data"],
+            "file_size": self._get_file_size(written.href),
+            "width": written.width,
+            "height": written.height,
+            "bands": 1,
+            "stats_min": stats.get("min"),
+            "stats_max": stats.get("max"),
+            "stats_mean": stats.get("mean"),
+            "stats_std": stats.get("std"),
+            "extra_fields": {
+                "compression": "deflate",
+                "nodata": None,
+            },
+        }
+        # Only stamp a checksum the caller actually supplied (derived
+        # provenance) — never clobber an existing one with "".
+        if checksum:
+            cog_defaults["checksum"] = checksum
+        try:
+            data_asset, _ = Asset.objects.update_or_create(
+                item=item,
+                variable=variable,
+                format=Asset.Format.COG,
+                defaults=cog_defaults,
+            )
+        except Exception as e:
+            logger.error("COG save failed for %s: %s", variable.slug, e)
+            raise
+        self._after_save_asset(data_asset)
+
+        self.extent_handler.expand(item.collection, timestamp, written.bounds)
+        return [data_asset]
+
+    def cog_path(self, item: Item, variable: "Variable", timestamp: datetime) -> str:
+        """The key in the assets bucket a Variable's COG at ``timestamp`` on ``item`` is written to."""
         catalog = item.collection.catalog
 
         if item.reference_time:
@@ -164,47 +233,7 @@ class AssetMaterializer:
             timestamp=timestamp,
             filename="",
         ).rstrip("/")
-
-        assets: list[Asset] = []
-
-        # ── COG ───────────────────────────────────────────────────────────────
-        cog_path = f"{base_dir}/{base_name}.tif"
-        try:
-            stored_cog = self.writer.write_cog(data, cog_path, tuple(bounds), crs)
-            cog_defaults = {
-                "href": stored_cog,
-                "media_type": ("image/tiff; application=geotiff; profile=cloud-optimized"),
-                "roles": ["data"],
-                "file_size": self._get_file_size(stored_cog),
-                "width": width,
-                "height": height,
-                "bands": 1,
-                "stats_min": stats.get("min"),
-                "stats_max": stats.get("max"),
-                "stats_mean": stats.get("mean"),
-                "stats_std": stats.get("std"),
-                "extra_fields": {
-                    "compression": "deflate",
-                    "nodata": None,
-                },
-            }
-            # Only stamp a checksum the caller actually supplied (derived
-            # provenance) — never clobber an existing one with "".
-            if checksum:
-                cog_defaults["checksum"] = checksum
-            data_asset, _ = Asset.objects.update_or_create(
-                item=item,
-                variable=variable,
-                format=Asset.Format.COG,
-                defaults=cog_defaults,
-            )
-            assets.append(data_asset)
-            self._after_save_asset(data_asset)
-        except Exception as e:
-            logger.error("COG save failed for %s: %s", variable.slug, e)
-            raise
-
-        return assets
+        return f"{base_dir}/{base_name}.tif"
 
     # =========================================================================
     # Helpers

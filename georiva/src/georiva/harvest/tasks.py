@@ -1,7 +1,7 @@
 import logging
 
 from georiva.config.celery import app
-from georiva.events.tasks import EntryTask
+from georiva.events.tasks import ChainedTask, EntryTask
 
 logger = logging.getLogger(__name__)
 
@@ -94,3 +94,26 @@ def survey_upstream_collection(self, token, upstream_url, collection_id):
     from georiva.harvest.background_survey import run
 
     run(token, upstream_url, collection_id)
+
+
+@app.task(
+    name="georiva.harvest.tasks.materialize_harvested_asset",
+    base=ChainedTask,
+    queue="georiva-ingestion",
+    bind=True,
+    acks_late=True,
+    max_retries=0,
+)
+def materialize_harvested_asset(self, asset_id):
+    """
+    Fetch one Remote asset of a Harvest feed's materialization window and
+    ingest it into our storage, in place (ADR 0042 §8).
+
+    On `georiva-ingestion`, like any fetch and extraction: until it runs, the
+    file is not ours. The harvest that sends it stays on `georiva-default`. Not
+    retried by Celery: an asset that could not be had stays Remote and due, and
+    a later run of its feed sends it again.
+    """
+    from georiva.harvest.materialize import materialize
+
+    return materialize(asset_id)

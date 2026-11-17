@@ -76,6 +76,21 @@ never copied.**
    (b); the provenance stays as history. A **mixed collection** — local hot window, remote deep archive — is a
    first-class state, and hydration is a per-window dial.
 
+   *As built (#640):* the window is the feed's `materialize_start` / `materialize_end`. Each harvest sends the
+   Remote COGs of its Jurisdiction inside it to `georiva-ingestion`, one asset per task, and stays on
+   `georiva-default` itself. The task fetches the bytes through the Upstream catalog client — the href, and every
+   redirect, judged by the feed's Asset host allowlist as at harvest time — reads them as ingestion reads a
+   GeoTIFF, and hands them to ingestion's own write step (`AssetMaterializer`), which rewrites the same `Asset` in
+   place and runs the after-save hooks (zonal statistics, virtual-Zarr manifest). It does not take the Loader's
+   bucket round-trip: ingestion from a file ingests every Variable that names a source in it, and a harvested
+   Variable names none — each upstream file is one Variable at one time already. So a materialization leaves no
+   `FetchedFile` row; what fails stays Remote and due, and a later harvest sends it again — except an href the
+   allowlist refused, which is marked and not sent again until the href or the allowlist changes. The COG is
+   uploaded first; only the row's rewrite is taken under a lock on the row, still Remote and still the feed's,
+   which the Mirror's removal takes too. The upstream's href, checksum, nodata and `updated` describe its file, not
+   ours: the row keeps them under `upstream` in `extra_fields`, as history, and its own checksum is cleared. A
+   Store asset (ADR 0044) is not a file and is never materialized.
+
 9. **Upstream decides what we index, never where our servers connect.** Asset hrefs come from upstream content and
    are later opened from inside our network. At harvest time each href must be `https` (plain `http` only if the
    operator allows it), on a host in the feed's allowlist (default: the catalog's own host; operator-extensible,
