@@ -1402,6 +1402,56 @@ class TestWarmingDropsWhatNoAssetNames:
 
         assert store_reader.open_keys() == {key}
 
+    def test_an_open_under_way_when_its_store_is_let_go_is_not_kept(self, upstream_store, monkeypatch):
+        key = (upstream_store.href, ((ECMWF, ""),))
+        real = store_reader.open_repository
+
+        def let_go_while_opening(*args):
+            store_reader.forget(*key)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", let_go_while_opening)
+
+        opened = store_reader.opened_store(*key)
+
+        assert opened is not None, "the request that opened it still draws from it"
+        assert store_reader.open_keys() == set()
+
+    def test_a_reopen_under_way_when_its_store_is_let_go_is_not_kept(self, upstream_store, monkeypatch):
+        key = (upstream_store.href, ((ECMWF, ""),))
+        stale = store_reader.opened_store(*key)
+        real = store_reader.open_repository
+
+        def let_go_while_reopening(*args):
+            store_reader.forget(*key)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", let_go_while_reopening)
+
+        assert store_reader.reopened_store(*key, stale) is not stale
+        assert store_reader.open_keys() == set()
+
+    def test_a_field_read_under_way_when_its_store_is_let_go_is_not_kept(self):
+        cache = store_reader.FieldCache(3 * 2**20)
+        target = slice_at("https://example.org/a", 6)
+
+        def let_go_while_reading(_):
+            cache.forget((target.store, target.chunk_locations))
+            return decoded(1)
+
+        assert cache.kept_or_read(target, let_go_while_reading) is not None
+        assert cache.get(target) is None
+        assert cache.size == 0
+
+    def test_a_store_opened_again_after_it_was_let_go_is_kept(self, upstream_store):
+        key = (upstream_store.href, ((ECMWF, ""),))
+        store_reader.opened_store(*key)
+        store_reader.forget(*key)
+
+        store_reader.opened_store(*key)
+
+        assert store_reader.open_keys() == {key}
+
     def test_a_store_opened_while_the_hashes_are_read_is_kept(self, rendering, upstream_store, monkeypatch):
         key = (upstream_store.href, ((ECMWF, ""),))
         real = warm.published_stores
