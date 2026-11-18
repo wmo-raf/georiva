@@ -30,6 +30,22 @@ Key:    ``georiva:remote-assets:{org}:{catalog}:{collection}:{variable}``
 Fields: ``{time}`` or ``{time}/{reference_time}``, each ``YYYYMMDDTHHMMSS`` UTC
 Values: a Remote COG's href, or a Store asset's :func:`store_entry` as JSON
 
+*Django announces a change to the stores it publishes* (#706). Each Titiler
+worker opens the published stores ahead of their first tile (``app.warm``), and
+a store is kept open under its address and the feed's Pinned locations: a new
+store harvest, a re-check that changes a feed's Pinned locations, or an adopted
+address leaves a running worker with nothing open under the new key. So
+whenever :func:`publish_variable` writes a hash that names a store, or named one
+before, its key is said on :data:`STORES_CHANNEL` — every store harvest, then,
+changed or not: each step's entry reaches the hash as its asset is saved, before
+the harvest publishes the Variable, so the hash cannot say what is new. A worker
+that hears an unchanged store reads the hashes and opens nothing.
+:func:`publish_all` says :data:`ALL_STORES` once, and :func:`withdraw_variable`
+says the key of a hash that named a store. The message is
+a nudge, not the news: a worker that hears it reads the hashes again, opens what
+it has not, and drops what no hash names any more. A message lost on the way
+costs only the warm-up it would have started.
+
 Which assets are Remote is asked of ``core.storage.asset_location``, never
 decided here.
 """
@@ -47,6 +63,13 @@ from georiva.core.storage.asset_location import AssetLocation, remote_q, store_q
 logger = logging.getLogger(__name__)
 
 REMOTE_ASSETS_KEY_PREFIX = "georiva:remote-assets"
+
+#: Where Django says the stores it publishes have changed (#706). Titiler listens
+#: on the same channel (``titiler-app/app/config.py``).
+STORES_CHANNEL = "georiva:stores-published"
+
+#: What :data:`STORES_CHANNEL` carries after a whole publish, in place of one hash's key.
+ALL_STORES = "*"
 
 #: Marks a hash Django wrote whole. Timestep fields open with a digit, so it cannot be one.
 PUBLISHED_FIELD = "published"
@@ -138,7 +161,7 @@ def remote_source(variable, time: datetime, reference_time: datetime | None = No
         .values_list(*_ROW)[:1]
     )
     for value in _values(rows).values():
-        return json.loads(value) if value.startswith("{") else value
+        return json.loads(value) if _is_store_entry(value) else value
     return None
 
 
@@ -148,7 +171,12 @@ def publish_variable(variable) -> str | None:
     try:
         key = variable_key(variable)
         values = _values(_published_assets().filter(variable=variable).values_list(*_ROW))
-        _write_hash(key, {field: value for (_, field), value in values.items()})
+        fields = {field: value for (_, field), value in values.items()}
+        before = _replace_hash(key, fields)
+        # Whether or not they changed: each step's store entry is written as its
+        # asset is saved, before this runs, so the hash cannot say what is new.
+        if _stores_named(before) or _stores_named(fields.values()):
+            _announce(key)
         return key
     except Exception as e:
         logger.warning("Failed to publish remote assets for variable %s: %s", getattr(variable, "slug", "?"), e)
@@ -176,12 +204,13 @@ def publish_all() -> None:
     for variable in Variable.objects.filter(is_active=True).select_related("collection__catalog__organisation"):
         try:
             key = variable_key(variable)
-            _write_hash(key, hrefs.get(variable.pk, {}))
+            _replace_hash(key, hrefs.get(variable.pk, {}), read_before=False)  # announced once, below
             live_keys.add(key)
         except Exception as e:
             logger.warning("Failed to publish remote assets for variable %s: %s", variable.slug, e)
 
     pruned = prune_stale_keys(live_keys, prefix=REMOTE_ASSETS_KEY_PREFIX)
+    _announce(ALL_STORES)
     logger.info(
         "Published remote assets for %d variables (%d with any), pruned %d stale key(s)",
         len(live_keys),
@@ -190,23 +219,52 @@ def publish_all() -> None:
     )
 
 
-def _write_hash(key: str, fields: dict[str, str]) -> None:
-    """Replace the hash at ``key``. In one transaction, so a reader sees the old
-    hash or the new one and never a half-filled one that claims to be whole."""
+def _replace_hash(key: str, fields: dict[str, str] | None, *, read_before: bool = True) -> list:
+    """Replace the hash at ``key`` with ``fields``, marked published whole, or
+    drop it for ``None``. Returns the values it held, if ``read_before``. In one
+    transaction, so a reader sees the old hash or the new one and never a
+    half-filled one that claims to be whole."""
     from django_redis import get_redis_connection
 
     pipeline = get_redis_connection("default").pipeline(transaction=True)
+    if read_before:
+        pipeline.hvals(key)
     pipeline.delete(key)
-    pipeline.hset(key, mapping={**fields, PUBLISHED_FIELD: "1"})
-    pipeline.execute()
+    if fields is not None:
+        pipeline.hset(key, mapping={**fields, PUBLISHED_FIELD: "1"})
+    done = pipeline.execute()
+    return done[0] if read_before else []
+
+
+def _stores_named(values) -> set[str]:
+    """The Store asset entries among a hash's values, read back (bytes) or about to be written (str)."""
+    return {value.decode() if isinstance(value, bytes) else value for value in values if _is_store_entry(value)}
+
+
+def _is_store_entry(value: str | bytes) -> bool:
+    """Whether a hash value is a Store asset's :func:`store_entry`, read back
+    (bytes) or about to be written (str), rather than a Remote COG's href: an
+    entry is a JSON object, and an href opens with its scheme. Titiler tells
+    them apart the same way (``app.store.is_store_entry``)."""
+    return (value.decode() if isinstance(value, bytes) else value).startswith("{")
+
+
+def _announce(about: str) -> None:
+    """Say on :data:`STORES_CHANNEL` that the stores published under ``about`` changed. Best-effort."""
+    from django_redis import get_redis_connection
+
+    try:
+        get_redis_connection("default").publish(STORES_CHANNEL, about)
+    except Exception as e:
+        logger.warning("Failed to announce the stores published under %s: %s", about, e)
 
 
 def withdraw_variable(variable) -> None:
     """Drop ``variable``'s hash, for its deletion. Best-effort, like ``palette_cache.prune_variable``."""
-    from django_redis import get_redis_connection
-
     try:
-        get_redis_connection("default").delete(variable_key(variable))
+        key = variable_key(variable)
+        if _stores_named(_replace_hash(key, None)):
+            _announce(key)
     except Exception as e:
         logger.warning("Failed to withdraw remote assets for variable %s: %s", getattr(variable, "slug", "?"), e)
 

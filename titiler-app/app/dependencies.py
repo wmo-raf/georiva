@@ -21,7 +21,7 @@ from app.config import (
     REMOTE_ASSETS_KEY_PREFIX,
     REMOTE_ASSETS_PUBLISHED_FIELD,
 )
-from app.store import StoreSlice
+from app.store import StoreSlice, is_store_entry
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ def remote_source(
 
     value, published = redis_client.hmget(key, [field, REMOTE_ASSETS_PUBLISHED_FIELD])
     entry = None
-    if value is not None and value.startswith("{"):
+    if value is not None and is_store_entry(value):
         try:
             entry = json.loads(value)
         except ValueError:

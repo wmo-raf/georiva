@@ -45,10 +45,12 @@ seconds (#677): a row can offer a step the store has lost, and without this
 each request for it would pay a reopen. A request for a remembered step still
 asks the open store, so one another request's reopen has found is drawn.
 
-**It is warmed at start** (#684). Each worker opens the stores of published
-Store assets as it comes up, in the background, through :func:`opened_store`
-and :meth:`OpenStore.warm`, so the open recorded above is paid before a user's
-first map asks; ``app.warm`` says how.
+**It is warmed at start, and kept warm** (#684, #706). Each worker opens the
+stores of published Store assets as it comes up, and each store published while
+it runs, in the background, through :func:`opened_store` and
+:meth:`OpenStore.warm`, so the open recorded above is paid before a user's first
+map asks. A store no published asset names any more is let go with
+:func:`forget`. ``app.warm`` says how.
 
 **It keeps the fields it decoded** (ADR 0044 §13; #663). A store's chunk is one
 whole field and every tile of a map needs all of it, so each process keeps up
@@ -115,6 +117,14 @@ class StoreSlice:
     def __str__(self) -> str:
         at = self.time.isoformat() if self.reftime is None else f"{self.reftime.isoformat()}+{self.time.isoformat()}"
         return f"{self.store}#{self.array}@{at}"
+
+
+def is_store_entry(value: str) -> bool:
+    """Whether a remote-assets hash value is a Store asset's entry rather than a
+    Remote COG's href: an entry is a JSON object, and an href opens with its
+    scheme. Told apart as Django tells them apart
+    (``_is_store_entry`` in ``georiva/core/machine_plane/remote_assets.py``)."""
+    return value.startswith("{")
 
 
 def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...]]:
@@ -491,6 +501,9 @@ class _Opened:
     reopens: dict = field(default_factory=dict)
     #: Each step a reopened store still did not hold, and the ``monotonic()`` time it may be looked for again.
     misses: dict[StoreSlice, float] = field(default_factory=dict)
+    #: How many times each store has been let go: an open begun before the
+    #: latest is handed to its own request but not kept (#706).
+    forgets: dict = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -503,10 +516,19 @@ def _key_lock(key) -> threading.Lock:
 
 
 def _open(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> OpenStore:
-    """The store at ``href`` opened at the tip of its branch, and kept for this process."""
+    """The store at ``href`` opened at the tip of its branch, and kept for this process.
+
+    Unless it was let go while this opened: the request that opened it draws
+    from it, and the next opens it again, rather than a store no published
+    asset names coming back to stay.
+    """
+    key = (href, chunk_locations)
+    with _opened.lock:
+        forgets = _opened.forgets.get(key, 0)
     opened = OpenStore(open_repository(storage(href), chunk_locations).readonly_session(BRANCH).store)
     with _opened.lock:
-        _opened.stores[(href, chunk_locations)] = opened
+        if _opened.forgets.get(key, 0) == forgets:
+            _opened.stores[key] = opened
     return opened
 
 
@@ -565,6 +587,35 @@ def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stal
             _opened.reopens.pop(key, None)
 
 
+def open_keys() -> set[tuple[str, tuple[tuple[str, str], ...]]]:
+    """The (address, pins) of every store this process has open."""
+    with _opened.lock:
+        return set(_opened.stores)
+
+
+def forget(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> None:
+    """Let go of the store at ``href`` read with these pins, and every field
+    kept from it (#706). A request holding it already draws on; the next one
+    opens it again.
+
+    An open or reopen under way finishes for the request that began it, and is
+    not kept; nor is a field still being read from it, nor a step such a read
+    finds missing. The store's lock is
+    kept, so a request that opens it again waits on one still opening.
+    """
+    key = (href, chunk_locations)
+    with _opened.lock:
+        _opened.forgets[key] = _opened.forgets.get(key, 0) + 1
+        _opened.stores.pop(key, None)
+        for missed in [slice_ for slice_ in _opened.misses if _store_key(slice_) == key]:
+            del _opened.misses[missed]
+    _fields.forget(key)
+
+
+def _store_key(target: StoreSlice) -> tuple[str, tuple[tuple[str, str], ...]]:
+    return target.store, target.chunk_locations
+
+
 def forget_all() -> None:
     """Drop every open store and every field kept. For tests, which open a new local store each."""
     _fields.clear()
@@ -572,6 +623,7 @@ def forget_all() -> None:
         _opened.stores.clear()
         _opened.locks.clear()
         _opened.reopens.clear()
+        _opened.forgets.clear()
         _opened.misses.clear()
 
 
@@ -586,6 +638,8 @@ def _decode(target: StoreSlice) -> Field:
     field, all within one ``STORE_READ_TIMEOUT``."""
 
     def read() -> Field:
+        with _opened.lock:
+            forgets = _opened.forgets.get(_store_key(target), 0)
         opened = opened_store(target.store, target.chunk_locations)
         try:
             return opened.field(target.array, target.time, target.reftime)
@@ -596,7 +650,7 @@ def _decode(target: StoreSlice) -> Field:
         try:
             return fresher.field(target.array, target.time, target.reftime)
         except StoreStepNotHeld:
-            _remember_missing(target)
+            _remember_missing(target, forgets)
             raise
 
     return _bounded(read)
@@ -617,6 +671,8 @@ class FieldCache:
         self._kept: OrderedDict[StoreSlice, Field] = OrderedDict()
         #: The read under way for each field not yet kept, which requests for it meanwhile wait on.
         self._reads: dict[StoreSlice, Future] = {}
+        #: How many times each store's fields have been let go: a read begun before the latest is not kept.
+        self._forgets: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
         self._lock = threading.Lock()
 
     def get(self, target: StoreSlice) -> Field | None:
@@ -643,6 +699,7 @@ class FieldCache:
             mine = underway is None
             if mine:
                 underway = self._reads[target] = Future()
+                forgets = self._forgets.get(_store_key(target), 0)
         if not mine:
             return underway.result()
         try:
@@ -651,19 +708,22 @@ class FieldCache:
             underway.set_exception(failed)
             raise
         else:
-            self.put(target, found)
+            self.put(target, found, forgets=forgets)
             underway.set_result(found)
             return found
         finally:
             with self._lock:
                 self._reads.pop(target, None)
 
-    def put(self, target: StoreSlice, found: Field) -> None:
+    def put(self, target: StoreSlice, found: Field, forgets: int | None = None) -> None:
+        """Keep ``found`` for ``target``; not if its store was let go since ``forgets`` was counted."""
         found.values.flags.writeable = False
         cost = found.values.nbytes
         if cost > self.capacity:
             return
         with self._lock:
+            if forgets is not None and self._forgets.get(_store_key(target), 0) != forgets:
+                return
             if target in self._kept:
                 self.size -= self._kept.pop(target).values.nbytes
             while self._kept and self.size + cost > self.capacity:
@@ -671,10 +731,21 @@ class FieldCache:
             self._kept[target] = found
             self.size += cost
 
+    def forget(self, store_key: tuple[str, tuple[tuple[str, str], ...]]) -> None:
+        """Drop every field kept from the store at this (address, pins).
+
+        A read under way finishes for the requests waiting on it, and is not kept.
+        """
+        with self._lock:
+            self._forgets[store_key] = self._forgets.get(store_key, 0) + 1
+            for target in [target for target in self._kept if _store_key(target) == store_key]:
+                self.size -= self._kept.pop(target).values.nbytes
+
     def clear(self) -> None:
         with self._lock:
             self._kept.clear()
             self._reads.clear()
+            self._forgets.clear()
             self.size = 0
 
 
@@ -694,10 +765,16 @@ def _remembered_missing(target: StoreSlice) -> bool:
         return target in _opened.misses
 
 
-def _remember_missing(target: StoreSlice) -> None:
-    """Remember that a reopened store does not hold this step, warning once per window."""
+def _remember_missing(target: StoreSlice, forgets: int) -> None:
+    """Remember that a reopened store does not hold this step, warning once per window.
+
+    Not if the store was let go since ``forgets`` was counted, as the read began
+    (#706): a miss is the store's, and goes with it.
+    """
     now = monotonic()
     with _opened.lock:
+        if _opened.forgets.get(_store_key(target), 0) != forgets:
+            return
         _forget_expired_misses(now)
         if target in _opened.misses:  # a request that shared this reopen remembered it already
             return

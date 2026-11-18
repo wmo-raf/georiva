@@ -17,6 +17,7 @@ import contextlib
 import http.server
 import json
 import os
+import shutil
 import threading
 import time as clock
 import urllib.parse
@@ -789,6 +790,26 @@ class TestAStepStillMissingIsRemembered:
         assert response.status_code == 200, response.text
         assert len(opens) == 3
 
+    def test_a_miss_found_after_its_store_was_let_go_is_not_remembered(
+        self, client, rendering, upstream_store, monkeypatch
+    ):
+        publish(rendering, {LATE: published(upstream_store.href)})
+        key = (upstream_store.href, ((ECMWF, ""),))
+        real = store_reader.open_repository
+        calls = []
+
+        def let_go_while_reopening(*args):
+            calls.append(1)
+            if len(calls) == 2:  # the reopen the miss asks for
+                store_reader.forget(*key)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", let_go_while_reopening)
+
+        assert tile(client, time=LATE_TIME).status_code == 404
+        assert len(calls) == 2
+        assert store_reader._opened.misses == {}
+
     def test_remembering_one_step_does_not_stop_another_from_reopening(
         self, client, rendering, upstream_store, opens, fake_monotonic
     ):
@@ -1255,3 +1276,247 @@ class TestStoresAreWarmedAtStart:
 
     def test_the_switch_is_a_setting(self):
         assert warm.STORE_WARM is config.STORE_WARM
+
+
+# ---------------------------------------------------------------------------
+# A running worker follows what Django publishes (#706)
+# ---------------------------------------------------------------------------
+
+
+def eventually(holds, timeout: float = 10.0) -> None:
+    """Wait for ``holds()`` to be true, as a background thread makes it so."""
+    deadline = clock.monotonic() + timeout
+    while not holds():
+        assert clock.monotonic() < deadline, "it never happened"
+        clock.sleep(0.02)
+
+
+def announce(fake_redis, about=HASH) -> None:
+    """What Django says when the stores it publishes under ``about`` change."""
+    assert fake_redis.publish(config.STORES_CHANNEL, about) == 1, "the worker is not listening"
+
+
+@pytest.fixture
+def quick(monkeypatch):
+    """A listener that settles and reconnects in moments, not seconds."""
+    monkeypatch.setattr(warm, "SETTLE_SECONDS", 0.05)
+    monkeypatch.setattr(warm, "RECONNECT_FIRST_SECONDS", 0.05)
+
+
+@pytest.fixture
+def worker(django_configs, rendering, quick):
+    """The app running as a worker does: started, listening, and stopped at the end."""
+    try:
+        with TestClient(app) as started:
+            eventually(lambda: rendering.subscribers)
+            yield started
+    finally:
+        wait_for_warm_up()
+
+
+@pytest.fixture
+def held_readings(monkeypatch, rendering):
+    """Each reading of the published stores, as how many announcements were
+    still waiting to be heard when it began. The first reading, as the worker
+    begins listening, is held until ``release`` is set."""
+    waiting: list[int] = []
+    release = threading.Event()
+    real = warm.published_stores
+
+    def reading():
+        waiting.append(sum(subscriber._inbox.qsize() for subscriber in rendering.subscribers))
+        if len(waiting) == 1:
+            release.wait(timeout=10)
+        return real()
+
+    monkeypatch.setattr(warm, "published_stores", reading)
+    try:
+        yield waiting, release
+    finally:
+        release.set()
+
+
+class TestARunningWorkerFollowsWhatIsPublished:
+    def test_a_store_published_while_it_runs_is_opened_before_its_first_tile(
+        self, rendering, upstream_store, opens, worker
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        announce(rendering)
+        eventually(lambda: opens)
+
+        response = tile(worker)
+
+        assert response.status_code == 200, response.text
+        assert opens == [((ECMWF, ""),)]
+
+    def test_new_pins_are_opened_and_the_store_under_the_old_ones_dropped(
+        self, rendering, upstream_store, opens, worker
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        announce(rendering)
+        eventually(lambda: opens)
+        new_pins = {ECMWF: "", GFS: "us-east-1"}
+
+        publish(rendering, {FIELD: published(upstream_store.href, new_pins)})
+        announce(rendering)
+
+        new_key = (upstream_store.href, ((ECMWF, ""), (GFS, "us-east-1")))
+        eventually(lambda: store_reader.open_keys() == {new_key})
+        assert tile(worker).status_code == 200
+        assert len(opens) == 2, "the tile found the store under its new Pinned locations open"
+
+    def test_an_adopted_address_is_opened_and_the_old_one_dropped(
+        self, rendering, upstream_store, producer, opens, worker, tmp_path
+    ):
+        _, base = producer
+        # The same store, at the address it had before the feed adopted the new one.
+        shutil.copytree(upstream_store.folder, tmp_path / "noaa-gfs-forecast-virtual" / "v0.0.9.icechunk")
+        old_key = (f"{base}/noaa-gfs-forecast-virtual/v0.0.9.icechunk", ((ECMWF, ""),))
+        new_key = (upstream_store.href, ((ECMWF, ""),))
+        publish(rendering, {FIELD: published(old_key[0])})
+        announce(rendering)
+        eventually(lambda: store_reader.open_keys() == {old_key})
+
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        announce(rendering)
+
+        eventually(lambda: store_reader.open_keys() == {new_key})
+        assert tile(worker).status_code == 200
+        assert len(opens) == 2, "the tile found the store at its new address open"
+
+    def test_a_connection_lost_is_listened_to_again_and_what_it_missed_is_opened(
+        self, rendering, upstream_store, opens, worker
+    ):
+        rendering.drop_subscribers()
+        publish(rendering, {FIELD: published(upstream_store.href)})  # announced to nobody
+
+        eventually(lambda: opens)
+        eventually(lambda: rendering.subscribers)
+        assert tile(worker).status_code == 200
+        assert len(opens) == 1
+
+    def test_a_burst_of_announcements_reads_the_published_stores_once(
+        self, rendering, upstream_store, held_readings, worker
+    ):
+        waiting, release = held_readings
+        eventually(lambda: waiting)  # held in the reading as it began listening
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        for _ in range(5):
+            announce(rendering)  # all queued before the listener hears the first
+
+        release.set()
+
+        eventually(lambda: len(waiting) >= 2)
+        # The one reading after the burst began with all of it heard, so nothing is left to read for.
+        assert waiting[1] == 0
+
+    def test_it_stops_listening_when_the_app_stops(self, django_configs, rendering, quick):
+        with TestClient(app):
+            eventually(lambda: rendering.subscribers)
+
+        # Stopping waited for the listener: nothing is left running, without waiting for it here.
+        assert not [thread for thread in threading.enumerate() if thread.name == warm.THREAD_NAME]
+        assert rendering.subscribers == []
+
+
+class TestWarmingDropsWhatNoAssetNames:
+    def test_a_store_no_hash_names_any_more_is_dropped_with_its_fields(self, client, rendering, upstream_store):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        warm.warm_stores()
+        assert tile(client).status_code == 200
+        assert store_reader._fields.size > 0
+
+        publish(rendering, {})
+        warm.warm_stores()
+
+        assert store_reader.open_keys() == set()
+        assert store_reader._fields.size == 0
+
+    def test_a_store_a_tile_opened_with_no_hash_to_name_it_is_kept(self, client, rendering, upstream_store):
+        # Opened as a tile opens it when Django answers in the hash's place (#706 review).
+        key = (upstream_store.href, ((ECMWF, ""),))
+        store_reader.opened_store(*key)
+
+        warm.warm_stores()
+
+        assert store_reader.open_keys() == {key}
+
+    def test_an_open_under_way_when_its_store_is_let_go_is_not_kept(self, upstream_store, monkeypatch):
+        key = (upstream_store.href, ((ECMWF, ""),))
+        real = store_reader.open_repository
+
+        def let_go_while_opening(*args):
+            store_reader.forget(*key)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", let_go_while_opening)
+
+        opened = store_reader.opened_store(*key)
+
+        assert opened is not None, "the request that opened it still draws from it"
+        assert store_reader.open_keys() == set()
+
+    def test_a_reopen_under_way_when_its_store_is_let_go_is_not_kept(self, upstream_store, monkeypatch):
+        key = (upstream_store.href, ((ECMWF, ""),))
+        stale = store_reader.opened_store(*key)
+        real = store_reader.open_repository
+
+        def let_go_while_reopening(*args):
+            store_reader.forget(*key)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", let_go_while_reopening)
+
+        assert store_reader.reopened_store(*key, stale) is not stale
+        assert store_reader.open_keys() == set()
+
+    def test_a_field_read_under_way_when_its_store_is_let_go_is_not_kept(self):
+        cache = store_reader.FieldCache(3 * 2**20)
+        target = slice_at("https://example.org/a", 6)
+
+        def let_go_while_reading(_):
+            cache.forget((target.store, target.chunk_locations))
+            return decoded(1)
+
+        assert cache.kept_or_read(target, let_go_while_reading) is not None
+        assert cache.get(target) is None
+        assert cache.size == 0
+
+    def test_a_store_opened_again_after_it_was_let_go_is_kept(self, upstream_store):
+        key = (upstream_store.href, ((ECMWF, ""),))
+        store_reader.opened_store(*key)
+        store_reader.forget(*key)
+
+        store_reader.opened_store(*key)
+
+        assert store_reader.open_keys() == {key}
+
+    def test_a_store_opened_while_the_hashes_are_read_is_kept(self, rendering, upstream_store, monkeypatch):
+        key = (upstream_store.href, ((ECMWF, ""),))
+        real = warm.published_stores
+
+        def a_tile_opens_it_meanwhile():
+            found = real()
+            store_reader.opened_store(*key)
+            return found
+
+        monkeypatch.setattr(warm, "published_stores", a_tile_opens_it_meanwhile)
+
+        warm.warm_stores()
+
+        assert store_reader.open_keys() == {key}
+
+    def test_hashes_that_cannot_be_read_drop_nothing(self, client, rendering, upstream_store, monkeypatch):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+
+        def down(*args, **kwargs):
+            raise ConnectionError("Redis is not there")
+
+        monkeypatch.setattr(rendering, "scan_iter", down)
+        warm.warm_stores()
+
+        assert store_reader.open_keys() == {(upstream_store.href, ((ECMWF, ""),))}
+
+    def test_the_channel_is_the_one_django_announces_on(self):
+        assert config.STORES_CHANNEL == "georiva:stores-published"

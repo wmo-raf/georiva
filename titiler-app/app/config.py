@@ -24,6 +24,10 @@ PALETTE_KEY_PREFIX = "georiva:palette"
 #: word. Spelled to match ``georiva/core/machine_plane/remote_assets.py``.
 REMOTE_ASSETS_KEY_PREFIX = "georiva:remote-assets"
 REMOTE_ASSETS_PUBLISHED_FIELD = "published"
+#: Where Django says the stores it publishes have changed (#706): each worker
+#: listens, and reads the hashes again. Spelled to match ``STORES_CHANNEL`` in
+#: ``georiva/core/machine_plane/remote_assets.py``.
+STORES_CHANNEL = "georiva:stores-published"
 PATH_RE = re.compile(r"^[\w/.-]+\.tif$")
 
 #: Seconds a read from an Upstream store may take in all — opening it, or
@@ -44,7 +48,8 @@ STORE_MISS_TTL = float(os.getenv("GEORIVA_STORE_MISS_TTL", "60"))
 #: Set in megabytes (``GEORIVA_STORE_FIELD_CACHE_MB``), held here in bytes.
 STORE_FIELD_CACHE_BYTES = int(float(os.getenv("GEORIVA_STORE_FIELD_CACHE_MB", "128")) * 2**20)
 #: Whether each worker opens the stores of published Store assets as it starts,
-#: in the background, so a user's first map of one does not wait 27 s for it
-#: (#684). Costs each worker an open store's memory whether or not it is asked
-#: for one. ``0`` leaves every store to be opened by its first tile.
+#: and each one published while it runs, in the background, so a user's first
+#: map of one does not wait 27 s for it (#684, #706). Costs each worker an open
+#: store's memory whether or not it is asked for one. ``0`` leaves every store to
+#: be opened by its first tile, and kept until the worker restarts.
 STORE_WARM = os.getenv("GEORIVA_STORE_WARM", "1").strip().lower() not in ("0", "false", "no", "off", "")

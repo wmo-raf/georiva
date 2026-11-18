@@ -19,6 +19,7 @@ real services answer at, and assertions live on responses.
 import fnmatch
 import http.server
 import os
+import queue
 import shutil
 import tempfile
 import threading
@@ -36,7 +37,7 @@ os.environ["DJANGO_BASE_URL"] = "http://never-connected:8000"
 
 import numpy
 import pytest
-from app import dependencies
+from app import dependencies, warm
 from app.main import app
 from fastapi.testclient import TestClient
 from rasterio.io import MemoryFile
@@ -113,19 +114,71 @@ COG_VALUES = numpy.linspace(0, 50, COG_SIZE * COG_SIZE, dtype="float32").reshape
 )
 
 
+class FakePubSub:
+    """One subscription, as redis-py's ``PubSub`` answers it: the messages
+    published on its channels while it listens, and nothing from before."""
+
+    def __init__(self, redis: "FakeRedis"):
+        self._redis = redis
+        self.channels: set[str] = set()
+        self._inbox: queue.Queue = queue.Queue()
+
+    def subscribe(self, *channels):
+        self.channels.update(channels)
+        with self._redis.lock:
+            self._redis.subscribers.append(self)
+
+    def get_message(self, ignore_subscribe_messages=False, timeout=0.0):
+        try:
+            message = self._inbox.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if isinstance(message, Exception):
+            raise message
+        return message
+
+    def deliver(self, message) -> None:
+        self._inbox.put(message)
+
+    def close(self):
+        with self._redis.lock:
+            if self in self._redis.subscribers:
+                self._redis.subscribers.remove(self)
+
+
 class FakeRedis:
     """The methods the app calls on its Redis client.
 
     ``store`` holds the string keys (rendering config) and ``hashes`` the hash
     keys (where a variable's Remote assets are). A hash that is absent reads as
     every field missing, which is what Redis answers too. ``scan_iter`` lists
-    hash keys only, in the order they were written: the warm-up at start is the
-    one caller, and it looks for nothing else.
+    hash keys only, in the order they were written: the warm-up is the one
+    caller, and it looks for nothing else. ``publish`` reaches every
+    subscription open on the channel; ``drop_subscribers`` loses them all, as a
+    restarted Redis does.
     """
 
     def __init__(self):
         self.store = {}
         self.hashes = {}
+        self.subscribers: list[FakePubSub] = []
+        self.lock = threading.Lock()
+
+    def pubsub(self, ignore_subscribe_messages=False):
+        return FakePubSub(self)
+
+    def publish(self, channel, data):
+        with self.lock:
+            listening = [subscriber for subscriber in self.subscribers if channel in subscriber.channels]
+        for subscriber in listening:
+            subscriber.deliver({"type": "message", "channel": channel, "data": data})
+        return len(listening)
+
+    def drop_subscribers(self) -> None:
+        with self.lock:
+            dropped, self.subscribers = self.subscribers, []
+        for subscriber in dropped:
+            subscriber.deliver(ConnectionError("Connection closed by server."))
 
     def get(self, key):
         return self.store.get(key)
@@ -154,6 +207,8 @@ def empty_storage():
 def fake_redis(monkeypatch):
     fake = FakeRedis()
     monkeypatch.setattr(dependencies, "redis_client", fake)
+    monkeypatch.setattr(warm, "listener_client", fake)
+    monkeypatch.setattr(warm, "_named", set())
     return fake
 
 
