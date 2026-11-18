@@ -521,8 +521,8 @@ _Avoid_: lineage (per-Item, that is the DerivationLink's), derived flag
 Fetching a window of a Remote collection's bytes into local storage, on the same feed. Each run of a Harvest feed
 sends the Remote COGs of its Jurisdiction inside its **materialization window** to the ingestion queue; each is
 fetched past the Asset host allowlist and written by ingestion's own write step, in place: the same Asset, now
-local, its Provenance kept. It leaves the Mirror's Jurisdiction for good, and stays local when the window moves.
-Not for an Upstream store: a Store asset is not a file.
+local, its Provenance kept — and, like its Remote neighbours, not clipped to the catalog's boundary. It leaves the
+Mirror's Jurisdiction for good, and stays local when the window moves. Not for an Upstream store: a Store asset is not a file.
 _Avoid_: hydrate (in code), cache, download, mirror (for copying bytes)
 
 **Asset host allowlist**:

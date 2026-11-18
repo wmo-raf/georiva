@@ -15,9 +15,14 @@ zonal statistics and a virtual-Zarr manifest like any ingested one.
 The copy holds what the upstream file held: every band, in its own dtype, with
 its own nodata value — not re-encoded as ingestion re-encodes a source file,
 narrowed to band 1 with nodata as NaN (#725). A file declaring no nodata is
-given none, unless the catalog's boundary mask cuts it, which needs a value to
-write outside the boundary. Its statistics are band 1's, the band its Variable
-maps and every reader draws, without the nodata value.
+given none. Its statistics are band 1's, the band its Variable maps and every
+reader draws, without the nodata value.
+
+Nor is it clipped to the catalog's boundary, as an ingested file is: its Remote
+neighbours are served as the Upstream publishes them, and a Mixed collection
+shows one footprint across the boundary between the two (#726). A `display`
+catalog crops both alike, on the map only (ADR 0038). The item keeps the
+Upstream's bbox for its bounds: the copy is the very file that bbox described.
 
 The rewritten href fails the Jurisdiction's "still Remote" test, so the asset
 has left the Mirror for good: no later harvest removes or rewrites it, even
@@ -275,20 +280,18 @@ def _write(asset, feed, raster: _Raster, writer) -> bool:
     from georiva.core.storage import storage
     from georiva.ingestion.asset_writer import AssetWriter
     from georiva.ingestion.materialization import AssetMaterializer
-    from georiva.processing.engine import catalog_clipper
 
     item = asset.item
-    clipper = catalog_clipper(item.collection)
     materializer = AssetMaterializer(writer or AssetWriter(storage.assets))
-    data, bounds = materializer.clip_array(raster.data, raster.bounds, clipper)
+    # Not clipped to the catalog's boundary: its Remote neighbours are served
+    # as the Upstream publishes them, and so is it (#726).
     written = materializer.write_cog(
         item=item,
         variable=asset.variable,
-        data=data,
-        bounds=bounds,
+        data=raster.data,
+        bounds=raster.bounds,
         crs=raster.crs,
         timestamp=item.time,
-        clipper=clipper,
         nodata=raster.nodata,
     )
 
