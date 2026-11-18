@@ -17,6 +17,7 @@ import contextlib
 import http.server
 import json
 import os
+import shutil
 import threading
 import time as clock
 import urllib.parse
@@ -1362,22 +1363,26 @@ class TestARunningWorkerFollowsWhatIsPublished:
         new_key = (upstream_store.href, ((ECMWF, ""), (GFS, "us-east-1")))
         eventually(lambda: store_reader.open_keys() == {new_key})
         assert tile(worker).status_code == 200
-        assert len(opens) == 2, "the tile found the store under its new pins open"
+        assert len(opens) == 2, "the tile found the store under its new Pinned locations open"
 
     def test_an_adopted_address_is_opened_and_the_old_one_dropped(
-        self, rendering, upstream_store, producer, opens, worker
+        self, rendering, upstream_store, producer, opens, worker, tmp_path
     ):
         _, base = producer
-        old = f"{base}/no-longer-here/v0.icechunk"
-        publish(rendering, {FIELD: published(old)})
+        # The same store, at the address it had before the feed adopted the new one.
+        shutil.copytree(upstream_store.folder, tmp_path / "noaa-gfs-forecast-virtual" / "v0.0.9.icechunk")
+        old_key = (f"{base}/noaa-gfs-forecast-virtual/v0.0.9.icechunk", ((ECMWF, ""),))
+        new_key = (upstream_store.href, ((ECMWF, ""),))
+        publish(rendering, {FIELD: published(old_key[0])})
         announce(rendering)
-        eventually(lambda: (old, ((ECMWF, ""),)) in warm._named)
-        store_reader._opened.stores[(old, ((ECMWF, ""),))] = object()  # as if a tile had opened it
+        eventually(lambda: store_reader.open_keys() == {old_key})
 
         publish(rendering, {FIELD: published(upstream_store.href)})
         announce(rendering)
 
-        eventually(lambda: store_reader.open_keys() == {(upstream_store.href, ((ECMWF, ""),))})
+        eventually(lambda: store_reader.open_keys() == {new_key})
+        assert tile(worker).status_code == 200
+        assert len(opens) == 2, "the tile found the store at its new address open"
 
     def test_a_connection_lost_is_listened_to_again_and_what_it_missed_is_opened(
         self, rendering, upstream_store, opens, worker
@@ -1408,8 +1413,8 @@ class TestARunningWorkerFollowsWhatIsPublished:
     def test_it_stops_listening_when_the_app_stops(self, django_configs, rendering, quick):
         with TestClient(app):
             eventually(lambda: rendering.subscribers)
-        wait_for_warm_up()
 
+        # Stopping waited for the listener: nothing is left running, without waiting for it here.
         assert not [thread for thread in threading.enumerate() if thread.name == warm.THREAD_NAME]
         assert rendering.subscribers == []
 

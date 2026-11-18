@@ -16,12 +16,12 @@ still opening waits on that open rather than starting its own.
 
 **It keeps up while the worker runs** (#706). A worker keys an open store by
 (address, pins), so a store harvest added after it started, a re-check that
-changes a feed's pins, or an adopted address all name a key it has nothing open
+changes a feed's Pinned locations, or an adopted address all name a key it has nothing open
 under. Django says so on ``STORES_CHANNEL`` whenever the stores it publishes
 change, and the thread listens there for as long as the worker runs. Each time
 it hears, it reads the hashes again — :func:`warm_stores` — opening what it has
 not and letting go of each store no published asset names any more, with the
-fields kept from it, so a store under pins a re-check replaced does not hold
+fields kept from it, so a store under Pinned locations a re-check replaced does not hold
 its memory until a restart. Only a store some reading found named is let go:
 one a tile opened from Django's own answer, with no hash to name it, is the
 tile's to keep. A burst of announcements — a harvest publishes each
@@ -89,7 +89,11 @@ listener_client = redis.Redis.from_url(
     socket_keepalive=True,
 )
 
-#: The stop of the listener running in this process, if one is.
+#: How long a stopping worker waits for the listener to finish what it is doing.
+STOP_WAIT_SECONDS = 5.0
+
+#: The listener running in this process, if one is, and its stop.
+_listener: threading.Thread | None = None
 _stopping: threading.Event | None = None
 
 #: Every (address, pins) a reading of the hashes has found named in this
@@ -99,18 +103,30 @@ _named: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
 
 def start() -> None:
     """Begin warming this worker's stores in the background, and keep them warm, unless switched off."""
-    global _stopping
+    global _listener, _stopping
     if not STORE_WARM:
         logger.info("Not warming upstream stores: GEORIVA_STORE_WARM is off")
         return
     _stopping = threading.Event()
-    threading.Thread(target=listen, args=(_stopping,), name=THREAD_NAME, daemon=True).start()
+    _listener = threading.Thread(target=listen, args=(_stopping,), name=THREAD_NAME, daemon=True)
+    _listener.start()
 
 
 def stop() -> None:
-    """Stop listening. A store being opened is left to finish; nothing more is opened."""
-    if _stopping is not None:
-        _stopping.set()
+    """Stop listening, and wait up to ``STOP_WAIT_SECONDS`` for the listener to end.
+
+    It ends between stores, so the wait is at most the open under way. One
+    that outlasts it is left to finish on its own — the thread is a daemon and
+    holds nothing a stopping worker needs — and nothing more is opened after it.
+    """
+    global _listener, _stopping
+    if _stopping is None or _listener is None:
+        return
+    _stopping.set()
+    _listener.join(timeout=STOP_WAIT_SECONDS)
+    if _listener.is_alive():
+        logger.info("Stopped listening for published upstream stores; an open under way is left to finish")
+    _listener = _stopping = None
 
 
 def listen(stopping: threading.Event) -> None:
@@ -185,7 +201,7 @@ def warm_stores(stopping: threading.Event | None = None) -> None:
     # A store a reading named once, and none names now; not one a tile opened with no hash to name it.
     gone = (already_open & _named) - stores.keys()
     for href, chunk_locations in gone:
-        logger.info("Letting go of upstream store %s: no published asset names it under these pins", href)
+        logger.info("Letting go of upstream store %s: no published asset names it under these Pinned locations", href)
         store.forget(href, chunk_locations)
 
     warmed = failed = opened_now = 0
