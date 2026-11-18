@@ -30,7 +30,7 @@ from wagtail import hooks
 
 from georiva.core.models import Asset, Item
 from georiva.core.storage import storage
-from georiva.ingestion.asset_writer import AssetWriter
+from georiva.ingestion.asset_writer import FROM_DTYPE, AssetWriter
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 from georiva.ingestion.utils import compute_stats, normalize_bounds
 
@@ -50,6 +50,10 @@ class WrittenCog:
     height: int
     bounds: list
     stats: dict
+    #: How many bands it holds; the first is the one its Variable maps.
+    bands: int = 1
+    #: The nodata value it declares, when its caller gave one to keep.
+    nodata: float | int | None = None
 
 
 class AssetMaterializer:
@@ -82,12 +86,13 @@ class AssetMaterializer:
         Crop a full-grid array to the clipper's pixel-snapped window.
 
         Used by callers whose arrays cover the whole source grid (the
-        derivation engine); ingestion crops at read time instead. A window
+        derivation engine); ingestion crops at read time instead. A 3D array
+        (bands first) is cropped band by band. A window
         that cannot be computed (no intersection) keeps the full grid.
         """
         if clipper is None or not clipper.is_active:
             return data, bounds
-        height, width = data.shape[:2]
+        height, width = data.shape[-2:]
         try:
             window = clipper.compute_window(tuple(bounds), width, height)
         except ValueError as e:
@@ -96,7 +101,7 @@ class AssetMaterializer:
         if not window:
             return data, bounds
         y0, x0 = window["y_off"], window["x_off"]
-        cropped = data[y0 : y0 + window["height"], x0 : x0 + window["width"]]
+        cropped = data[..., y0 : y0 + window["height"], x0 : x0 + window["width"]]
         return cropped, window["bounds"]
 
     def materialize_variable(
@@ -111,6 +116,7 @@ class AssetMaterializer:
         clipper: Optional["BoundaryClipper"] = None,
         stats: dict | None = None,
         checksum: str = "",
+        nodata=FROM_DTYPE,
     ) -> list[Asset]:
         """
         Run the shared materialization sequence for one variable's array:
@@ -128,6 +134,7 @@ class AssetMaterializer:
             timestamp=timestamp,
             clipper=clipper,
             stats=stats,
+            nodata=nodata,
         )
         return self.record_cog(item=item, variable=variable, written=written, timestamp=timestamp, checksum=checksum)
 
@@ -142,28 +149,49 @@ class AssetMaterializer:
         timestamp: datetime,
         clipper: Optional["BoundaryClipper"] = None,
         stats: dict | None = None,
+        nodata=FROM_DTYPE,
     ) -> "WrittenCog":
         """
         The storage half: mask the array, compute its statistics and write
         its COG to storage. Touches no row, so a caller may do it before
         taking a lock and record it after (the harvest's materialization does).
+
+        ``nodata`` left as ``FROM_DTYPE``, the array is a float field whose
+        nodata is NaN, and the writer derives what the COG declares. Given —
+        None included — it is what the array's own nodata is, and is kept: the
+        array is written in its own dtype, every band of a 3D one (bands
+        first), and the statistics are band 1's, without that value. Only a
+        geometry mask over an array with no nodata gives it one: NaN, or for
+        integers a value of the dtype's own (``mask_fill``) (#725).
         """
         bounds = normalize_bounds(bounds)
 
+        keep = nodata is not FROM_DTYPE
         if clipper is not None and clipper.is_active:
-            data = clipper.apply_geometry_mask(data, bounds, nodata=np.nan)
+            if keep and nodata is None and clipper.apply_mask:
+                nodata = mask_fill(data.dtype)
+            data = clipper.apply_geometry_mask(data, bounds, nodata=nodata if keep else np.nan)
 
         if stats is None:
-            stats = compute_stats(data)
+            stats = compute_stats(_first_band_values(data, nodata if keep else None))
 
-        height, width = data.shape[:2]
+        height, width = data.shape[-2:]
+        bands = data.shape[0] if data.ndim == 3 else 1
         path = self.cog_path(item, variable, timestamp)
         try:
-            stored = self.writer.write_cog(data, path, tuple(bounds), crs)
+            stored = self.writer.write_cog(data, path, tuple(bounds), crs, nodata=nodata)
         except Exception as e:
             logger.error("COG save failed for %s: %s", variable.slug, e)
             raise
-        return WrittenCog(href=stored, width=width, height=height, bounds=list(bounds), stats=stats)
+        return WrittenCog(
+            href=stored,
+            width=width,
+            height=height,
+            bounds=list(bounds),
+            stats=stats,
+            bands=bands,
+            nodata=nodata if keep else None,
+        )
 
     def record_cog(
         self,
@@ -186,14 +214,15 @@ class AssetMaterializer:
             "file_size": self._get_file_size(written.href),
             "width": written.width,
             "height": written.height,
-            "bands": 1,
+            "bands": written.bands,
             "stats_min": stats.get("min"),
             "stats_max": stats.get("max"),
             "stats_mean": stats.get("mean"),
             "stats_std": stats.get("std"),
             "extra_fields": {
                 "compression": "deflate",
-                "nodata": None,
+                # NaN is not JSON: a NaN nodata reads None, as it always has.
+                "nodata": None if written.nodata is None or np.isnan(written.nodata) else written.nodata,
             },
         }
         # Only stamp a checksum the caller actually supplied (derived
@@ -258,3 +287,27 @@ class AssetMaterializer:
             return int(self.writer.bucket.size(path))
         except Exception:
             return None
+
+
+def mask_fill(dtype) -> float | int:
+    """What a geometry mask writes outside the boundary of an array that has
+    no nodata of its own, which the COG then declares: NaN for floats, else
+    the writer's default for the dtype, else the dtype's least value — its
+    greatest, unsigned."""
+    dtype = np.dtype(dtype)
+    fill = AssetWriter.default_nodata(dtype)
+    if fill is not None:
+        return fill
+    limits = np.iinfo(dtype)
+    return int(limits.max if limits.min == 0 else limits.min)
+
+
+def _first_band_values(data: np.ndarray, nodata) -> np.ndarray:
+    """Band 1 of ``data`` as floats with NaN where it holds ``nodata``: what
+    its statistics are computed over. Band 1 is the band a Variable maps."""
+    band = data[0] if data.ndim == 3 else data
+    if nodata is None or np.isnan(nodata):
+        return band
+    values = band.astype("float64")
+    values[band == nodata] = np.nan
+    return values

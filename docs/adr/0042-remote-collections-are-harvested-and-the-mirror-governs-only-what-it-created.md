@@ -82,9 +82,16 @@ never copied.**
    redirect, judged by the feed's Asset host allowlist as at harvest time, and connected to at the very address the
    allowlist judged, never a second lookup of the host (#723): IPv4 first, then each judged address in turn, and
    through no proxy, since a proxy would look the host up again; a deployment whose only way out is a proxy cannot
-   materialize — reads them as ingestion reads a
-   GeoTIFF, and hands them to ingestion's own write step (`AssetMaterializer`), which rewrites the same `Asset` in
-   place and runs the after-save hooks (zonal statistics, virtual-Zarr manifest). It does not take the Loader's
+   materialize — reads them north up, and hands them to ingestion's own write step (`AssetMaterializer`), which
+   rewrites the same `Asset` in place and runs the after-save hooks (zonal statistics, virtual-Zarr manifest). The
+   copy holds what the upstream file held (#725): every band, in the file's own dtype, with its own nodata value —
+   not narrowed to band 1 and re-encoded with NaN for nodata as ingestion treats a source file — so a Remote asset
+   and its local copy differ in nothing but the href. A file declaring no nodata is given none, unless the
+   catalog's boundary mask cuts it and needs a value outside the boundary: NaN, or for integers the dtype's
+   default fill. The statistics are band 1's — the band the Variable maps and every reader draws — without the
+   nodata value. A multi-band upstream is copied whole rather than refused: every reader opens the copy as it
+   opened the Remote file, so cutting it to band 1 would be the one thing that told the two apart. Overviews are
+   still built by averaging, so a categorical integer upstream's coarse zoom levels are averages of its classes. It does not take the Loader's
    bucket round-trip: ingestion from a file ingests every Variable that names a source in it, and a harvested
    Variable names none — each upstream file is one Variable at one time already. So a materialization leaves no
    `FetchedFile` row; what fails stays Remote and due, and a later harvest sends it again — except an href the

@@ -13,6 +13,10 @@ from georiva.core.storage import Bucket
 
 logger = logging.getLogger(__name__)
 
+#: Passed as ``nodata``: derive one from the array's dtype (``AssetWriter.default_nodata``).
+#: Any other value, None included, is declared as given.
+FROM_DTYPE = object()
+
 
 class AssetWriter:
     """
@@ -28,7 +32,8 @@ class AssetWriter:
       - Block size scales with raster dimensions (country → global)
       - Overview levels are computed from dimensions and block size
       - Compression predictor is derived from data dtype
-      - nodata default is derived from data dtype
+      - nodata default is derived from data dtype, unless the caller gives one
+        (None included) to keep: a materialized copy keeps the upstream's (#725)
     """
 
     def __init__(self, bucket: Bucket):
@@ -45,15 +50,17 @@ class AssetWriter:
         output_path: str,
         bounds: tuple,
         crs: str = "EPSG:4326",
-        nodata: float = None,
+        nodata=FROM_DTYPE,
     ) -> str:
         """
-        Write a 2D numpy array to storage as a Cloud-Optimized GeoTIFF.
+        Write a numpy array to storage as a Cloud-Optimized GeoTIFF: a 2D
+        array as one band, a 3D one (bands, rows, columns) band by band.
 
         The output is fully adaptive to the input data:
           - dtype is derived from data.dtype (float32, int16, uint8 etc)
           - compression predictor follows dtype (3 for floats, 2 for ints)
-          - nodata defaults to a sensible value per dtype if not supplied
+          - nodata defaults to a sensible value per dtype if not supplied;
+            one supplied, None included, is declared as it is
           - block size and overview levels scale with raster dimensions
 
         Two-pass approach:
@@ -63,22 +70,24 @@ class AssetWriter:
                    minimises HTTP range requests from TiTiler and QGIS.
 
         Args:
-            data:        2D numpy array of any numeric dtype.
+            data:        2D or 3D (bands first) numpy array of any numeric dtype.
             output_path: Destination path in the bucket.
             bounds:      (west, south, east, north) in the given CRS.
             crs:         Coordinate reference system (default EPSG:4326).
-            nodata:      NoData value. If None, derived from dtype.
+            nodata:      NoData value; None declares none. ``FROM_DTYPE``
+                         (the default) derives one from the dtype.
 
         Returns:
             Final stored path.
         """
-        height, width = data.shape
+        bands = data if data.ndim == 3 else data[np.newaxis]
+        count, height, width = bands.shape
         dtype = data.dtype
 
         transform = from_bounds(*bounds, width, height)
         blocksize = self._blocksize(width, height)
         overview_levels = self._overview_levels(width, height, blocksize)
-        _nodata = nodata if nodata is not None else self._default_nodata(dtype)
+        _nodata = self.default_nodata(dtype) if nodata is FROM_DTYPE else nodata
         _predictor = self._predictor(dtype)
 
         # Convert to plain dict before mutating
@@ -96,7 +105,7 @@ class AssetWriter:
             "dtype": np.dtype(dtype).name,  # rasterio expects string e.g. 'float32'
             "width": width,
             "height": height,
-            "count": 1,
+            "count": count,
             "crs": crs,
             "transform": transform,
             "nodata": _nodata,
@@ -117,7 +126,7 @@ class AssetWriter:
             # Pass 1 — write raw data as a plain GeoTIFF
             # No overviews here — cog_translate handles that in pass 2.
             with rasterio.open(tmp_path, "w", **raw_profile) as dst:
-                dst.write(data.astype(dtype), 1)
+                dst.write(bands)
 
             # Pass 2 — build overviews and rewrite in true COG byte order.
             # overview_resampling="average" is appropriate for continuous
@@ -218,7 +227,8 @@ class AssetWriter:
             return 2
         return 1
 
-    def _default_nodata(self, dtype: np.dtype):
+    @staticmethod
+    def default_nodata(dtype: np.dtype):
         """
         Return a sensible default nodata value for a given dtype.
 
