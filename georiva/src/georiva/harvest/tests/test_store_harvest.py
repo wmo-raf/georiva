@@ -6,15 +6,17 @@ The only fake is the Upstream — here one that is a store, told which steps it 
 """
 
 import json
+import uuid
 from datetime import UTC, datetime, timedelta
 from unittest import mock
 from xml.etree import ElementTree as ET
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone
 from django_redis import get_redis_connection
 
+from georiva.core.machine_plane import remote_assets
 from georiva.core.machine_plane.palette_cache import warm_all
 from georiva.core.machine_plane.remote_assets import (
     PUBLISHED_FIELD,
@@ -684,3 +686,114 @@ class StoreAssetsArePublishedForTitilerTests(StoreFeedMixin, TestCase):
         Collection.objects.filter(pk=self.collection.pk).update(visibility=Collection.Visibility.PRIVATE)
 
         self.assertEqual(self.tile_config(3).status_code, 404)
+
+
+class StoresAreAnnouncedToTitilerTests(StoreFeedMixin, TestCase):
+    """Django says on a Redis channel whenever a Variable's published stores
+    change, so a running Titiler worker opens the new ones before a tile asks,
+    and drops the ones no asset names any more (#706).
+
+    Each test listens on a channel of its own: pub/sub channels are server-wide,
+    and parallel test workers share the server.
+    """
+
+    PINS = {"s3://noaa-gfs-bdp-pds/": "us-east-1"}
+
+    def setUp(self):
+        super().setUp()
+        self.redis = get_redis_connection("default")
+        self._sweep_redis()
+        self.addCleanup(self._sweep_redis)
+        channel = f"georiva:test:stores-published:{uuid.uuid4().hex}"
+        patcher = mock.patch.object(remote_assets, "STORES_CHANNEL", channel)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.listener = self.redis.pubsub(ignore_subscribe_messages=True)
+        self.listener.subscribe(channel)
+        self.addCleanup(self.listener.close)
+        self.heard()  # the subscription's own confirmation
+
+    def _sweep_redis(self):
+        keys = list(self.redis.scan_iter(match=f"{REMOTE_ASSETS_KEY_PREFIX}:*"))
+        if keys:
+            self.redis.delete(*keys)
+
+    def heard(self) -> list[str]:
+        """Every announcement made since the last call."""
+        said = []
+        while (message := self.listener.get_message(timeout=0.2)) is not None:
+            if message["type"] == "message":
+                said.append(message["data"].decode())
+        return said
+
+    def test_a_new_store_harvest_announces_its_variable(self):
+        self.hold("temperature_2m", 0, 3)
+
+        self.harvest()
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_new_pins_are_announced(self):
+        self.hold("temperature_2m", 0)
+        self.harvest()
+        self.heard()
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations=self.PINS)
+
+        remote_assets.publish_variable(self.temperature)
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_an_adopted_store_address_is_announced(self):
+        self.hold("temperature_2m", 0)
+        self.harvest()
+        self.heard()
+        # A re-sync rewrites hrefs without saving a row; the harvest then publishes the Variable.
+        Asset.objects.filter(variable=self.temperature).update(href=f"{STORE}/moved")
+
+        remote_assets.publish_variable(self.temperature)
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_a_hash_that_named_a_store_and_now_names_none_is_announced(self):
+        entry = json.dumps({"store": STORE, "array": "temperature_2m", "chunk_locations": {}})
+        self.redis.hset(
+            variable_key(self.temperature),
+            mapping={timestep_field(self.run, self.run): entry, PUBLISHED_FIELD: "1"},
+        )
+
+        remote_assets.publish_variable(self.temperature)
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_a_variable_that_names_no_store_is_not_announced(self):
+        remote_assets.publish_variable(self.temperature)
+
+        self.assertEqual(self.heard(), [])
+
+    def test_a_whole_publish_is_announced_once(self):
+        self.hold("temperature_2m", 0)
+        self.harvest()
+        self.heard()
+
+        warm_all()
+
+        self.assertEqual(self.heard(), [remote_assets.ALL_STORES])
+
+    def test_a_withdrawn_variable_with_stores_is_announced(self):
+        self.hold("temperature_2m", 0)
+        self.harvest()
+        self.heard()
+
+        remote_assets.withdraw_variable(self.temperature)
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_redis_that_cannot_be_written_does_not_fail_the_publish(self):
+        with mock.patch("django_redis.get_redis_connection", side_effect=ConnectionError("down")):
+            self.assertIsNone(remote_assets.publish_variable(self.temperature))
+
+
+class StoresChannelTests(SimpleTestCase):
+    def test_the_channel_is_the_one_titiler_listens_on(self):
+        # Spelled to match STORES_CHANNEL in titiler-app/app/config.py (#706).
+        self.assertEqual(remote_assets.STORES_CHANNEL, "georiva:stores-published")

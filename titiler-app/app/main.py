@@ -61,9 +61,11 @@ cog = TilerFactory(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Each worker starts opening its Upstream stores as it comes up, in the
-    background, and is ready for every other tile at once (#684)."""
+    background, and is ready for every other tile at once (#684). It keeps
+    listening for stores published while it runs until it stops (#706)."""
     warm.start()
     yield
+    warm.stop()
 
 
 app = FastAPI(title="GeoRiva Tile Server", root_path=TTL_ROOT_PATH, lifespan=lifespan)

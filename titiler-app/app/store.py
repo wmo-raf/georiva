@@ -45,10 +45,12 @@ seconds (#677): a row can offer a step the store has lost, and without this
 each request for it would pay a reopen. A request for a remembered step still
 asks the open store, so one another request's reopen has found is drawn.
 
-**It is warmed at start** (#684). Each worker opens the stores of published
-Store assets as it comes up, in the background, through :func:`opened_store`
-and :meth:`OpenStore.warm`, so the open recorded above is paid before a user's
-first map asks; ``app.warm`` says how.
+**It is warmed at start, and kept warm** (#684, #706). Each worker opens the
+stores of published Store assets as it comes up, and each store published while
+it runs, in the background, through :func:`opened_store` and
+:meth:`OpenStore.warm`, so the open recorded above is paid before a user's first
+map asks. A store no published asset names any more is let go with
+:func:`forget`. ``app.warm`` says how.
 
 **It keeps the fields it decoded** (ADR 0044 §13; #663). A store's chunk is one
 whole field and every tile of a map needs all of it, so each process keeps up
@@ -565,6 +567,25 @@ def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stal
             _opened.reopens.pop(key, None)
 
 
+def open_keys() -> set[tuple[str, tuple[tuple[str, str], ...]]]:
+    """The (address, pins) of every store this process has open."""
+    with _opened.lock:
+        return set(_opened.stores)
+
+
+def forget(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> None:
+    """Let go of the store at ``href`` read with these pins, and every field
+    kept from it (#706). A request holding it already draws on; the next one
+    opens it again."""
+    key = (href, chunk_locations)
+    with _opened.lock:
+        _opened.stores.pop(key, None)
+        _opened.locks.pop(key, None)
+        for missed in [slice_ for slice_ in _opened.misses if (slice_.store, slice_.chunk_locations) == key]:
+            del _opened.misses[missed]
+    _fields.forget(lambda target: (target.store, target.chunk_locations) == key)
+
+
 def forget_all() -> None:
     """Drop every open store and every field kept. For tests, which open a new local store each."""
     _fields.clear()
@@ -670,6 +691,12 @@ class FieldCache:
                 self.size -= self._kept.popitem(last=False)[1].values.nbytes
             self._kept[target] = found
             self.size += cost
+
+    def forget(self, matches: Callable[[StoreSlice], bool]) -> None:
+        """Drop every kept field whose slice ``matches``. A read under way is left to finish."""
+        with self._lock:
+            for target in [target for target in self._kept if matches(target)]:
+                self.size -= self._kept.pop(target).values.nbytes
 
     def clear(self) -> None:
         with self._lock:
