@@ -32,6 +32,7 @@ from georiva.harvest.materialize import (
     NOT_DUE,
     REFUSED,
     UNREACHABLE,
+    UNRESOLVED_MARK,
     claim_key,
     materialize,
     refusals,
@@ -410,6 +411,56 @@ class ARefusalForWhereAHostResolvesNowIsTriedAgainTests(MaterializeMixin, TestCa
         self.harvest()
 
         self.assertLessEqual(cache.ttl(claim_key(self.asset.pk)), MATERIALIZE_CLAIM.total_seconds())
+        self.assertEqual(refusals(self.feed, self.feed.collection), [])
+
+
+class AMarkAndAHarvestWriteTheRowWithoutLosingEachOthersFieldsTests(MaterializeMixin, TestCase):
+    """A materialization and a harvest each write their own keys of `extra_fields`
+    and leave the rest as the database holds it at the write (#724)."""
+
+    def setUp(self):
+        super().setUp()
+        self.harvest()
+        self.asset = self.asset_on(3)
+
+    def test_a_mark_keeps_what_a_harvest_wrote_while_the_host_was_looked_up(self):
+        def harvest_meanwhile(host):
+            Asset.objects.filter(pk=self.asset.pk).update(extra_fields={"nodata": -9999.0})
+            return ["10.0.0.7"]
+
+        with mock.patch.object(self.upstream, "resolve_host", side_effect=harvest_meanwhile):
+            self.assertEqual(self.materialize(self.asset.pk), REFUSED)
+
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.extra_fields["nodata"], -9999.0)
+        self.assertIn(UNRESOLVED_MARK, self.asset.extra_fields)
+
+    def test_a_resync_keeps_a_mark_written_after_the_harvest_read_the_row(self):
+        from georiva.harvest.harvester import _Jurisdiction
+
+        resync = _Jurisdiction.resync
+
+        def refused_meanwhile(jurisdiction, mine, asset, item):
+            self.upstream.addresses["stac.upstream.example"] = ["10.0.0.7"]
+            self.materialize(self.asset.pk)
+            del self.upstream.addresses["stac.upstream.example"]
+            return resync(jurisdiction, mine, asset, item)
+
+        self.upstream.items = [item for item in self.upstream.items if item.datetime != day(3)]
+        self.upstream.add_item(day(3), {"rainfall": rain_href(3)}, updated=day(10))
+        with mock.patch.object(_Jurisdiction, "resync", refused_meanwhile):
+            self.harvest()
+
+        self.asset.refresh_from_db()
+        self.assertIn(UNRESOLVED_MARK, self.asset.extra_fields)
+        self.assertIn("upstream_updated", self.asset.extra_fields)
+
+    def test_a_refusal_for_an_href_since_rewritten_is_not_counted(self):
+        self.upstream.addresses["stac.upstream.example"] = ["10.0.0.7"]
+        self.materialize(self.asset.pk)
+
+        Asset.objects.filter(pk=self.asset.pk).update(href=f"{ASSET_HOST}/v3/3.tif")
+
         self.assertEqual(refusals(self.feed, self.feed.collection), [])
 
 

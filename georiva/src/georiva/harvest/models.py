@@ -261,7 +261,7 @@ class HarvestFeed(DataFeed):
         counted by reason (`materialize.Refusal`), most first (#724)."""
         from .materialize import refusals
 
-        return refusals(self, self.collection) if self.materializes else []
+        return refusals(self, self.collection)
 
     @property
     def allowed_asset_hosts(self) -> set[str]:

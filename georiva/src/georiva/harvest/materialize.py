@@ -48,12 +48,15 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import BooleanField, Case, Count, F, IntegerField, Q, Value, When
+from django.db.models.expressions import RawSQL
 from django.db.models.fields.json import KeyTextTransform, KeyTransform
+from django.db.models.functions import Cast
 
 from georiva.core.storage.asset_location import remote_q
 
 from .asset_hosts import AssetHostAllowlist
+from .extra_fields import rewritten
 from .upstream import UpstreamUnreachable
 
 logger = logging.getLogger(__name__)
@@ -92,9 +95,12 @@ MATERIALIZE_SCAN = 2000
 REFUSED_MARK = "materialize_refused"
 
 #: Where a Remote asset whose host was refused for where it resolved keeps,
-#: in `extra_fields`, why and how many times in a row: it is sent again all
-#: the same, each claim twice as long as the last (#724).
+#: in `extra_fields`, the href it was judged at, why, and how many times in a
+#: row: it is sent again all the same, each claim twice as long as the last (#724).
 UNRESOLVED_MARK = "materialize_unresolved"
+
+#: A row holds at most one of the two: the latest verdict on it.
+_MARKS = (REFUSED_MARK, UNRESOLVED_MARK)
 
 #: Where a Materialized asset keeps, in `extra_fields`, what the Upstream said
 #: of the file it was copied from: its href, checksum, nodata and `updated`.
@@ -109,6 +115,7 @@ def claim_period(times_unresolved: int) -> timedelta:
     """How long an asset sent now is not sent again: `MATERIALIZE_CLAIM`,
     doubled for each time in a row its host was refused for where it resolved,
     up to `MATERIALIZE_CLAIM_LONGEST`."""
+    # The doubling is cut short well past the cap: a timedelta overflows long before 2 ** times does.
     return min(MATERIALIZE_CLAIM * 2 ** min(times_unresolved, 16), MATERIALIZE_CLAIM_LONGEST)
 
 
@@ -145,14 +152,12 @@ def enqueue_due(feed, collection) -> int:
     if not feed.materializes:
         return 0
     sent = 0
-    for asset_id, href, extra in due(feed, collection).values_list("pk", "href", "extra_fields")[:MATERIALIZE_SCAN]:
+    # Refused, and nothing it was refused by has changed since: not asked again.
+    unrefused = _verdicts(due(feed, collection), feed).filter(href_refused=False).annotate(times=F("times_unresolved"))
+    for asset_id, times in unrefused.values_list("pk", "times")[:MATERIALIZE_SCAN]:
         if sent >= MATERIALIZE_BATCH:
             break
-        extra = extra or {}
-        if _still_refused(extra.get(REFUSED_MARK), feed, href):
-            # Refused, and nothing it was refused by has changed since.
-            continue
-        if not _try_claim(claim_key(asset_id), claim_period((extra.get(UNRESOLVED_MARK) or {}).get("times", 0))):
+        if not _try_claim(claim_key(asset_id), claim_period(times)):
             continue
         transaction.on_commit(partial(materialize_harvested_asset.delay, asset_id))
         sent += 1
@@ -192,24 +197,17 @@ def materialize(asset_id: int, *, upstream=None, writer=None) -> str:
     refusal = allowlist.href_refusal(asset.href)
     if refusal:
         logger.warning("Harvest %s: asset %s not kept locally — %s", feed.name, asset.pk, refusal)
-        _mark(asset, feed, REFUSED_MARK, {**_refusal_mark(feed, asset.href), "reason": refusal})
+        _mark_refused(asset, feed, refusal)
         return REFUSED
     refusal = allowlist.address_refusal(asset.href)
     if refusal:
         # Where the host resolves now, not what the href is: sent again later.
-        times = ((asset.extra_fields or {}).get(UNRESOLVED_MARK) or {}).get("times", 0) + 1
-        logger.warning(
-            "Harvest %s: asset %s not kept locally — %s (%d time(s) in a row; it is tried again)",
-            feed.name,
-            asset.pk,
-            refusal,
-            times,
-        )
-        _mark(asset, feed, UNRESOLVED_MARK, {"reason": refusal, "times": times})
+        logger.warning("Harvest %s: asset %s not kept locally — %s; it is tried again", feed.name, asset.pk, refusal)
+        _mark_unresolved(asset, feed, refusal)
         return REFUSED
     if UNRESOLVED_MARK in (asset.extra_fields or {}):
         # Its host resolves publicly again: a later refusal starts the count over.
-        _mark(asset, feed, UNRESOLVED_MARK, None)
+        _clear_unresolved(asset, feed)
 
     with tempfile.TemporaryDirectory(prefix="georiva_materialize_", dir=settings.GEORIVA_TEMP_DIR) as folder:
         path = Path(folder) / "asset.tif"
@@ -317,30 +315,74 @@ def _drop_unrecorded(bucket, key: str) -> None:
         logger.warning("Materialization: could not remove the unrecorded object %s", key)
 
 
-def _refusal_mark(feed, href: str) -> dict:
-    """What a refusal of `href` was judged by: the href and the feed's allowlist."""
-    return {"href": href, "hosts": sorted(feed.allowed_asset_hosts), "allow_http": feed.allow_http}
+def _judged_by(feed) -> dict:
+    """The feed's allowlist as a refusal of an href was judged by it: with the
+    href, what `REFUSED_MARK` is asked again only once it has changed."""
+    return {"hosts": sorted(feed.allowed_asset_hosts), "allow_http": feed.allow_http}
 
 
-def _still_refused(mark: dict | None, feed, href: str) -> bool:
-    """Whether a refusal `mark` was judged by `href` and the feed's allowlist as it is now."""
-    judged_by = _refusal_mark(feed, href)
-    return bool(mark) and all(mark.get(key) == value for key, value in judged_by.items())
+def _verdicts(rows, feed):
+    """`rows`, each with the verdicts on it that still hold, as aliases:
+    `href_refused` — its href was refused, and neither the href nor the feed's
+    allowlist has changed since; `times_unresolved` — how many times in a row
+    its host was refused for where it resolved, at the href it has now, or 0."""
+    refused = KeyTransform(REFUSED_MARK, "extra_fields")
+    unresolved = KeyTransform(UNRESOLVED_MARK, "extra_fields")
+    still_judged_by = {f"extra_fields__{REFUSED_MARK}__{key}": value for key, value in _judged_by(feed).items()}
+    return rows.alias(
+        refused_href=KeyTextTransform("href", refused),
+        unresolved_href=KeyTextTransform("href", unresolved),
+    ).alias(
+        href_refused=Case(
+            When(Q(refused_href=F("href"), **still_judged_by), then=Value(True)),
+            default=Value(False),
+            output_field=BooleanField(),
+        ),
+        times_unresolved=Case(
+            When(unresolved_href=F("href"), then=Cast(KeyTextTransform("times", unresolved), IntegerField())),
+            default=Value(0),
+            output_field=IntegerField(),
+        ),
+    )
 
 
-def _mark(asset, feed, key: str, verdict: dict | None) -> None:
-    """Note on the row the latest verdict on it — a refusal of its href
-    (`REFUSED_MARK`) or of where its host resolves (`UNRESOLVED_MARK`) — the
-    other kind dropped; `None` drops this kind. Only while it is the row that
-    was judged: still the feed's, still Remote, and at the same href. Not a
-    save: nothing a reader sees changed."""
+def _mark_refused(asset, feed, reason: str) -> None:
+    """Note on the row that its href was refused, so it is not sent again for
+    nothing, with what it was judged by and why."""
+    verdict = {"href": asset.href, **_judged_by(feed), "reason": reason}
+    _rewrite_marks(asset, feed, rewritten(drop=_MARKS, put={REFUSED_MARK: verdict}))
+
+
+def _mark_unresolved(asset, feed, reason: str) -> None:
+    """Note on the row that its host was refused for where it resolved, why,
+    and how many times in a row at this href. The count is the database's, read
+    at the write: two refusals at once both count."""
+    _rewrite_marks(
+        asset,
+        feed,
+        RawSQL(
+            "(extra_fields - %s::text[]) || jsonb_build_object(%s::text, jsonb_build_object("
+            "'href', href, 'reason', %s::text, 'times', 1 + CASE WHEN extra_fields -> %s::text ->> 'href' = href "
+            "THEN COALESCE((extra_fields -> %s::text ->> 'times')::int, 0) ELSE 0 END))",
+            (list(_MARKS), UNRESOLVED_MARK, reason, UNRESOLVED_MARK, UNRESOLVED_MARK),
+        ),
+    )
+
+
+def _clear_unresolved(asset, feed) -> None:
+    """Forget that the row's host was refused for where it resolved."""
+    _rewrite_marks(asset, feed, rewritten(drop=(UNRESOLVED_MARK,)))
+
+
+def _rewrite_marks(asset, feed, extra_fields) -> None:
+    """Write `extra_fields`, an expression over the row's own, only while it is
+    the row that was judged: still the feed's, still Remote, and at the same
+    href. Not a save: nothing a reader sees changed."""
     from georiva.core.models import Asset
 
-    marks = (REFUSED_MARK, UNRESOLVED_MARK)
-    extra = {name: value for name, value in (asset.extra_fields or {}).items() if name not in marks}
-    if verdict is not None:
-        extra[key] = verdict
-    Asset.objects.filter(remote_q(), pk=asset.pk, harvested_by_id=feed.pk, href=asset.href).update(extra_fields=extra)
+    Asset.objects.filter(remote_q(), pk=asset.pk, harvested_by_id=feed.pk, href=asset.href).update(
+        extra_fields=extra_fields
+    )
 
 
 @dataclass(frozen=True)
@@ -356,26 +398,18 @@ class Refusal:
 
 def refusals(feed, collection) -> list[Refusal]:
     """What in `feed`'s materialization window the allowlist refused, by
-    reason, most first. An href refused by an allowlist that has changed since
-    is not counted: it is sent again."""
+    reason, most first. A refusal of an href, or by an allowlist, that has
+    changed since is not counted: it is sent again."""
     if not feed.materializes or collection is None:
         return []
-    marked = due(feed, collection).order_by()
-    refused = KeyTransform(REFUSED_MARK, "extra_fields")
+    judged = _verdicts(due(feed, collection).order_by(), feed)
     by_href = (
-        marked.annotate(judged_href=KeyTextTransform("href", refused))
-        .filter(
-            judged_href=F("href"),
-            **{
-                f"extra_fields__{REFUSED_MARK}__hosts": sorted(feed.allowed_asset_hosts),
-                f"extra_fields__{REFUSED_MARK}__allow_http": feed.allow_http,
-            },
-        )
-        .values(why=KeyTextTransform("reason", refused))
+        judged.filter(href_refused=True)
+        .values(why=KeyTextTransform("reason", KeyTransform(REFUSED_MARK, "extra_fields")))
         .annotate(count=Count("pk"))
     )
     by_address = (
-        marked.filter(extra_fields__has_key=UNRESOLVED_MARK)
+        judged.filter(times_unresolved__gt=0)
         .values(why=KeyTextTransform("reason", KeyTransform(UNRESOLVED_MARK, "extra_fields")))
         .annotate(count=Count("pk"))
     )

@@ -561,12 +561,14 @@ class _Jurisdiction:
 
     def resync(self, mine: _Mine, asset, item: UpstreamItem) -> int:
         """Rewrite one asset from what the Upstream now says of it. Returns how
-        many rows that rewrote: 1, or 0 when it left the Jurisdiction meanwhile."""
-        return (
-            self._rows()
-            .filter(pk=mine.pk)
-            .update(**_lifted(asset, item, kept=mine.extra_fields), modified=timezone.now())
-        )
+        many rows that rewrote: 1, or 0 when it left the Jurisdiction meanwhile.
+        Of `extra_fields` only the keys a harvest owns are rewritten: what another
+        hand put there since `mine` was read stays."""
+        from .extra_fields import rewritten
+
+        lifted = _lifted(asset, item)
+        lifted["extra_fields"] = rewritten(drop=_LIFTED_EXTRA, put=lifted["extra_fields"])
+        return self._rows().filter(pk=mine.pk).update(**lifted, modified=timezone.now())
 
     def remove_gone(self, upstream_times: set, upstream_places: set, mapped: set, settled: set = frozenset()) -> int:
         """Remove the assets that are gone upstream, and then every item of this
@@ -642,12 +644,16 @@ def _updated_stamp(item: UpstreamItem) -> str | None:
     return item.updated.astimezone(UTC).isoformat() if item.updated else None
 
 
-def _lifted(asset, item: UpstreamItem, *, kept: dict | None = None) -> dict:
+#: The keys of `extra_fields` a harvest owns: on a re-sync, only these are rewritten.
+_LIFTED_EXTRA = ("nodata", UPSTREAM_UPDATED)
+
+
+def _lifted(asset, item: UpstreamItem) -> dict:
     """The fields of an `Asset` a harvest takes from the Upstream: written at
-    creation, and written again whole on a re-sync. `kept` is the `extra_fields`
-    the row already has; what the harvest did not put there stays."""
+    creation, and written again on a re-sync — of `extra_fields`, only the keys
+    in `_LIFTED_EXTRA`."""
     stats = asset.statistics
-    extra = {key: value for key, value in (kept or {}).items() if key not in ("nodata", UPSTREAM_UPDATED)}
+    extra = {}
     if asset.nodata is not None:
         extra["nodata"] = asset.nodata
     if item.updated is not None:

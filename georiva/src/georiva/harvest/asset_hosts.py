@@ -146,6 +146,12 @@ class PinnedBuckets:
         return f"https://{host}/{quote(key, safe='/=')}"
 
 
+def _host(parts) -> str:
+    """The host a split href names, as the allowlist knows it and as its
+    verdicts on where a host resolves are kept: lower case, no trailing dot."""
+    return (parts.hostname or "").lower().rstrip(".")
+
+
 class AssetHostAllowlist:
     """Says whether one feed may store an asset href, and if not, why."""
 
@@ -177,7 +183,7 @@ class AssetHostAllowlist:
             return "href is not a URL"
         try:
             parts = urlsplit(href)
-            host = (parts.hostname or "").lower().rstrip(".")
+            host = _host(parts)
             # Read now, so a port out of range is refused here and not by whatever opens the href.
             parts.port  # noqa: B018
         except ValueError:
@@ -196,7 +202,7 @@ class AssetHostAllowlist:
         """Why the host of `href`, an href with no `href_refusal`, may not be
         reached now: it resolves to a private address, or not at all. A verdict
         about the DNS of the moment, which may answer otherwise later (#724)."""
-        return self._address_refusal((urlsplit(href).hostname or "").lower().rstrip("."))
+        return self._address_refusal(_host(urlsplit(href)))
 
     def addresses(self, href: str) -> list[str] | None:
         """The addresses `href` may be reached at — exactly those its host was
@@ -208,8 +214,7 @@ class AssetHostAllowlist:
         (#723)."""
         if self.refusal(href) is not None:
             return None
-        host = (urlsplit(href).hostname or "").lower().rstrip(".")
-        return list(self._judged[host][1])
+        return list(self._judged[_host(urlsplit(href))][1])
 
     def _address_refusal(self, host: str) -> str | None:
         """A host is asked about once per harvest, however many assets it serves."""
