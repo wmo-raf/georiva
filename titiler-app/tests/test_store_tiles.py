@@ -1314,12 +1314,25 @@ def worker(django_configs, rendering, quick):
 
 
 @pytest.fixture
-def readings(monkeypatch):
-    """How many times the published stores were read."""
-    read = []
+def held_readings(monkeypatch, rendering):
+    """Each reading of the published stores, as how many announcements were
+    still waiting to be heard when it began. The first reading, as the worker
+    begins listening, is held until ``release`` is set."""
+    waiting: list[int] = []
+    release = threading.Event()
     real = warm.published_stores
-    monkeypatch.setattr(warm, "published_stores", lambda: read.append(1) or real())
-    return read
+
+    def reading():
+        waiting.append(sum(subscriber._inbox.qsize() for subscriber in rendering.subscribers))
+        if len(waiting) == 1:
+            release.wait(timeout=10)
+        return real()
+
+    monkeypatch.setattr(warm, "published_stores", reading)
+    try:
+        yield waiting, release
+    finally:
+        release.set()
 
 
 class TestARunningWorkerFollowsWhatIsPublished:
@@ -1378,18 +1391,19 @@ class TestARunningWorkerFollowsWhatIsPublished:
         assert len(opens) == 1
 
     def test_a_burst_of_announcements_reads_the_published_stores_once(
-        self, rendering, upstream_store, readings, worker, monkeypatch
+        self, rendering, upstream_store, held_readings, worker
     ):
-        eventually(lambda: readings)  # the reading as it began listening
-        monkeypatch.setattr(warm, "SETTLE_SECONDS", 0.3)
+        waiting, release = held_readings
+        eventually(lambda: waiting)  # held in the reading as it began listening
         publish(rendering, {FIELD: published(upstream_store.href)})
-
         for _ in range(5):
-            announce(rendering)
+            announce(rendering)  # all queued before the listener hears the first
 
-        eventually(lambda: len(readings) == 2)
-        clock.sleep(0.5)
-        assert len(readings) == 2
+        release.set()
+
+        eventually(lambda: len(waiting) >= 2)
+        # The one reading after the burst began with all of it heard, so nothing is left to read for.
+        assert waiting[1] == 0
 
     def test_it_stops_listening_when_the_app_stops(self, django_configs, rendering, quick):
         with TestClient(app):
