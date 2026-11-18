@@ -789,6 +789,26 @@ class TestAStepStillMissingIsRemembered:
         assert response.status_code == 200, response.text
         assert len(opens) == 3
 
+    def test_a_miss_found_after_its_store_was_let_go_is_not_remembered(
+        self, client, rendering, upstream_store, monkeypatch
+    ):
+        publish(rendering, {LATE: published(upstream_store.href)})
+        key = (upstream_store.href, ((ECMWF, ""),))
+        real = store_reader.open_repository
+        calls = []
+
+        def let_go_while_reopening(*args):
+            calls.append(1)
+            if len(calls) == 2:  # the reopen the miss asks for
+                store_reader.forget(*key)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", let_go_while_reopening)
+
+        assert tile(client, time=LATE_TIME).status_code == 404
+        assert len(calls) == 2
+        assert store_reader._opened.misses == {}
+
     def test_remembering_one_step_does_not_stop_another_from_reopening(
         self, client, rendering, upstream_store, opens, fake_monotonic
     ):

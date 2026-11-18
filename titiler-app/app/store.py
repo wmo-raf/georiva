@@ -591,7 +591,8 @@ def forget(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> None:
     opens it again.
 
     An open or reopen under way finishes for the request that began it, and is
-    not kept; nor is a field still being read from it. The store's lock is
+    not kept; nor is a field still being read from it, nor a step such a read
+    finds missing. The store's lock is
     kept, so a request that opens it again waits on one still opening.
     """
     key = (href, chunk_locations)
@@ -629,6 +630,8 @@ def _decode(target: StoreSlice) -> Field:
     field, all within one ``STORE_READ_TIMEOUT``."""
 
     def read() -> Field:
+        with _opened.lock:
+            forgets = _opened.forgets.get(_store_key(target), 0)
         opened = opened_store(target.store, target.chunk_locations)
         try:
             return opened.field(target.array, target.time, target.reftime)
@@ -639,7 +642,7 @@ def _decode(target: StoreSlice) -> Field:
         try:
             return fresher.field(target.array, target.time, target.reftime)
         except StoreStepNotHeld:
-            _remember_missing(target)
+            _remember_missing(target, forgets)
             raise
 
     return _bounded(read)
@@ -754,10 +757,16 @@ def _remembered_missing(target: StoreSlice) -> bool:
         return target in _opened.misses
 
 
-def _remember_missing(target: StoreSlice) -> None:
-    """Remember that a reopened store does not hold this step, warning once per window."""
+def _remember_missing(target: StoreSlice, forgets: int) -> None:
+    """Remember that a reopened store does not hold this step, warning once per window.
+
+    Not if the store was let go since ``forgets`` was counted, as the read began
+    (#706): a miss is the store's, and goes with it.
+    """
     now = monotonic()
     with _opened.lock:
+        if _opened.forgets.get(_store_key(target), 0) != forgets:
+            return
         _forget_expired_misses(now)
         if target in _opened.misses:  # a request that shared this reopen remembered it already
             return
