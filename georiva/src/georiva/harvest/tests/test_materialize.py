@@ -19,6 +19,7 @@ from django.core.cache import cache
 from django.db import connection
 from django.test import TestCase
 from django.urls import reverse
+from django_redis import get_redis_connection
 from wagtail import hooks
 
 from georiva.core.models import Asset, Item
@@ -28,6 +29,7 @@ from georiva.harvest.materialize import (
     LEFT,
     MATERIALIZE_CLAIM,
     MATERIALIZE_CLAIM_LONGEST,
+    MATERIALIZE_LANE_LEASE,
     MATERIALIZED,
     NOT_DUE,
     REFUSED,
@@ -106,7 +108,16 @@ class MaterializeMixin(HarvestFeedMixin):
     def forget_claims(self):
         """As if every claim period, and every lane's lease, had passed."""
         cache.delete_pattern(claim_key("*"))
-        cache.delete_pattern(lane_key("*"))
+        self.forget_lanes()
+
+    def forget_lanes(self):
+        """As if every lane's lease had passed."""
+        redis = get_redis_connection("default")
+        for key in redis.scan_iter(lane_key("*")):
+            redis.delete(key)
+
+    def lane_ttl(self):
+        return get_redis_connection("default").ttl(lane_key(self.feed.pk))
 
     def harvest(self, **kwargs):
         # What a harvest sends, it sends as its writes commit.
@@ -246,17 +257,68 @@ class AFeedMaterializesOneAssetAtATimeTests(MaterializeMixin, TestCase):
     def test_a_lane_whose_lease_lapsed_is_taken_again_and_the_old_one_stands_down(self):
         self.harvest()
         stale = self.sent
-        cache.delete_pattern(lane_key("*"))
+        self.forget_lanes()
         self.sent = []
         self.harvest()
         # Day 4 is still claimed by the lost task: day 3 is next.
         self.assertEqual(self.sent, [self.asset_on(3).pk])
         self.sent = []
 
-        # The lost task turns up after all: it does its work, and sends nothing on.
-        self.run_in_lane(stale[0], self.lanes[stale[0]])
+        # The lost task turns up after all: it does its work, and sends nothing on —
+        self.assertEqual(self.run_in_lane(stale[0], self.lanes[stale[0]]), MATERIALIZED)
+        self.assertEqual(self.sent, [])
+        # — nor closes the lane opened since, nor takes it over.
+        self.harvest()
+        self.assertEqual(self.sent, [])
+        self.run_in_lane(self.asset_on(3).pk, self.lanes[self.asset_on(3).pk])
+        self.assertEqual(self.sent, [self.asset_on(2).pk])
+
+    def test_a_lane_stays_open_while_its_task_waits_behind_a_deep_queue(self):
+        """Its asset's claim lapses long before its lease does: a harvest in the
+        meantime does not open a second lane, which would be one per harvest."""
+        self.harvest()
+        cache.delete_pattern(claim_key("*"))
+        self.sent = []
+
+        self.harvest()
 
         self.assertEqual(self.sent, [])
+        self.assertGreater(self.lane_ttl(), 12 * 3600)
+
+    def test_a_task_renews_its_lane_as_it_starts(self):
+        self.harvest()
+        get_redis_connection("default").expire(lane_key(self.feed.pk), 60)
+        self.upstream.unfetchable[rain_href(4)] = "upstream answered 503"
+        self.upstream.unfetchable[rain_href(3)] = "upstream answered 503"
+        seen = []
+        real = materialize
+
+        def materializing(*args, **kwargs):
+            seen.append(self.lane_ttl())
+            return real(*args, **kwargs)
+
+        with mock.patch("georiva.harvest.materialize.materialize", side_effect=materializing):
+            self.materialize_sent()
+
+        self.assertGreater(seen[0], MATERIALIZE_LANE_LEASE.total_seconds() - 60)
+
+    def test_a_task_that_raises_still_passes_the_lane_on(self):
+        self.harvest()
+
+        with mock.patch("georiva.harvest.materialize.materialize", side_effect=RuntimeError("worker fell over")):
+            with self.assertRaises(RuntimeError):
+                self.materialize_sent()
+
+        self.assertEqual(self.sent, [self.asset_on(3).pk])
+
+    def test_a_harvest_that_could_not_send_closes_the_lane_it_opened(self):
+        with mock.patch("georiva.harvest.materialize._send_next", side_effect=RuntimeError("database went away")):
+            self.harvest()
+        self.assertEqual(self.sent, [])
+
+        self.harvest()
+
+        self.assertEqual(self.sent, [self.asset_on(4).pk])
 
     def test_a_task_sent_without_a_lane_sends_nothing_on(self):
         """One sent before lanes existed, still on the queue as they are deployed."""
