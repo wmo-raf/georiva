@@ -256,6 +256,14 @@ class HarvestFeed(DataFeed):
         return self.materializes and when is not None and in_window(when, self.materialization_window)
 
     @property
+    def materialization_refusals(self):
+        """What in the materialization window the allowlist refused to fetch,
+        counted by reason (`materialize.Refusal`), most first (#724)."""
+        from .materialize import refusals
+
+        return refusals(self, self.collection) if self.materializes else []
+
+    @property
     def allowed_asset_hosts(self) -> set[str]:
         """The Asset host allowlist: the upstream catalog's own host, those the
         operator added, and those its pinned buckets are read at."""

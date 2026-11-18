@@ -60,6 +60,19 @@
                         {% if feed.materialize_end %}{{ feed.materialize_end }}{% else %}{% trans "open" %}{% endif %}
                     </td>
                 </tr>
+                {% with refusals=feed.materialization_refusals %}
+                    {% if refusals %}
+                        <tr>
+                            <th scope="row">{% trans "Not kept locally" %}</th>
+                            <td>
+                                {% for refusal in refusals %}
+                                    {% blocktrans count count=refusal.count with reason=refusal.reason %}{{ count }} asset: {{ reason }}{% plural %}{{ count }} assets: {{ reason }}{% endblocktrans %}
+                                    — {% if refusal.retried %}{% trans "tried again by later harvests" %}{% else %}{% trans "not tried again until the href or the allowlist changes" %}{% endif %}{% if not forloop.last %}<br>{% endif %}
+                                {% endfor %}
+                            </td>
+                        </tr>
+                    {% endif %}
+                {% endwith %}
             {% endif %}
             <tr>
                 <th scope="row">{% trans "Asset host allowlist" %}</th>

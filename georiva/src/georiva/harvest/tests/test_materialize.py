@@ -26,12 +26,15 @@ from georiva.core.storage.asset_location import AssetLocation
 from georiva.harvest import tasks
 from georiva.harvest.materialize import (
     LEFT,
+    MATERIALIZE_CLAIM,
+    MATERIALIZE_CLAIM_LONGEST,
     MATERIALIZED,
     NOT_DUE,
     REFUSED,
     UNREACHABLE,
     claim_key,
     materialize,
+    refusals,
 )
 from georiva.harvest.upstream import UpstreamAsset
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
@@ -343,6 +346,122 @@ class MaterializedBytesPassTheAllowlistTests(MaterializeMixin, TestCase):
         self.upstream.garbage.add(rain_href(3))
 
         self.assert_left_remote(self.materialize(self.asset.pk), UNREACHABLE)
+
+
+class ARefusalForWhereAHostResolvesNowIsTriedAgainTests(MaterializeMixin, TestCase):
+    """A host resolving privately, or not at all, says nothing of the href: the
+    asset is tried again on the claim period, never marked for good (#724)."""
+
+    HOST = "stac.upstream.example"
+
+    def setUp(self):
+        super().setUp()
+        self.harvest()
+        self.asset = self.asset_on(3)
+        self.sent = []
+
+    def refused_for_where_it_resolves(self, addresses):
+        self.upstream.addresses[self.HOST] = addresses
+        self.assertEqual(self.materialize(self.asset.pk), REFUSED)
+        self.forget_claims()
+
+    def test_a_host_that_resolved_privately_is_materialized_once_it_resolves_publicly(self):
+        self.refused_for_where_it_resolves(["10.0.0.7"])
+        del self.upstream.addresses[self.HOST]
+
+        self.harvest()
+        self.assertIn(self.asset.pk, self.sent)
+        self.materialize_sent()
+
+        self.asset.refresh_from_db()
+        self.assertFalse(self.asset.location.is_remote)
+
+    def test_a_host_that_did_not_resolve_is_sent_again(self):
+        self.refused_for_where_it_resolves([])
+
+        self.harvest()
+
+        self.assertIn(self.asset.pk, self.sent)
+
+    def test_each_refusal_in_a_row_doubles_the_claim_period(self):
+        self.refused_for_where_it_resolves(["10.0.0.7"])
+        self.refused_for_where_it_resolves(["10.0.0.7"])
+
+        self.harvest()
+
+        self.assertIn(self.asset.pk, self.sent)
+        self.assertGreater(cache.ttl(claim_key(self.asset.pk)), 3 * MATERIALIZE_CLAIM.total_seconds())
+
+    def test_the_claim_period_stops_growing(self):
+        for _ in range(12):
+            self.refused_for_where_it_resolves(["10.0.0.7"])
+
+        self.harvest()
+
+        self.assertLessEqual(cache.ttl(claim_key(self.asset.pk)), MATERIALIZE_CLAIM_LONGEST.total_seconds())
+
+    def test_a_host_that_resolves_publicly_again_starts_the_count_over(self):
+        self.refused_for_where_it_resolves(["10.0.0.7"])
+        del self.upstream.addresses[self.HOST]
+        self.upstream.unfetchable[rain_href(3)] = "upstream answered 503"
+        self.assertEqual(self.materialize(self.asset.pk), UNREACHABLE)
+        self.forget_claims()
+
+        self.harvest()
+
+        self.assertLessEqual(cache.ttl(claim_key(self.asset.pk)), MATERIALIZE_CLAIM.total_seconds())
+        self.assertEqual(refusals(self.feed, self.feed.collection), [])
+
+
+class AnOperatorSeesWhatWasRefusedTests(MaterializeMixin, TestCase):
+    """What in the window was refused, and why, counted by reason (#724)."""
+
+    def setUp(self):
+        super().setUp()
+        self.harvest()
+
+    def test_nothing_refused_says_nothing(self):
+        self.materialize_sent()
+
+        self.assertEqual(refusals(self.feed, self.feed.collection), [])
+
+    def test_refusals_are_counted_by_reason_and_kind(self):
+        Asset.objects.filter(pk=self.asset_on(3).pk).update(href="https://elsewhere.example/3.tif")
+        self.materialize(self.asset_on(3).pk)
+        self.upstream.addresses["stac.upstream.example"] = ["10.0.0.7"]
+        self.materialize(self.asset_on(4).pk)
+
+        self.assertCountEqual(
+            [(r.reason, r.count, r.retried) for r in refusals(self.feed, self.feed.collection)],
+            [
+                ("host elsewhere.example is not in the asset host allowlist", 1, False),
+                ("host stac.upstream.example resolves to a private, loopback or link-local address", 1, True),
+            ],
+        )
+
+    def test_a_refusal_the_allowlist_has_since_lifted_is_not_counted(self):
+        Asset.objects.filter(pk=self.asset_on(3).pk).update(href="https://elsewhere.example/3.tif")
+        self.materialize(self.asset_on(3).pk)
+
+        self.feed.asset_hosts = ["stac.upstream.example", "elsewhere.example"]
+        self.feed.save()
+
+        self.assertEqual(refusals(self.feed, self.feed.collection), [])
+
+    def test_the_feed_dashboard_says_what_was_refused_and_why(self):
+        from django.contrib.auth import get_user_model
+
+        from georiva.organisations.testing import dial_org
+
+        Asset.objects.filter(pk=self.asset_on(3).pk).update(href="https://elsewhere.example/3.tif")
+        self.materialize(self.asset_on(3).pk)
+        self.client.force_login(get_user_model().objects.create_superuser("op", "op@test.com", "pw"))
+        dial_org(self.client)
+
+        response = self.client.get(reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
+
+        self.assertContains(response, "Not kept locally")
+        self.assertContains(response, "host elsewhere.example is not in the asset host allowlist")
 
 
 class OnlyWhatIsStillDueIsMaterializedTests(MaterializeMixin, TestCase):

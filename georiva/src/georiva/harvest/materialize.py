@@ -31,20 +31,25 @@ ours: the row keeps them under `upstream` in `extra_fields`, as history.
 Nothing here is retried by Celery. What fails stays Remote and stays due: a
 later run of the feed sends it again once its claim has lapsed. An asset whose
 href the allowlist refused is marked so, and not sent again until its href or
-the feed's allowlist changes.
+the feed's allowlist changes. A refusal of where its host resolves now —
+privately, or not at all — says nothing of the href: that asset is sent again,
+its claim doubling with each such refusal in a row, up to a day (#724). The
+feed's page counts both kinds in its window, by reason (`refusals`).
 """
 
 from __future__ import annotations
 
 import logging
 import tempfile
+from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, F, Q
+from django.db.models.fields.json import KeyTextTransform, KeyTransform
 
 from georiva.core.storage.asset_location import remote_q
 
@@ -69,6 +74,10 @@ UNREACHABLE = "unreachable"
 #: not be had is tried again the same day.
 MATERIALIZE_CLAIM = timedelta(hours=2)
 
+#: The longest an asset is claimed after its host was refused for where it
+#: resolved, time after time: it is still tried once a day.
+MATERIALIZE_CLAIM_LONGEST = timedelta(days=1)
+
 #: How many assets one harvest sends at most, newest first. A deep window
 #: drains over several runs rather than flooding the ingestion queue at once.
 MATERIALIZE_BATCH = 200
@@ -79,8 +88,13 @@ MATERIALIZE_SCAN = 2000
 
 #: Where a Remote asset whose href its feed's allowlist refused keeps that
 #: verdict, in `extra_fields`: with the href and the allowlist it was judged
-#: by, so it is asked again only once either has changed.
+#: by, so it is asked again only once either has changed, and why.
 REFUSED_MARK = "materialize_refused"
+
+#: Where a Remote asset whose host was refused for where it resolved keeps,
+#: in `extra_fields`, why and how many times in a row: it is sent again all
+#: the same, each claim twice as long as the last (#724).
+UNRESOLVED_MARK = "materialize_unresolved"
 
 #: Where a Materialized asset keeps, in `extra_fields`, what the Upstream said
 #: of the file it was copied from: its href, checksum, nodata and `updated`.
@@ -89,6 +103,13 @@ UPSTREAM_HISTORY = "upstream"
 
 def claim_key(asset_id: int) -> str:
     return f"harvest-materialize-claim:{asset_id}"
+
+
+def claim_period(times_unresolved: int) -> timedelta:
+    """How long an asset sent now is not sent again: `MATERIALIZE_CLAIM`,
+    doubled for each time in a row its host was refused for where it resolved,
+    up to `MATERIALIZE_CLAIM_LONGEST`."""
+    return min(MATERIALIZE_CLAIM * 2 ** min(times_unresolved, 16), MATERIALIZE_CLAIM_LONGEST)
 
 
 def due(feed, collection):
@@ -116,8 +137,9 @@ def due(feed, collection):
 def enqueue_due(feed, collection) -> int:
     """Send the assets `feed` should make local to the ingestion queue, each
         as the caller's writes commit, and say how many were sent. One sent within
-        `MATERIALIZE_CLAIM` is not sent again, nor more than `MATERIALIZE_BATCH`, nor
-    one its feed's allowlist refused, until its href or the allowlist changes."""
+        `MATERIALIZE_CLAIM` is not sent again — longer, after its host was refused
+    for where it resolved — nor more than `MATERIALIZE_BATCH`, nor one its
+    feed's allowlist refused, until its href or the allowlist changes."""
     from .tasks import materialize_harvested_asset
 
     if not feed.materializes:
@@ -126,10 +148,11 @@ def enqueue_due(feed, collection) -> int:
     for asset_id, href, extra in due(feed, collection).values_list("pk", "href", "extra_fields")[:MATERIALIZE_SCAN]:
         if sent >= MATERIALIZE_BATCH:
             break
-        if (extra or {}).get(REFUSED_MARK) == _refusal_mark(feed, href):
+        extra = extra or {}
+        if _still_refused(extra.get(REFUSED_MARK), feed, href):
             # Refused, and nothing it was refused by has changed since.
             continue
-        if not _try_claim(claim_key(asset_id)):
+        if not _try_claim(claim_key(asset_id), claim_period((extra.get(UNRESOLVED_MARK) or {}).get("times", 0))):
             continue
         transaction.on_commit(partial(materialize_harvested_asset.delay, asset_id))
         sent += 1
@@ -166,11 +189,27 @@ def materialize(asset_id: int, *, upstream=None, writer=None) -> str:
 
     upstream = upstream or feed.upstream_client()
     allowlist = AssetHostAllowlist(feed.allowed_asset_hosts, allow_http=feed.allow_http, resolve=upstream.resolve_host)
-    refusal = allowlist.refusal(asset.href)
+    refusal = allowlist.href_refusal(asset.href)
     if refusal:
         logger.warning("Harvest %s: asset %s not kept locally — %s", feed.name, asset.pk, refusal)
-        _mark_refused(asset, feed)
+        _mark(asset, feed, REFUSED_MARK, {**_refusal_mark(feed, asset.href), "reason": refusal})
         return REFUSED
+    refusal = allowlist.address_refusal(asset.href)
+    if refusal:
+        # Where the host resolves now, not what the href is: sent again later.
+        times = ((asset.extra_fields or {}).get(UNRESOLVED_MARK) or {}).get("times", 0) + 1
+        logger.warning(
+            "Harvest %s: asset %s not kept locally — %s (%d time(s) in a row; it is tried again)",
+            feed.name,
+            asset.pk,
+            refusal,
+            times,
+        )
+        _mark(asset, feed, UNRESOLVED_MARK, {"reason": refusal, "times": times})
+        return REFUSED
+    if UNRESOLVED_MARK in (asset.extra_fields or {}):
+        # Its host resolves publicly again: a later refusal starts the count over.
+        _mark(asset, feed, UNRESOLVED_MARK, None)
 
     with tempfile.TemporaryDirectory(prefix="georiva_materialize_", dir=settings.GEORIVA_TEMP_DIR) as folder:
         path = Path(folder) / "asset.tif"
@@ -283,23 +322,78 @@ def _refusal_mark(feed, href: str) -> dict:
     return {"href": href, "hosts": sorted(feed.allowed_asset_hosts), "allow_http": feed.allow_http}
 
 
-def _mark_refused(asset, feed) -> None:
-    """Note on the row that its href was refused, so it is not sent again for
-    nothing. Only while it is the row that was judged: still the feed's, still
-    Remote, and at the same href. Not a save: nothing a reader sees changed."""
+def _still_refused(mark: dict | None, feed, href: str) -> bool:
+    """Whether a refusal `mark` was judged by `href` and the feed's allowlist as it is now."""
+    judged_by = _refusal_mark(feed, href)
+    return bool(mark) and all(mark.get(key) == value for key, value in judged_by.items())
+
+
+def _mark(asset, feed, key: str, verdict: dict | None) -> None:
+    """Note on the row the latest verdict on it — a refusal of its href
+    (`REFUSED_MARK`) or of where its host resolves (`UNRESOLVED_MARK`) — the
+    other kind dropped; `None` drops this kind. Only while it is the row that
+    was judged: still the feed's, still Remote, and at the same href. Not a
+    save: nothing a reader sees changed."""
     from georiva.core.models import Asset
 
-    Asset.objects.filter(remote_q(), pk=asset.pk, harvested_by_id=feed.pk, href=asset.href).update(
-        extra_fields={**(asset.extra_fields or {}), REFUSED_MARK: _refusal_mark(feed, asset.href)}
+    marks = (REFUSED_MARK, UNRESOLVED_MARK)
+    extra = {name: value for name, value in (asset.extra_fields or {}).items() if name not in marks}
+    if verdict is not None:
+        extra[key] = verdict
+    Asset.objects.filter(remote_q(), pk=asset.pk, harvested_by_id=feed.pk, href=asset.href).update(extra_fields=extra)
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """How many assets of a feed's materialization window are not kept locally
+    for one reason; `retried` when it is where their host resolves, which a
+    later harvest asks again."""
+
+    reason: str
+    count: int
+    retried: bool
+
+
+def refusals(feed, collection) -> list[Refusal]:
+    """What in `feed`'s materialization window the allowlist refused, by
+    reason, most first. An href refused by an allowlist that has changed since
+    is not counted: it is sent again."""
+    if not feed.materializes or collection is None:
+        return []
+    marked = due(feed, collection).order_by()
+    refused = KeyTransform(REFUSED_MARK, "extra_fields")
+    by_href = (
+        marked.annotate(judged_href=KeyTextTransform("href", refused))
+        .filter(
+            judged_href=F("href"),
+            **{
+                f"extra_fields__{REFUSED_MARK}__hosts": sorted(feed.allowed_asset_hosts),
+                f"extra_fields__{REFUSED_MARK}__allow_http": feed.allow_http,
+            },
+        )
+        .values(why=KeyTextTransform("reason", refused))
+        .annotate(count=Count("pk"))
     )
+    by_address = (
+        marked.filter(extra_fields__has_key=UNRESOLVED_MARK)
+        .values(why=KeyTextTransform("reason", KeyTransform(UNRESOLVED_MARK, "extra_fields")))
+        .annotate(count=Count("pk"))
+    )
+    found = [
+        # A mark made before refusals kept their reason says only that it was refused.
+        Refusal(row["why"] or "refused by the asset host allowlist", row["count"], retried=False)
+        for row in by_href
+    ] + [Refusal(row["why"], row["count"], retried=True) for row in by_address]
+    return sorted(found, key=lambda refusal: (-refusal.count, refusal.reason))
 
 
-def _try_claim(key: str) -> bool:
-    """Claim `key` unless it is claimed already. A cache outage fails open: a
-    second materialization of one asset finds it local and fetches nothing."""
+def _try_claim(key: str, period: timedelta = MATERIALIZE_CLAIM) -> bool:
+    """Claim `key` for `period` unless it is claimed already. A cache outage
+    fails open: a second materialization of one asset finds it local and
+    fetches nothing."""
     from django.core.cache import cache
 
     try:
-        return cache.add(key, 1, timeout=int(MATERIALIZE_CLAIM.total_seconds()))
+        return cache.add(key, 1, timeout=int(period.total_seconds()))
     except Exception:
         return True

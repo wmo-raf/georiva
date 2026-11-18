@@ -158,6 +158,12 @@ class AssetHostAllowlist:
 
     def refusal(self, href: str) -> str | None:
         """Why `href` may not be stored, or `None` if it may."""
+        return self.href_refusal(href) or self.address_refusal(href)
+
+    def href_refusal(self, href: str) -> str | None:
+        """Why `href` may not be stored whatever its host resolves to — its
+        scheme, its host, its credentials, its shape — or `None`. A verdict
+        that stands until the href or the allowlist changes."""
         if len(href) > MAX_HREF_LENGTH:
             return f"href is longer than {MAX_HREF_LENGTH} characters"
         # What is judged must be what is stored and later opened: a parser that
@@ -184,7 +190,13 @@ class AssetHostAllowlist:
             return "href names no host"
         if host not in self.hosts:
             return f"host {host} is not in the asset host allowlist"
-        return self._address_refusal(host)
+        return None
+
+    def address_refusal(self, href: str) -> str | None:
+        """Why the host of `href`, an href with no `href_refusal`, may not be
+        reached now: it resolves to a private address, or not at all. A verdict
+        about the DNS of the moment, which may answer otherwise later (#724)."""
+        return self._address_refusal((urlsplit(href).hostname or "").lower().rstrip("."))
 
     def addresses(self, href: str) -> list[str] | None:
         """The addresses `href` may be reached at — exactly those its host was
