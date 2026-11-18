@@ -104,16 +104,19 @@ def survey_upstream_collection(self, token, upstream_url, collection_id):
     acks_late=True,
     max_retries=0,
 )
-def materialize_harvested_asset(self, asset_id):
+def materialize_harvested_asset(self, asset_id, lane=None):
     """
     Fetch one Remote asset of a Harvest feed's materialization window and
-    ingest it into our storage, in place (ADR 0042 §8).
+    ingest it into our storage, in place (ADR 0042 §8), then send the feed's
+    next asset due in its `lane` (#727).
 
     On `georiva-ingestion`, like any fetch and extraction: until it runs, the
-    file is not ours. The harvest that sends it stays on `georiva-default`. Not
-    retried by Celery: an asset that could not be had stays Remote and due, and
-    a later run of its feed sends it again.
+    file is not ours. One per feed at a time, each sending the next to the back
+    of the queue, so a deep window never sits in front of a fresh file. The
+    harvest that opens the lane stays on `georiva-default`. Not retried by
+    Celery: an asset that could not be had stays Remote and due, and is sent
+    again once its claim has lapsed.
     """
-    from georiva.harvest.materialize import materialize
+    from georiva.harvest.materialize import materialize_in_lane
 
-    return materialize(asset_id)
+    return materialize_in_lane(asset_id, lane)

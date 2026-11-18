@@ -78,7 +78,15 @@ never copied.**
 
    *As built (#640):* the window is the feed's `materialize_start` / `materialize_end`. Each harvest sends the
    Remote COGs of its Jurisdiction inside it to `georiva-ingestion`, one asset per task, and stays on
-   `georiva-default` itself. The task fetches the bytes through the Upstream catalog client — the href, and every
+   `georiva-default` itself. A feed has one materialization on that queue at a time — its lane (#727): a harvest
+   opens it with the newest asset due, unless it is open already, and each materialization, whatever came of it,
+   sends the feed's next asset due to the back of the queue, behind any fresh file that arrived meanwhile. A fresh
+   file so waits behind at most one materialization per feed materializing, not behind a whole window, and a deep
+   window drains newest first without waiting for the next harvest. The lane is a Redis key on a one-day lease,
+   renewed as each task starts and as it passes the lane on: longer than any wait on the queue, since a lane lapsing
+   while its task still waited would let each harvest open another. One whose task was lost is opened again by the
+   feed's next harvest once its lease lapses; the lost task, should it run after all, stands down — renewing and
+   closing compare the lane's token and write in one step, so it can neither take over nor close the newer lane. The task fetches the bytes through the Upstream catalog client — the href, and every
    redirect, judged by the feed's Asset host allowlist as at harvest time, and connected to at the very address the
    allowlist judged, never a second lookup of the host (#723): IPv4 first, then each judged address in turn, and
    through no proxy, since a proxy would look the host up again; a deployment whose only way out is a proxy cannot
