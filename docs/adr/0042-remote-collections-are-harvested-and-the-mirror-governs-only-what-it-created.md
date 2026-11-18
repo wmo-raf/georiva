@@ -100,7 +100,10 @@ never copied.**
    and timeseries alike. A `display` catalog crops both kinds alike, on the map only (ADR 0038). The item keeps
    the Upstream's bbox for its bounds: the copy is the very file that bbox described. The statistics are band 1's —
    the band the Variable maps and every reader draws — without the nodata value. A multi-band upstream is copied
-   whole rather than refused: every reader opens the copy as it opened the Remote file, so cutting it to band 1 would be the one thing that told the two apart. Overviews are
+   whole rather than refused: every reader opens the copy as it opened the Remote file, so cutting it to band 1 would be the one thing that told the two apart. A Variable's virtual Zarr, which holds one array of
+   one band, holds the newest single-band asset's dtype, shape and chunks; a multi-band copy, or one of a dtype its
+   older copies do not share (those made before #725 were `float32`), is left out of it by reason, shown on the
+   Variable's Virtual Zarr pages, rather than stalling every later append (#732). Overviews are
    still built by averaging, so a categorical integer upstream's coarse zoom levels are averages of its classes. It does not take the Loader's
    bucket round-trip: ingestion from a file ingests every Variable that names a source in it, and a harvested
    Variable names none — each upstream file is one Variable at one time already. So a materialization leaves no

@@ -175,6 +175,22 @@
         </div>
     {% endif %}
 
+    {% if report.left_out %}
+        <div class="vz-warning-panel vz-left-out">
+            <strong>
+                {% blocktrans count counter=report.left_out_count %}{{ counter }} asset left out of the repo{% plural %}{{ counter }} assets left out of the repo{% endblocktrans %}
+            </strong>
+            <p class="help-text">
+                {% trans "The repo holds one array: the newest single-band asset's dtype, shape, chunks and compression. These assets are still stored and served, but are not in the virtual Zarr until they match it." %}
+            </p>
+            <ul class="w-text-14">
+                {% for entry in report.left_out %}
+                    <li><span class="w-font-mono">{{ entry.count }}</span> × {{ entry.reason }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
     {% if report.repo_read_error or detail.detail_read_error %}
         <div class="vz-warning-panel">
             <strong>{% trans "Repo read problem" %}</strong>

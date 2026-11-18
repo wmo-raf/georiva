@@ -109,6 +109,12 @@
                         {% if report.extra_count %}
                             <span class="vz-extra">{{ report.extra_count }} {% trans "extra" %}</span>
                         {% endif %}
+                        {% if report.left_out_count %}
+                            <span class="vz-extra vz-status-help vz-left-out" title="{{ report.left_out_summary }}">
+                                {{ report.left_out_count }} {% trans "left out" %}
+                            </span>
+                            <span class="vz-note">{{ report.left_out_summary|truncatechars:120 }}</span>
+                        {% endif %}
                     </td>
 
                     <td class="w-text-14">

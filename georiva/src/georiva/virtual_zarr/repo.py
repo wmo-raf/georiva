@@ -17,12 +17,14 @@ ref updates.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 
 import icechunk
 from django.conf import settings
 
 from georiva.virtual_zarr.classify import CommittedState
+from georiva.virtual_zarr.compat import LeftOut, left_out_from_json, left_out_to_json
 
 logger = logging.getLogger(__name__)
 
@@ -123,13 +125,21 @@ def commit_metadata(
     item_count: int,
     time_start: datetime,
     time_end: datetime,
+    left_out: Sequence[LeftOut] = (),
 ) -> dict:
-    """Properties recorded on every commit; values must be JSON-friendly."""
+    """
+    Properties recorded on every commit; values must be JSON-friendly.
+
+    ``item_count`` and the time range cover every asset the build accounted
+    for, held or ``left_out`` (#732) — what ``classify`` compares the
+    catalog against, so assets left out do not read as a backfill.
+    """
     return {
         "watermark": watermark.isoformat(),
         "item_count": item_count,
         "time_start": time_start.isoformat(),
         "time_end": time_end.isoformat(),
+        "left_out": left_out_to_json(left_out),
     }
 
 
@@ -165,6 +175,7 @@ def latest_committed_state(repo: icechunk.Repository) -> CommittedState | None:
             watermark=datetime.fromisoformat(metadata["watermark"]),
             time_end=datetime.fromisoformat(metadata["time_end"]),
             item_count=int(metadata["item_count"]),
+            left_out=left_out_from_json(metadata.get("left_out")),
         )
     except (KeyError, TypeError, ValueError):
         logger.info(

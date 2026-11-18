@@ -18,7 +18,11 @@ from georiva.events.tasks import EntryTask, ReadSideTask
 from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 from georiva.virtual_zarr.classify import BuildMode, SourceRow, classify
 from georiva.virtual_zarr.compat import (
-    assert_compatible,
+    LeftOut,
+    appends_cleanly,
+    describe_left_out,
+    left_out_count,
+    select,
     spec_from_virtual_variable,
     spec_from_zarr_array,
 )
@@ -84,7 +88,10 @@ def build_virtual_zarr_manifest(self, manifest_id: int, claim: str = "") -> None
         (source of truth — never the Django row) and classify the cycle:
         append (new tail only), rebuild (new commit in place), or up-to-date.
     4.  Write virtual refs via VirtualZarrBuilder + to_icechunk and commit
-        with {watermark, item_count, time_start, time_end} metadata.
+        with {watermark, item_count, time_start, time_end, left_out}
+        metadata.  The repo holds the newest single-band asset's array
+        signature; an asset of another, or of several bands, is left out
+        and named in ``left_out`` (#732).
     5.  Mark READY and refresh the derived cache fields.
 
     On any exception — including icechunk.ConflictError, which the sweep's
@@ -267,11 +274,7 @@ def _run_build(
         open_repo,
         repo_exists,
     )
-    from georiva.virtual_zarr.virtual_zarr import (
-        MinioStoreConfig,
-        VirtualZarrBuilder,
-        write_rebuild,
-    )
+    from georiva.virtual_zarr.virtual_zarr import MinioStoreConfig, VirtualZarrBuilder
 
     if report is None:
         report = BuildReport()
@@ -325,81 +328,137 @@ def _run_build(
         )
         manifest.mark_ready(
             repo_path=repo_path,
-            item_count=item_count,
+            item_count=item_count - left_out_count(committed.left_out),
             time_start=time_start,
             time_end=time_end,
             snapshot_id=latest_snapshot_id(repo) or "",
             watermark=committed.watermark,
+            left_out=committed.left_out,
         )
         report.snapshot_id = latest_snapshot_id(repo) or ""
         return report
 
     builder = VirtualZarrBuilder(config)
-    metadata = commit_metadata(
-        watermark=plan.watermark,
-        item_count=item_count,
-        time_start=time_start,
-        time_end=time_end,
-    )
 
-    if plan.mode == BuildMode.APPEND:
-        snapshot_id = _run_append(repo, builder, plan, variable.slug, build_start, metadata)
-    else:
-        vds = builder.build(_to_url_df(plan.rows), variable_name=variable.slug)
-        snapshot_id = write_rebuild(
-            repo,
-            vds,
-            last_updated_at=build_start,
-            metadata=metadata,
-            message=f"rebuild: {item_count} item(s)",
+    def metadata(left_out):
+        return commit_metadata(
+            watermark=plan.watermark,
+            item_count=item_count,
+            time_start=time_start,
+            time_end=time_end,
+            left_out=left_out,
         )
+
+    written = None
+    if plan.mode == BuildMode.APPEND:
+        written = _run_append(repo, builder, plan, committed, variable.slug, build_start, metadata)
+        if written is None:
+            # A new signature, or a multi-band asset: what the repo holds is
+            # chosen again over every asset (#732).
+            logger.info(
+                "build_virtual_zarr_manifest: %s/%s new assets do not append cleanly — rebuilding",
+                collection.slug,
+                variable.slug,
+            )
+            report.mode = BuildMode.REBUILD.value
+    if written is None:
+        ordered = sorted(rows, key=lambda row: row.time)
+        written = _run_rebuild(repo, builder, ordered, variable.slug, build_start, metadata)
+        if written.left_out:
+            logger.warning(
+                "build_virtual_zarr_manifest: %s/%s left %d asset(s) out: %s",
+                collection.slug,
+                variable.slug,
+                left_out_count(written.left_out),
+                describe_left_out(written.left_out),
+            )
+        if written.snapshot_id is None:
+            logger.info(
+                "build_virtual_zarr_manifest: %s/%s holds no asset — marking NO_DATA",
+                collection.slug,
+                variable.slug,
+            )
+            manifest.mark_no_data(left_out=written.left_out)
+            report.mode = BuildMode.NO_DATA.value
+            return report
 
     manifest.mark_ready(
         repo_path=repo_path,
-        item_count=item_count,
+        item_count=item_count - left_out_count(written.left_out),
         time_start=time_start,
         time_end=time_end,
-        snapshot_id=snapshot_id,
+        snapshot_id=written.snapshot_id,
         watermark=plan.watermark,
+        left_out=written.left_out,
     )
 
     logger.info(
         "build_virtual_zarr_manifest: READY (%s) — %d items, %s → %s, snapshot %s",
-        plan.mode.value,
+        report.mode,
         item_count,
         time_start.date(),
         time_end.date(),
-        snapshot_id,
+        written.snapshot_id,
     )
 
-    report.items_written = len(plan.rows)
-    report.snapshot_id = snapshot_id
+    report.items_written = written.items_written
+    report.snapshot_id = written.snapshot_id
     return report
 
 
-def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> str:
+@dataclass(frozen=True)
+class _Written:
+    """One commit's outcome: its snapshot — None when nothing could be held —
+    the timesteps it wrote, and the assets the repo leaves out."""
+
+    snapshot_id: str | None
+    items_written: int
+    left_out: tuple[LeftOut, ...]
+
+
+def _run_rebuild(repo, builder, rows, variable_name, build_start, metadata) -> _Written:
     """
-    Append path: heterogeneity guard per COG, belt-and-braces time check,
-    then a single append commit.
+    Rebuild path: hold the newest single-band asset's signature and leave
+    every other asset out, by reason (#732), as a new commit in place.
+    """
+    from georiva.virtual_zarr.virtual_zarr import write_rebuild
+
+    opened = builder.open(_to_url_df(rows))
+    selection = select([spec_from_virtual_variable(cog.vds) for cog in opened])
+    if selection.signature is None:
+        return _Written(snapshot_id=None, items_written=0, left_out=selection.left_out)
+
+    kept = [opened[position] for position in selection.kept]
+    vds = builder.assemble(kept, variable_name)
+    snapshot_id = write_rebuild(
+        repo,
+        vds,
+        last_updated_at=build_start,
+        metadata=metadata(selection.left_out),
+        message=f"rebuild: {len(kept)} item(s)",
+    )
+    return _Written(snapshot_id=snapshot_id, items_written=len(kept), left_out=selection.left_out)
+
+
+def _run_append(repo, builder, plan, committed, variable_name, build_start, metadata) -> _Written | None:
+    """
+    Append path: the new tail as a single append commit, carrying the
+    committed record of assets left out. None when any new asset differs
+    from the committed signature — the caller rebuilds, since the newest
+    signature may now be another and an append never leaves anything out.
     """
     import zarr
 
     from georiva.virtual_zarr.virtual_zarr import last_committed_time, write_append
 
-    # Committed array signature for the hard heterogeneity guard (decision 7)
     ro = repo.readonly_session(branch="main")
     group = zarr.open_group(ro.store, mode="r")
-    existing_spec = spec_from_zarr_array(group[variable_name])
+    committed_spec = spec_from_zarr_array(group[variable_name])
 
-    def guard(vds, url):
-        raw_var = list(vds.data_vars)[0]
-        assert_compatible(existing_spec, spec_from_virtual_variable(vds, raw_var), source=url)
-
-    vds = builder.build(
-        _to_url_df(plan.rows),
-        variable_name=variable_name,
-        per_cog_check=guard,
-    )
+    opened = builder.open(_to_url_df(plan.rows))
+    if not appends_cleanly(committed_spec, [spec_from_virtual_variable(cog.vds) for cog in opened]):
+        return None
+    vds = builder.assemble(opened, variable_name)
 
     # Belt-and-braces (decision 5): appended timesteps must be strictly
     # after the last committed time coordinate, read from the snapshot
@@ -413,13 +472,14 @@ def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> st
                 f"is not strictly after the committed axis end {committed_last}."
             )
 
-    return write_append(
+    snapshot_id = write_append(
         repo,
         vds,
         last_updated_at=build_start,
-        metadata=metadata,
+        metadata=metadata(committed.left_out),
         message=f"append: {len(plan.rows)} item(s)",
     )
+    return _Written(snapshot_id=snapshot_id, items_written=len(opened), left_out=committed.left_out)
 
 
 # =============================================================================

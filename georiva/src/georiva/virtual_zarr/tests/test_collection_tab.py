@@ -164,6 +164,20 @@ class CollectionVirtualZarrTabTests(TestCase):
         self.assertContains(response, "Failed")
         self.assertContains(response, "cannot reach store")
 
+    def test_assets_left_out_of_the_repo_are_counted_with_their_reason(self):
+        """#732: a manifest that holds the newest signature names what it left out."""
+        variable = add_variable(self.collection, slug="mixed")
+        VirtualZarrManifest.objects.create(
+            variable=variable,
+            status=VirtualZarrManifest.Status.READY,
+            left_out=[{"reason": "dtype float32, not int16 (the newest single-band asset's)", "count": 4}],
+        )
+
+        response = self._get()
+
+        self.assertContains(response, "4 left out")
+        self.assertContains(response, "dtype float32, not int16")
+
     # -- navigation ---------------------------------------------------------
 
     def test_items_page_links_to_the_virtual_zarr_tab_and_back(self):

@@ -609,7 +609,8 @@ _Avoid_: live feed, ingestion log, activity dashboard, Ingestion Activity Feed
 
 **Virtual Zarr tab**:
 A per-collection admin page (a tab beside the items listing — ADR-0019, no sidebar entry) listing every Variable
-with its manifest status, catalog-vs-repo coverage counts, items lacking a COG asset, and freshness lag. A stuck
+with its manifest status, catalog-vs-repo coverage counts, items lacking a COG asset, assets **left out** of the
+repo by reason (#732), and freshness lag. A stuck
 build (BUILDING with an expired lock) is surfaced as its own condition, distinct from an active build. Rendered
 over the coverage service (`virtual_zarr/coverage.py`), which computes the report live — the Icechunk tip is the
 source of truth; nothing per-timestamp is persisted.
@@ -618,11 +619,18 @@ _Avoid_: zarr dashboard, manifest page
 **Virtual Zarr drill-down**:
 The per-variable page reached from a Virtual Zarr tab row, answering "what exactly is wrong with this variable"
 without shell access: the exact missing/extra timestamp lists, the silently-skipped items (no COG asset), the
-current error with its last-failure time, build history from the durable build log, last-GC status, Icechunk
+current error with its last-failure time, the assets left out of the repo and why, build history from the durable build log, last-GC status, Icechunk
 snapshot history with committed coverage metadata, cached repo size, and the store structure read on demand at
 the repo tip. Rendered over `variable_detail` in the same coverage service; a variable whose repo does not exist
 yet degrades to empty history rather than an error.
 _Avoid_: variable page, manifest detail
+
+**Left out (of a virtual Zarr)**:
+An asset a Variable's virtual Zarr does not hold, though it is stored and served. A repo holds one array — the newest
+single-band asset's dtype, spatial shape, chunks and compression, since virtual references cannot be cast, re-chunked
+or cut to a band — so an asset of another signature, or with several bands, is left out, counted by reason on every
+commit and on the manifest (#732). A new signature arriving rebuilds the repo around it rather than failing.
+_Avoid_: refused, heterogeneous asset error, skipped (that is an item with no COG asset)
 
 **Failures panel**:
 The Wagtail admin home panel, above the Collection Health Panel, listing the active organisation's failed and refused
