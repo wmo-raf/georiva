@@ -87,15 +87,15 @@ def _reason(spec: ArraySpec, signature: ArraySpec | None) -> str:
     if spec.bands != 1:
         return f"{spec.bands} bands — the virtual Zarr holds single-band arrays only"
     differs = []
-    for field, label in (("shape", "shape"), ("chunks", "chunks")):
+    for field in ("shape", "chunks"):
         mine, held = getattr(spec, field), getattr(signature, field)
         if mine != held:
-            differs.append(f"{label} {_dims(mine)}, not {_dims(held)}")
+            differs.append(f"{field} {_dims(mine)}, not {_dims(held)}")
     if spec.dtype != signature.dtype:
         differs.append(f"dtype {spec.dtype}, not {signature.dtype}")
     if spec.codecs != signature.codecs:
         differs.append("a different compression")
-    return "; ".join(differs) + " (the newest asset's)"
+    return "; ".join(differs) + " (the newest single-band asset's)"
 
 
 def _dims(dims: tuple[int, ...]) -> str:
@@ -118,6 +118,11 @@ def left_out_from_json(value) -> tuple[LeftOut, ...]:
 
 def left_out_count(left_out: Sequence[LeftOut]) -> int:
     return sum(entry.count for entry in left_out)
+
+
+def describe_left_out(left_out: Sequence[LeftOut]) -> str:
+    """Every reason in one line, for a log or a hover."""
+    return "; ".join(f"{entry.count} × {entry.reason}" for entry in left_out)
 
 
 # ---------------------------------------------------------------------------

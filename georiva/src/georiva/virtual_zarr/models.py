@@ -96,7 +96,7 @@ class VirtualZarrManifest(TimeStampedModel):
         editable=False,
         help_text=(
             "Assets the repo does not hold, by reason: another array signature than "
-            "the newest asset's, or several bands (#732). [{reason, count}]"
+            "the newest single-band asset's, or several bands (#732). [{reason, count}]"
         ),
     )
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from .compat import LeftOut, left_out_count, left_out_from_json
+from .compat import LeftOut, describe_left_out, left_out_count, left_out_from_json
 
 if TYPE_CHECKING:
     from georiva.core.models import Variable
@@ -149,7 +149,7 @@ class VariableCoverage:
     @property
     def left_out_summary(self) -> str:
         """Every reason in one line, for a hover."""
-        return "; ".join(f"{entry.count} × {entry.reason}" for entry in self.left_out)
+        return describe_left_out(self.left_out)
 
     @property
     def missing_count(self) -> int:

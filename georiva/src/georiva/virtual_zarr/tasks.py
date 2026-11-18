@@ -20,6 +20,7 @@ from georiva.virtual_zarr.classify import BuildMode, SourceRow, classify
 from georiva.virtual_zarr.compat import (
     LeftOut,
     appends_cleanly,
+    describe_left_out,
     left_out_count,
     select,
     spec_from_virtual_variable,
@@ -369,7 +370,7 @@ def _run_build(
                 collection.slug,
                 variable.slug,
                 left_out_count(written.left_out),
-                "; ".join(f"{entry.count} × {entry.reason}" for entry in written.left_out),
+                describe_left_out(written.left_out),
             )
         if written.snapshot_id is None:
             logger.info(

@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='virtualzarrmanifest',
             name='left_out',
-            field=models.JSONField(blank=True, default=list, editable=False, help_text="Assets the repo does not hold, by reason: another array signature than the newest asset's, or several bands (#732). [{reason, count}]"),
+            field=models.JSONField(blank=True, default=list, editable=False, help_text="Assets the repo does not hold, by reason: another array signature than the newest single-band asset's, or several bands (#732). [{reason, count}]"),
         ),
     ]

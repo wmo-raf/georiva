@@ -189,7 +189,7 @@ class VariableDrilldownTests(TestCase):
             variable,
             status=VirtualZarrManifest.Status.READY,
             left_out=[
-                {"reason": "dtype float32, not int16 (the newest asset's)", "count": 4},
+                {"reason": "dtype float32, not int16 (the newest single-band asset's)", "count": 4},
                 {"reason": "3 bands — the virtual Zarr holds single-band arrays only", "count": 1},
             ],
         )

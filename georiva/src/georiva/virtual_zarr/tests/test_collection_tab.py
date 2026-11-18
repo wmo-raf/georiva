@@ -170,7 +170,7 @@ class CollectionVirtualZarrTabTests(TestCase):
         VirtualZarrManifest.objects.create(
             variable=variable,
             status=VirtualZarrManifest.Status.READY,
-            left_out=[{"reason": "dtype float32, not int16 (the newest asset's)", "count": 4}],
+            left_out=[{"reason": "dtype float32, not int16 (the newest single-band asset's)", "count": 4}],
         )
 
         response = self._get()
