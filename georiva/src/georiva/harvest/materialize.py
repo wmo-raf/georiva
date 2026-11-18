@@ -2,9 +2,21 @@
 Materializing a window: a Harvest feed keeps a hot window local while its deep
 archive stays Remote (ADR 0042 §8, #640).
 
-A feed with a materialization window sends, from each of its runs, the Remote
-COGs of its Jurisdiction inside that window to the ingestion queue, one asset
-per task. There each is fetched — its href, and any redirect, past the same
+A feed with a materialization window sends the Remote COGs of its
+Jurisdiction inside that window to the ingestion queue, one asset per task and
+one at a time: its lane (#727). The ingestion queue is a strict FIFO on one
+pool process (ADR 0025), so a feed never has more than one materialization in
+front of another feed's fresh file. A harvest opens the lane with the newest
+asset due, unless the feed's lane is open already; each materialization, once
+run — whatever came of it — sends the feed's next asset due, newest first, to
+the back of the queue, behind whatever fresh file arrived meanwhile. A deep
+window so drains without waiting for the next harvest, and a fresh file waits
+behind at most one materialization per feed materializing. The lane closes
+when nothing is left to send; one whose task was lost is open again for the
+feed's next harvest once its lease lapses, and that lost task, should it run
+after all, stands down rather than open a second.
+
+There each is fetched — its href, and any redirect, past the same
 Asset host allowlist a harvested href passes (§9) — read north up, and handed
 to the shared write step ingestion and derivation end in (`AssetMaterializer`).
 That step writes the COG into our storage, rewrites the same Asset row in place
@@ -52,6 +64,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
@@ -96,11 +109,12 @@ MATERIALIZE_CLAIM = timedelta(hours=2)
 #: resolved, time after time: it is still tried once a day.
 MATERIALIZE_CLAIM_LONGEST = timedelta(days=1)
 
-#: How many assets one harvest sends at most, newest first. A deep window
-#: drains over several runs rather than flooding the ingestion queue at once.
-MATERIALIZE_BATCH = 200
+#: How long a feed's lane stays open without being passed on: long enough for
+#: a busy ingestion queue to reach the asset in it. A lane whose task was lost
+#: is the feed's next harvest's to open again once it has lapsed.
+MATERIALIZE_LANE_LEASE = timedelta(hours=2)
 
-#: How many due assets one harvest looks through for unclaimed ones.
+#: How many due assets are looked through for an unclaimed one to send.
 MATERIALIZE_SCAN = 2000
 
 
@@ -124,6 +138,10 @@ UPSTREAM_HISTORY = "upstream"
 
 def claim_key(asset_id: int) -> str:
     return f"harvest-materialize-claim:{asset_id}"
+
+
+def lane_key(feed_id) -> str:
+    return f"harvest-materialize-lane:{feed_id}"
 
 
 def claim_period(times_unresolved: int) -> timedelta:
@@ -157,28 +175,109 @@ def due(feed, collection):
 
 
 def enqueue_due(feed, collection) -> int:
-    """Send the assets `feed` should make local to the ingestion queue, each
-        as the caller's writes commit, and say how many were sent. One sent within
-        `MATERIALIZE_CLAIM` is not sent again — longer, after its host was refused
-    for where it resolved — nor more than `MATERIALIZE_BATCH`, nor one its
-    feed's allowlist refused, until its href or the allowlist changes."""
-    from .tasks import materialize_harvested_asset
-
+    """Open `feed`'s lane with the newest asset it should make local and has
+    not, sent to the ingestion queue as the caller's writes commit; say how
+    many were sent — none while its lane is open already, or nothing is due."""
     if not feed.materializes:
         return 0
-    sent = 0
+    lane = _open_lane(feed.pk)
+    if lane is None:
+        return 0
+    if not _send_next(feed, collection, lane):
+        _close_lane(feed.pk, lane)
+        return 0
+    logger.info("Harvest %s: its local window is being fetched, newest first", feed.name)
+    return 1
+
+
+def materialize_in_lane(asset_id: int, lane: str | None, *, upstream=None, writer=None) -> str:
+    """Materialize one asset, then pass its feed's `lane` on to the next asset
+    due — whatever came of this one. A task sent without a lane passes nothing on."""
+    try:
+        return materialize(asset_id, upstream=upstream, writer=writer)
+    finally:
+        if lane is not None:
+            try:
+                _pass_on(lane)
+            except Exception:
+                logger.exception("Materialization: lane %s could not be passed on; the next harvest opens it", lane)
+
+
+def _send_next(feed, collection, lane: str) -> bool:
+    """Send the newest asset `feed` should make local, in `lane`: not one sent
+    within its claim period, nor one its allowlist refused until its href or
+    the allowlist changes. False when there is none."""
+    from .tasks import materialize_harvested_asset
+
     # Refused, and nothing it was refused by has changed since: not asked again.
     unrefused = _verdicts(due(feed, collection), feed).filter(href_refused=False).annotate(times=F("times_unresolved"))
     for asset_id, times in unrefused.values_list("pk", "times")[:MATERIALIZE_SCAN]:
-        if sent >= MATERIALIZE_BATCH:
-            break
-        if not _try_claim(claim_key(asset_id), claim_period(times)):
-            continue
-        transaction.on_commit(partial(materialize_harvested_asset.delay, asset_id))
-        sent += 1
-    if sent:
-        logger.info("Harvest %s: %d asset(s) sent to be kept locally", feed.name, sent)
-    return sent
+        if _try_claim(claim_key(asset_id), claim_period(times)):
+            transaction.on_commit(partial(materialize_harvested_asset.delay, asset_id, lane))
+            return True
+    return False
+
+
+def _pass_on(lane: str) -> None:
+    """Send the lane's feed's next asset due in it, while the lane is still
+    this one; close it when nothing is."""
+    from .models import HarvestFeed
+
+    feed_id = lane.split(":", 1)[0]
+    if not _holds(feed_id, lane):
+        # Lapsed, and opened again since by a harvest: that one carries on.
+        return
+    feed = HarvestFeed.objects.filter(pk=feed_id).first()
+    collection = feed.collection if feed is not None and feed.materializes else None
+    if collection is not None:
+        _renew_lane(feed_id, lane)
+        if _send_next(feed, collection, lane):
+            return
+    _close_lane(feed_id, lane)
+
+
+def _open_lane(feed_id) -> str | None:
+    """Open the feed's lane, unless it is open already. A cache outage fails
+    open: each harvest then sends one asset, and nothing passes it on."""
+    from django.core.cache import cache
+
+    lane = f"{feed_id}:{uuid.uuid4().hex}"
+    try:
+        return lane if cache.add(lane_key(feed_id), lane, timeout=_lease()) else None
+    except Exception:
+        return lane
+
+
+def _holds(feed_id, lane: str) -> bool:
+    from django.core.cache import cache
+
+    try:
+        return cache.get(lane_key(feed_id)) == lane
+    except Exception:
+        return False
+
+
+def _renew_lane(feed_id, lane: str) -> None:
+    from django.core.cache import cache
+
+    try:
+        cache.set(lane_key(feed_id), lane, timeout=_lease())
+    except Exception:
+        pass
+
+
+def _close_lane(feed_id, lane: str) -> None:
+    from django.core.cache import cache
+
+    if _holds(feed_id, lane):
+        try:
+            cache.delete(lane_key(feed_id))
+        except Exception:
+            pass
+
+
+def _lease() -> int:
+    return int(MATERIALIZE_LANE_LEASE.total_seconds())
 
 
 def materialize(asset_id: int, *, upstream=None, writer=None) -> str:

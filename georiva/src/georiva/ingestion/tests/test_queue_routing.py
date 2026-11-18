@@ -41,7 +41,9 @@ TIME_CRITICAL = {
     "georiva.sources.tasks.run_data_feed_loader",
     "georiva.sources.tasks.retry_fetched_file",
     # A Harvest feed's materialization window: one Remote COG fetched and
-    # ingested into our storage (ADR 0042 §8, #640). The harvest stays off it.
+    # ingested into our storage (ADR 0042 §8, #640). The harvest stays off it,
+    # and a feed has one on the queue at a time, so a deep window delays a
+    # fresh file by one materialization per feed, not by the window (#727).
     "georiva.harvest.tasks.materialize_harvested_asset",
 }
 

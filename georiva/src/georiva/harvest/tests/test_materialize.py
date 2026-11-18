@@ -34,11 +34,14 @@ from georiva.harvest.materialize import (
     UNREACHABLE,
     UNRESOLVED_MARK,
     claim_key,
+    lane_key,
     materialize,
+    materialize_in_lane,
     refusals,
 )
 from georiva.harvest.upstream import UpstreamAsset
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
+from georiva.organisations.testing import make_organisation
 
 from .support import ASSET_HOST, HarvestFeedMixin, RemoteCollectionMixin, day, rain_href, stamp
 
@@ -88,17 +91,22 @@ class MaterializeMixin(HarvestFeedMixin):
         self.feed.materialize_start = day(3)
         self.feed.save()
         self.sent: list[int] = []
-        # A harvest's send claims its asset in the cache, which outlives the test's
-        # transaction — and a later run's test database may hand out the same pks.
+        #: The lane each sent asset travels in, by asset.
+        self.lanes: dict[int, str | None] = {}
+        # A harvest's send claims its asset and its feed's lane in the cache, which outlives
+        # the test's transaction — and a later run's test database may hand out the same pks.
         self.forget_claims()
         self.addCleanup(self.forget_claims)
-        self.enterContext(
-            mock.patch.object(tasks.materialize_harvested_asset, "delay", side_effect=lambda pk: self.sent.append(pk))
-        )
+        self.enterContext(mock.patch.object(tasks.materialize_harvested_asset, "delay", side_effect=self.send))
+
+    def send(self, asset_id, lane=None):
+        self.sent.append(asset_id)
+        self.lanes[asset_id] = lane
 
     def forget_claims(self):
-        """As if every claim period had passed."""
+        """As if every claim period, and every lane's lease, had passed."""
         cache.delete_pattern(claim_key("*"))
+        cache.delete_pattern(lane_key("*"))
 
     def harvest(self, **kwargs):
         # What a harvest sends, it sends as its writes commit.
@@ -109,9 +117,28 @@ class MaterializeMixin(HarvestFeedMixin):
         return materialize(asset_id, upstream=self.upstream, writer=self.writer)
 
     def materialize_sent(self):
-        """Run what the harvest sent to the ingestion queue, as its worker would."""
+        """Run what was sent to the ingestion queue, as its worker would: each
+        passing its feed's lane on to the next asset due, which is sent in turn."""
         sent, self.sent = self.sent, []
-        return [self.materialize(pk) for pk in sent]
+        return [self.run_in_lane(pk, self.lanes.get(pk)) for pk in sent]
+
+    def run_in_lane(self, asset_id, lane):
+        """The task: a worker runs it in autocommit, so what it sends is sent at once."""
+        with self.captureOnCommitCallbacks(execute=True):
+            return materialize_in_lane(asset_id, lane, upstream=self.upstream, writer=self.writer)
+
+    def materialize_window(self) -> list[str]:
+        """Run what was sent, and what that sends, until nothing more is: what came of each."""
+        self.ran, outcomes = [], []
+        while self.sent:
+            self.ran += self.sent
+            outcomes += self.materialize_sent()
+        return outcomes
+
+    def drain(self) -> list[int]:
+        """`materialize_window`: which assets ran, in order."""
+        self.materialize_window()
+        return self.ran
 
     def asset_on(self, n) -> Asset:
         return Asset.objects.get(item__time=day(n), variable=self.variable)
@@ -121,7 +148,7 @@ class AHarvestSendsItsMaterializationWindowToIngestionTests(MaterializeMixin, Te
     def test_the_remote_assets_inside_the_window_are_sent(self):
         self.harvest()
 
-        self.assertCountEqual(self.sent, [self.asset_on(3).pk, self.asset_on(4).pk])
+        self.assertEqual(self.drain(), [self.asset_on(4).pk, self.asset_on(3).pk])
 
     def test_a_window_with_an_end_sends_only_what_is_inside_it(self):
         self.feed.materialize_end = day(3)
@@ -149,17 +176,104 @@ class AHarvestSendsItsMaterializationWindowToIngestionTests(MaterializeMixin, Te
 
     def test_an_asset_already_local_is_not_sent_again(self):
         self.harvest()
-        self.materialize_sent()
+        self.drain()
         self.feed.materialize_start = day(1)
         self.feed.save()
 
         self.harvest()
 
-        self.assertCountEqual(self.sent, [self.asset_on(1).pk, self.asset_on(2).pk])
+        self.assertEqual(self.drain(), [self.asset_on(2).pk, self.asset_on(1).pk])
 
     def test_the_task_runs_on_the_ingestion_queue_and_the_harvest_does_not(self):
         self.assertEqual(tasks.materialize_harvested_asset.queue, "georiva-ingestion")
         self.assertEqual(tasks.run_harvest.queue, "georiva-default")
+
+
+class AFeedMaterializesOneAssetAtATimeTests(MaterializeMixin, TestCase):
+    """A feed has one materialization on the ingestion queue at most: its lane.
+    Each, once run, sends the feed's next asset due to the back of the queue,
+    so a fresh file arriving meanwhile is ahead of it, and a deep window drains
+    newest first without waiting for the next harvest (#727)."""
+
+    def setUp(self):
+        super().setUp()
+        self.feed.materialize_start = day(1)
+        self.feed.save()
+
+    def test_a_harvest_sends_only_the_newest_asset_due(self):
+        self.harvest()
+
+        self.assertEqual(self.sent, [self.asset_on(4).pk])
+
+    def test_each_asset_run_sends_the_next_newest_due(self):
+        self.harvest()
+
+        self.materialize_sent()
+
+        self.assertEqual(self.sent, [self.asset_on(3).pk])
+
+    def test_the_window_drains_newest_first_without_another_harvest(self):
+        self.harvest()
+
+        self.assertEqual(self.drain(), [self.asset_on(n).pk for n in (4, 3, 2, 1)])
+        self.assertFalse(Asset.objects.filter(item__collection=self.feed.collection, href__startswith="https").exists())
+
+    def test_a_harvest_sends_nothing_while_its_feeds_lane_is_taken(self):
+        self.harvest()
+        self.materialize_sent()
+        self.sent = []
+
+        self.harvest()
+
+        self.assertEqual(self.sent, [])
+
+    def test_an_asset_that_could_not_be_had_passes_the_lane_on(self):
+        self.upstream.unfetchable[rain_href(4)] = "upstream answered 503"
+        self.harvest()
+
+        self.assertEqual(self.materialize_sent(), [UNREACHABLE])
+        self.assertEqual(self.sent, [self.asset_on(3).pk])
+
+    def test_a_drained_window_frees_the_lane_for_what_arrives_later(self):
+        self.harvest()
+        self.drain()
+        self.upstream.add_item(day(5), {"rainfall": rain_href(5)})
+
+        self.harvest()
+
+        self.assertEqual(self.sent, [self.asset_on(5).pk])
+
+    def test_a_lane_whose_lease_lapsed_is_taken_again_and_the_old_one_stands_down(self):
+        self.harvest()
+        stale = self.sent
+        cache.delete_pattern(lane_key("*"))
+        self.sent = []
+        self.harvest()
+        # Day 4 is still claimed by the lost task: day 3 is next.
+        self.assertEqual(self.sent, [self.asset_on(3).pk])
+        self.sent = []
+
+        # The lost task turns up after all: it does its work, and sends nothing on.
+        self.run_in_lane(stale[0], self.lanes[stale[0]])
+
+        self.assertEqual(self.sent, [])
+
+    def test_a_task_sent_without_a_lane_sends_nothing_on(self):
+        """One sent before lanes existed, still on the queue as they are deployed."""
+        self.harvest()
+
+        self.assertEqual(self.run_in_lane(self.asset_on(4).pk, None), MATERIALIZED)
+        self.assertEqual(self.sent, [self.asset_on(4).pk])
+
+    def test_each_feed_has_a_lane_of_its_own(self):
+        self.harvest()
+        self.sent = []
+        self.feed = self.make_feed(make_organisation("second-org"), materialize_start=day(1))
+        self.map_variable()
+
+        self.harvest()
+
+        self.assertEqual(self.sent, [Asset.objects.get(harvested_by_id=self.feed.pk, item__time=day(4)).pk])
 
 
 class AMaterializedAssetIsTheSameAssetMadeLocalTests(MaterializeMixin, TestCase):
@@ -168,7 +282,7 @@ class AMaterializedAssetIsTheSameAssetMadeLocalTests(MaterializeMixin, TestCase)
         self.upstream.rasters[rain_href(3)] = numpy.full((8, 8), 12.5, dtype="float32")
         self.harvest()
         self.before = self.asset_on(3)
-        self.outcomes = self.materialize_sent()
+        self.outcomes = self.materialize_window()
 
     def test_its_bytes_are_fetched_and_ingested_locally(self):
         self.assertEqual(self.outcomes, [MATERIALIZED, MATERIALIZED])
@@ -353,7 +467,7 @@ class AMaterializedAssetHasLeftTheMirrorsJurisdictionTests(MaterializeMixin, Tes
     def setUp(self):
         super().setUp()
         self.harvest()
-        self.materialize_sent()
+        self.materialize_window()
         self.local = {n: (self.asset_on(n).pk, self.asset_on(n).href) for n in (3, 4)}
 
     def kept(self):
@@ -417,14 +531,13 @@ class MaterializedBytesPassTheAllowlistTests(MaterializeMixin, TestCase):
         self.sent = []
 
         self.harvest()
-        self.assertEqual(self.sent, [self.asset_on(4).pk])
+        self.assertEqual(self.drain(), [self.asset_on(4).pk])
 
         self.feed.asset_hosts = ["elsewhere.example"]
         self.feed.save()
         self.forget_claims()
-        self.sent = []
         self.harvest()
-        self.assertCountEqual(self.sent, [self.asset.pk, self.asset_on(4).pk])
+        self.assertEqual(self.sent, [self.asset.pk])
 
     def test_a_refused_asset_whose_href_is_resynced_is_sent_again(self):
         Asset.objects.filter(pk=self.asset.pk).update(href="https://elsewhere.example/3.tif")
@@ -435,7 +548,7 @@ class MaterializedBytesPassTheAllowlistTests(MaterializeMixin, TestCase):
 
         self.harvest()
 
-        self.assertIn(self.asset.pk, self.sent)
+        self.assertIn(self.asset.pk, self.drain())
 
     def test_a_host_now_resolving_to_a_private_address_is_not_fetched(self):
         self.upstream.addresses["stac.upstream.example"] = ["10.0.0.7"]
@@ -472,6 +585,9 @@ class ARefusalForWhereAHostResolvesNowIsTriedAgainTests(MaterializeMixin, TestCa
 
     def setUp(self):
         super().setUp()
+        # Day 3 alone is due: the one a harvest sends.
+        self.feed.materialize_end = day(3)
+        self.feed.save()
         self.harvest()
         self.asset = self.asset_on(3)
         self.sent = []
@@ -487,7 +603,7 @@ class ARefusalForWhereAHostResolvesNowIsTriedAgainTests(MaterializeMixin, TestCa
 
         self.harvest()
         self.assertIn(self.asset.pk, self.sent)
-        self.materialize_sent()
+        self.materialize_window()
 
         self.asset.refresh_from_db()
         self.assertFalse(self.asset.location.is_remote)
@@ -587,7 +703,7 @@ class AnOperatorSeesWhatWasRefusedTests(MaterializeMixin, TestCase):
         self.harvest()
 
     def test_nothing_refused_says_nothing(self):
-        self.materialize_sent()
+        self.materialize_window()
 
         self.assertEqual(refusals(self.feed, self.feed.collection), [])
 
@@ -686,7 +802,7 @@ class ALocalAssetIsBookkeptAsAnyIngestedAssetTests(MaterializeMixin, TestCase):
         seen = []
 
         with hooks.register_temporarily(GEORIVA_AFTER_SAVE_ASSET, lambda asset: seen.append(asset.pk)):
-            self.materialize_sent()
+            self.materialize_window()
 
         self.assertCountEqual(seen, [self.asset_on(3).pk, self.asset_on(4).pk])
 
@@ -694,7 +810,7 @@ class ALocalAssetIsBookkeptAsAnyIngestedAssetTests(MaterializeMixin, TestCase):
         self.harvest()
         collection = self.feed.collection
 
-        self.materialize_sent()
+        self.materialize_window()
 
         collection.refresh_from_db()
         self.assertEqual((collection.time_start, collection.time_end), (day(1), day(4)))
