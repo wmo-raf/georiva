@@ -688,35 +688,23 @@ class StoreAssetsArePublishedForTitilerTests(StoreFeedMixin, TestCase):
         self.assertEqual(self.tile_config(3).status_code, 404)
 
 
-class StoresAreAnnouncedToTitilerTests(StoreFeedMixin, TestCase):
-    """Django says on a Redis channel whenever a Variable's published stores
-    change, so a running Titiler worker opens the new ones before a tile asks,
-    and drops the ones no asset names any more (#706).
+class HearsStoreAnnouncements:
+    """Listens where Django announces that the stores it publishes changed (#706).
 
-    Each test listens on a channel of its own: pub/sub channels are server-wide,
-    and parallel test workers share the server.
+    On a channel of its own: pub/sub channels are server-wide, and parallel test
+    workers share the server. Call :meth:`listen_for_announcements` in
+    ``setUp``; :meth:`heard` is what was said since it was last asked.
     """
 
-    PINS = {"s3://noaa-gfs-bdp-pds/": "us-east-1"}
-
-    def setUp(self):
-        super().setUp()
-        self.redis = get_redis_connection("default")
-        self._sweep_redis()
-        self.addCleanup(self._sweep_redis)
+    def listen_for_announcements(self):
         channel = f"georiva:test:stores-published:{uuid.uuid4().hex}"
         patcher = mock.patch.object(remote_assets, "STORES_CHANNEL", channel)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.listener = self.redis.pubsub(ignore_subscribe_messages=True)
+        self.listener = get_redis_connection("default").pubsub(ignore_subscribe_messages=True)
         self.listener.subscribe(channel)
         self.addCleanup(self.listener.close)
         self.heard()  # the subscription's own confirmation
-
-    def _sweep_redis(self):
-        keys = list(self.redis.scan_iter(match=f"{REMOTE_ASSETS_KEY_PREFIX}:*"))
-        if keys:
-            self.redis.delete(*keys)
 
     def heard(self) -> list[str]:
         """Every announcement made since the last call."""
@@ -725,6 +713,28 @@ class StoresAreAnnouncedToTitilerTests(StoreFeedMixin, TestCase):
             if message["type"] == "message":
                 said.append(message["data"].decode())
         return said
+
+
+class StoresAreAnnouncedToTitilerTests(HearsStoreAnnouncements, StoreFeedMixin, TestCase):
+    """Django says on a Redis channel whenever a Variable's published stores
+    change, so a running Titiler worker opens the new ones before a tile asks,
+    and drops the ones no asset names any more (#706). The re-check that
+    changes a feed's Pinned locations or adopts an address is driven through its
+    page in ``test_recheck_store``."""
+
+    PINS = {"s3://noaa-gfs-bdp-pds/": "us-east-1"}
+
+    def setUp(self):
+        super().setUp()
+        self.redis = get_redis_connection("default")
+        self._sweep_redis()
+        self.addCleanup(self._sweep_redis)
+        self.listen_for_announcements()
+
+    def _sweep_redis(self):
+        keys = list(self.redis.scan_iter(match=f"{REMOTE_ASSETS_KEY_PREFIX}:*"))
+        if keys:
+            self.redis.delete(*keys)
 
     def test_a_new_store_harvest_announces_its_variable(self):
         self.hold("temperature_2m", 0, 3)
@@ -762,6 +772,17 @@ class StoresAreAnnouncedToTitilerTests(StoreFeedMixin, TestCase):
         )
 
         remote_assets.publish_variable(self.temperature)
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_a_harvest_that_only_adds_steps_of_the_same_store_is_announced_too(self):
+        # Its entries reached the hash step by step, before the Variable was published.
+        self.hold("temperature_2m", 0)
+        self.harvest()
+        self.heard()
+        self.hold("temperature_2m", 0, 3)
+
+        self.harvest()
 
         self.assertEqual(self.heard(), [variable_key(self.temperature)])
 

@@ -28,7 +28,7 @@ from georiva.sources.models import FetchRun
 from georiva.sources.registry import data_feed_viewset_registry
 
 from .support import RecheckPages
-from .test_store_harvest import RUN_STEP_GRID, STORE, STORE_TYPE, WHOLE_FIELD, StoreFeedMixin
+from .test_store_harvest import RUN_STEP_GRID, STORE, STORE_TYPE, WHOLE_FIELD, HearsStoreAnnouncements, StoreFeedMixin
 
 User = get_user_model()
 
@@ -453,12 +453,13 @@ class DecliningEverythingTests(StoreRecheckMixin, TestCase):
         self.run_now.assert_called_once_with()
 
 
-class ConfirmedChangesReachTitilerTests(StoreRecheckMixin, TestCase):
+class ConfirmedChangesReachTitilerTests(HearsStoreAnnouncements, StoreRecheckMixin, TestCase):
     def setUp(self):
         self.redis = get_redis_connection("default")
         self._sweep_redis()
         self.addCleanup(self._sweep_redis)
         super().setUp()
+        self.listen_for_announcements()
 
     def _sweep_redis(self):
         keys = list(self.redis.scan_iter(match=f"{REMOTE_ASSETS_KEY_PREFIX}:*"))
@@ -485,3 +486,25 @@ class ConfirmedChangesReachTitilerTests(StoreRecheckMixin, TestCase):
         self.harvest()
 
         self.assertEqual({entry["store"] for entry in self.published()}, {MOVED_STORE})
+
+    def test_a_confirmed_pin_is_announced_so_running_workers_open_the_store_under_it(self):
+        self.publish_store(places=(MOVED_BUCKET,))
+
+        self.answer({"allow_place": MOVED_BUCKET, "forget_place": GFS_BUCKET})
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_an_adopted_address_is_announced_once_the_harvest_has_rewritten_the_rows(self):
+        self.publish_store(href=MOVED_STORE)
+
+        self.answer({"adopt_store": MOVED_STORE})
+        self.assertEqual(self.heard(), [], "nothing is published until the harvest rewrites the rows")
+        self.feed.refresh_from_db()
+        self.harvest()
+
+        self.assertEqual(self.heard(), [variable_key(self.temperature)])
+
+    def test_a_recheck_that_changes_nothing_announces_nothing(self):
+        self.answer({})
+
+        self.assertEqual(self.heard(), [])

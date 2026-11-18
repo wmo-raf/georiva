@@ -32,12 +32,16 @@ Values: a Remote COG's href, or a Store asset's :func:`store_entry` as JSON
 
 *Django announces a change to the stores it publishes* (#706). Each Titiler
 worker opens the published stores ahead of their first tile (``app.warm``), and
-a store is kept open under its (address, pins): a new store harvest, a re-check
-that changes a feed's pins, or an adopted address leaves a running worker with
-nothing open under the new key. So whenever :func:`publish_variable` writes a
-hash that names a store, or named one before, its key is said on
-:data:`STORES_CHANNEL`; :func:`publish_all` says :data:`ALL_STORES` once, and
-:func:`withdraw_variable` says the key of a hash that named one. The message is
+a store is kept open under its address and the feed's Pinned locations: a new
+store harvest, a re-check that changes a feed's Pinned locations, or an adopted
+address leaves a running worker with nothing open under the new key. So
+whenever :func:`publish_variable` writes a hash that names a store, or named one
+before, its key is said on :data:`STORES_CHANNEL` — every store harvest, then,
+changed or not: each step's entry reaches the hash as its asset is saved, before
+the harvest publishes the Variable, so the hash cannot say what is new. A worker
+that hears an unchanged store reads the hashes and opens nothing.
+:func:`publish_all` says :data:`ALL_STORES` once, and :func:`withdraw_variable`
+says the key of a hash that named a store. The message is
 a nudge, not the news: a worker that hears it reads the hashes again, opens what
 it has not, and drops what no hash names any more. A message lost on the way
 costs only the warm-up it would have started.
@@ -168,8 +172,10 @@ def publish_variable(variable) -> str | None:
         key = variable_key(variable)
         values = _values(_published_assets().filter(variable=variable).values_list(*_ROW))
         fields = {field: value for (_, field), value in values.items()}
-        before = _write_hash(key, fields)
-        if _names_store(before) or _names_store(fields.values()):
+        before = _replace_hash(key, fields)
+        # Whether or not they changed: each step's store entry is written as its
+        # asset is saved, before this runs, so the hash cannot say what is new.
+        if _stores_named(before) or _stores_named(fields.values()):
             _announce(key)
         return key
     except Exception as e:
@@ -198,7 +204,7 @@ def publish_all() -> None:
     for variable in Variable.objects.filter(is_active=True).select_related("collection__catalog__organisation"):
         try:
             key = variable_key(variable)
-            _write_hash(key, hrefs.get(variable.pk, {}))
+            _replace_hash(key, hrefs.get(variable.pk, {}), read_before=False)  # announced once, below
             live_keys.add(key)
         except Exception as e:
             logger.warning("Failed to publish remote assets for variable %s: %s", variable.slug, e)
@@ -213,22 +219,26 @@ def publish_all() -> None:
     )
 
 
-def _write_hash(key: str, fields: dict[str, str]) -> list:
-    """Replace the hash at ``key``, returning the values it held. In one
+def _replace_hash(key: str, fields: dict[str, str] | None, *, read_before: bool = True) -> list:
+    """Replace the hash at ``key`` with ``fields``, marked published whole, or
+    drop it for ``None``. Returns the values it held, if ``read_before``. In one
     transaction, so a reader sees the old hash or the new one and never a
     half-filled one that claims to be whole."""
     from django_redis import get_redis_connection
 
     pipeline = get_redis_connection("default").pipeline(transaction=True)
-    pipeline.hvals(key)
+    if read_before:
+        pipeline.hvals(key)
     pipeline.delete(key)
-    pipeline.hset(key, mapping={**fields, PUBLISHED_FIELD: "1"})
-    return pipeline.execute()[0]
+    if fields is not None:
+        pipeline.hset(key, mapping={**fields, PUBLISHED_FIELD: "1"})
+    done = pipeline.execute()
+    return done[0] if read_before else []
 
 
-def _names_store(values) -> bool:
-    """Whether any of a hash's values is a Store asset's entry."""
-    return any(_is_store_entry(value) for value in values)
+def _stores_named(values) -> set[str]:
+    """The Store asset entries among a hash's values, read back (bytes) or about to be written (str)."""
+    return {value.decode() if isinstance(value, bytes) else value for value in values if _is_store_entry(value)}
 
 
 def _is_store_entry(value: str | bytes) -> bool:
@@ -251,14 +261,9 @@ def _announce(about: str) -> None:
 
 def withdraw_variable(variable) -> None:
     """Drop ``variable``'s hash, for its deletion. Best-effort, like ``palette_cache.prune_variable``."""
-    from django_redis import get_redis_connection
-
     try:
         key = variable_key(variable)
-        pipeline = get_redis_connection("default").pipeline(transaction=True)
-        pipeline.hvals(key)
-        pipeline.delete(key)
-        if _names_store(pipeline.execute()[0]):
+        if _stores_named(_replace_hash(key, None)):
             _announce(key)
     except Exception as e:
         logger.warning("Failed to withdraw remote assets for variable %s: %s", getattr(variable, "slug", "?"), e)
