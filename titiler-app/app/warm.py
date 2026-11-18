@@ -235,7 +235,7 @@ def published_stores() -> dict[tuple[str, tuple[tuple[str, str], ...]], set[str]
             continue
         for field, value in entries.items():
             # Most timesteps of a Variable repeat one entry: each is read once.
-            if field == REMOTE_ASSETS_PUBLISHED_FIELD or not value.startswith("{") or value in seen:
+            if field == REMOTE_ASSETS_PUBLISHED_FIELD or not store.is_store_entry(value) or value in seen:
                 continue
             seen.add(value)
             try:

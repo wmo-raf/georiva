@@ -119,6 +119,14 @@ class StoreSlice:
         return f"{self.store}#{self.array}@{at}"
 
 
+def is_store_entry(value: str) -> bool:
+    """Whether a remote-assets hash value is a Store asset's entry rather than a
+    Remote COG's href: an entry is a JSON object, and an href opens with its
+    scheme. Told apart as Django tells them apart
+    (``_is_store_entry`` in ``georiva/core/machine_plane/remote_assets.py``)."""
+    return value.startswith("{")
+
+
 def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...]]:
     """The store, the array and the pins a published entry names, the pins as
     every request spells them. Raises :class:`StoreMisdescribed` for an entry

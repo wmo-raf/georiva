@@ -157,7 +157,7 @@ def remote_source(variable, time: datetime, reference_time: datetime | None = No
         .values_list(*_ROW)[:1]
     )
     for value in _values(rows).values():
-        return json.loads(value) if value.startswith("{") else value
+        return json.loads(value) if _is_store_entry(value) else value
     return None
 
 
@@ -227,8 +227,16 @@ def _write_hash(key: str, fields: dict[str, str]) -> list:
 
 
 def _names_store(values) -> bool:
-    """Whether any of a hash's values is a Store asset's entry, read back (bytes) or about to be written (str)."""
-    return any((value.decode() if isinstance(value, bytes) else value).startswith("{") for value in values)
+    """Whether any of a hash's values is a Store asset's entry."""
+    return any(_is_store_entry(value) for value in values)
+
+
+def _is_store_entry(value: str | bytes) -> bool:
+    """Whether a hash value is a Store asset's :func:`store_entry`, read back
+    (bytes) or about to be written (str), rather than a Remote COG's href: an
+    entry is a JSON object, and an href opens with its scheme. Titiler tells
+    them apart the same way (``app.store.is_store_entry``)."""
+    return (value.decode() if isinstance(value, bytes) else value).startswith("{")
 
 
 def _announce(about: str) -> None:
