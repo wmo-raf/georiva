@@ -86,11 +86,13 @@ never copied.**
    rewrites the same `Asset` in place and runs the after-save hooks (zonal statistics, virtual-Zarr manifest). The
    copy holds what the upstream file held (#725): every band, in the file's own dtype, with its own nodata value —
    not narrowed to band 1 and re-encoded with NaN for nodata as ingestion treats a source file — so a Remote asset
-   and its local copy differ in nothing but the href. A file declaring no nodata is given none, unless the
-   catalog's boundary mask cuts it and needs a value outside the boundary: NaN, or for integers the dtype's
-   default fill. The statistics are band 1's — the band the Variable maps and every reader draws — without the
-   nodata value. A multi-band upstream is copied whole rather than refused: every reader opens the copy as it
-   opened the Remote file, so cutting it to band 1 would be the one thing that told the two apart. Overviews are
+   and its local copy differ in nothing but the href. A file declaring no nodata is given none. Nor is the copy
+   clipped to the catalog's boundary, as an ingested file is (#726): its Remote neighbours are served as the
+   Upstream publishes them, so a clipped copy would give a Mixed collection two footprints — in tiles, STAC bbox
+   and timeseries alike. A `display` catalog crops both kinds alike, on the map only (ADR 0038). The item keeps
+   the Upstream's bbox for its bounds: the copy is the very file that bbox described. The statistics are band 1's —
+   the band the Variable maps and every reader draws — without the nodata value. A multi-band upstream is copied
+   whole rather than refused: every reader opens the copy as it opened the Remote file, so cutting it to band 1 would be the one thing that told the two apart. Overviews are
    still built by averaging, so a categorical integer upstream's coarse zoom levels are averages of its classes. It does not take the Loader's
    bucket round-trip: ingestion from a file ingests every Variable that names a source in it, and a harvested
    Variable names none — each upstream file is one Variable at one time already. So a materialization leaves no

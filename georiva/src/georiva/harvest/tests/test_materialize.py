@@ -302,6 +302,53 @@ class AMaterializedAssetKeepsItsUpstreamAsHistoryTests(MaterializeMixin, TestCas
         )
 
 
+class AMaterializedCopyIsNotClippedTests(MaterializeMixin, TestCase):
+    """A catalog's boundary clips what is ingested, not what is harvested: a
+    Remote asset is served as its Upstream publishes it, so its local copy is
+    too, and a Mixed collection shows one footprint across the boundary (#726).
+    A `display` catalog crops both alike, on the map only (ADR 0038)."""
+
+    def setUp(self):
+        super().setUp()
+        from adminboundarymanager.models import AdminBoundary
+        from django.contrib.gis.geos import MultiPolygon, Polygon
+
+        self.boundary = AdminBoundary.objects.create(
+            name_0="Testland", gid_0="TST", level=0, geom=MultiPolygon(Polygon.from_bbox((35.0, -3.0, 40.0, 3.0)))
+        )
+        self.harvest()
+        self.asset = self.asset_on(3)
+        self.data = numpy.arange(64, dtype="float32").reshape(8, 8)
+        self.upstream.rasters[rain_href(3)] = self.data
+
+    def copy_in(self, clip_mode):
+        from georiva.core.models import Catalog
+
+        Catalog.objects.filter(pk=self.feed.catalog_id).update(clip_mode=clip_mode, boundary=self.boundary)
+        self.assertEqual(self.materialize(self.asset.pk), MATERIALIZED)
+        self.asset.refresh_from_db()
+        return self.writer.written[self.asset.href]
+
+    def test_a_clipping_catalog_copies_the_whole_upstream_grid(self):
+        from georiva.core.models import Catalog
+
+        for clip_mode in (Catalog.ClipMode.BBOX, Catalog.ClipMode.MASK, Catalog.ClipMode.DISPLAY):
+            with self.subTest(clip_mode=clip_mode):
+                Asset.objects.filter(pk=self.asset.pk).update(href=rain_href(3), harvested_by=self.feed)
+                written = self.copy_in(clip_mode)
+
+                numpy.testing.assert_array_equal(written, self.data)
+                self.assertEqual((self.asset.width, self.asset.height), (8, 8))
+
+    def test_its_item_keeps_the_upstreams_bbox_as_its_remote_neighbours_do(self):
+        from georiva.core.models import Catalog
+
+        self.copy_in(Catalog.ClipMode.MASK)
+
+        self.assertEqual(self.asset.item.bounds, [33.0, -5.0, 42.0, 5.0])
+        self.assertEqual(self.asset.item.bounds, self.asset_on(1).item.bounds)
+
+
 class AMaterializedAssetHasLeftTheMirrorsJurisdictionTests(MaterializeMixin, TestCase):
     def setUp(self):
         super().setUp()
