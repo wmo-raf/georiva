@@ -153,6 +153,90 @@ class MaterializeVariableTests(MaterializerFixture):
         self.assertIsNone(self.item.assets.get(format=Asset.Format.COG).stats_mean)
 
 
+class AnExplicitNodataIsKeptAsGivenTests(MaterializerFixture):
+    """A caller that says what its array's nodata is — a materialization of a
+    harvested file (#725) — has it kept, its dtype with it, and its every band."""
+
+    def written(self):
+        args, kwargs = self.writer.write_cog.call_args
+        return args[0], kwargs["nodata"]
+
+    def test_the_writer_is_given_the_nodata_and_dtype_as_they_are(self):
+        data = np.full((10, 10), 7, dtype="int16")
+
+        (asset,) = self._materialize(data=data, nodata=-9999)
+
+        written, nodata = self.written()
+        self.assertEqual((written.dtype, nodata), (np.int16, -9999))
+        self.assertEqual(asset.extra_fields["nodata"], -9999)
+
+    def test_no_nodata_is_none_rather_than_one_derived_from_the_dtype(self):
+        self._materialize(data=np.full((10, 10), 255, dtype="uint8"), nodata=None)
+
+        self.assertIsNone(self.written()[1])
+
+    def test_statistics_leave_out_the_nodata_value(self):
+        data = np.full((10, 10), 7, dtype="int16")
+        data[0] = -9999
+
+        (asset,) = self._materialize(data=data, nodata=-9999)
+
+        self.assertEqual((asset.stats_min, asset.stats_max), (7, 7))
+
+    def test_a_mask_over_integers_with_no_nodata_declares_a_fill_it_can_hold(self):
+        data = np.full((10, 10), 7, dtype="uint8")
+
+        (asset,) = self._materialize(data=data, nodata=None, clipper=_StubClipper())
+
+        written, nodata = self.written()
+        self.assertEqual(written.dtype, np.uint8)
+        self.assertEqual(nodata, 255)
+        self.assertTrue((written[:, :5] == 255).all())
+        self.assertEqual((asset.stats_min, asset.stats_max), (7, 7))
+
+    def test_every_band_is_written_and_counted_and_band_one_has_the_statistics(self):
+        data = np.stack([np.full((10, 10), 1.0, dtype="float32"), np.full((10, 10), 9.0, dtype="float32")])
+
+        (asset,) = self._materialize(data=data, nodata=None)
+
+        self.assertEqual(self.written()[0].shape, (2, 10, 10))
+        self.assertEqual((asset.bands, asset.width, asset.height), (2, 10, 10))
+        self.assertEqual(asset.stats_max, 1.0)
+
+    def test_a_nan_nodata_is_recorded_as_none(self):
+        """NaN is not JSON; an ingested asset's NaN nodata reads None the same way."""
+        (asset,) = self._materialize(nodata=np.nan)
+
+        self.assertIsNone(asset.extra_fields["nodata"])
+
+
+class ABandedArrayIsClippedBandByBandTests(MaterializerFixture):
+    def test_clip_array_crops_every_band(self):
+        clipper = MagicMock()
+        clipper.is_active = True
+        window = {"x_off": 2, "y_off": 2, "width": 4, "height": 3, "bounds": (12, -3, 16, 0)}
+        clipper.compute_window.return_value = window
+
+        data, _ = self.materializer.clip_array(np.zeros((3, 10, 10)), [10, -5, 20, 5], clipper)
+
+        self.assertEqual(data.shape, (3, 3, 4))
+
+    def test_the_geometry_mask_covers_every_band(self):
+        from georiva.ingestion.clipper import BoundaryClipper
+
+        inside = np.zeros((10, 10), dtype=bool)
+        inside[:, 5:] = True
+        clipper = BoundaryClipper(apply_mask=True)
+        with (
+            mock.patch.object(BoundaryClipper, "shapely_geom", new_callable=mock.PropertyMock, return_value=object()),
+            mock.patch.object(clipper, "create_mask", return_value=inside),
+        ):
+            masked = clipper.apply_geometry_mask(np.ones((2, 10, 10), dtype="int16"), (10, -5, 20, 5), nodata=-1)
+
+        self.assertTrue((masked[:, :, :5] == -1).all())
+        self.assertTrue((masked[:, :, 5:] == 1).all())
+
+
 class ClipArrayTests(MaterializerFixture):
     def test_clip_array_crops_to_window(self):
         clipper = MagicMock()

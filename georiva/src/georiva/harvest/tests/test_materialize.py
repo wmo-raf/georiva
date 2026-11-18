@@ -64,12 +64,15 @@ class KeptWriter:
 
     def __init__(self):
         self.written: dict[str, numpy.ndarray] = {}
+        #: The nodata value each object was written to declare, by key.
+        self.nodata: dict = {}
         self.depths: list[int] = []
         self.bucket = KeptBucket(self.written)
 
     def write_cog(self, data, output_path, bounds, crs="EPSG:4326", nodata=None):
         self.depths.append(len(connection.savepoint_ids))
         self.written[output_path] = numpy.array(data)
+        self.nodata[output_path] = nodata
         return output_path
 
 
@@ -200,6 +203,70 @@ class AMaterializedAssetIsTheSameAssetMadeLocalTests(MaterializeMixin, TestCase)
         self.assertEqual(self.upstream.fetched, fetched)
 
 
+class AMaterializedCopyHoldsWhatTheUpstreamFileHeldTests(MaterializeMixin, TestCase):
+    """Every band, in the upstream's own dtype, with its own nodata value: a
+    copy, not a re-encoding (#725). Nothing downstream tells a Remote asset
+    from its local copy beyond the href."""
+
+    def setUp(self):
+        super().setUp()
+        self.harvest()
+        self.asset = self.asset_on(3)
+
+    def copy_of(self, data, nodata=-9999.0):
+        self.upstream.rasters[rain_href(3)] = data
+        self.upstream.nodata[rain_href(3)] = nodata
+        self.assertEqual(self.materialize(self.asset.pk), MATERIALIZED)
+        self.asset.refresh_from_db()
+        return self.writer.written[self.asset.href], self.writer.nodata[self.asset.href]
+
+    def test_integer_values_stay_integers_with_their_own_nodata(self):
+        data = numpy.arange(64, dtype="int16").reshape(8, 8)
+        data[0, 0] = -9999
+
+        written, nodata = self.copy_of(data)
+
+        self.assertEqual(written.dtype, numpy.int16)
+        numpy.testing.assert_array_equal(written, data)
+        self.assertEqual(nodata, -9999)
+        self.assertEqual(self.asset.extra_fields["nodata"], -9999)
+
+    def test_a_float64_upstream_keeps_its_precision(self):
+        data = numpy.full((8, 8), 1 + 1e-12, dtype="float64")
+
+        written, _ = self.copy_of(data)
+
+        self.assertEqual(written.dtype, numpy.float64)
+        numpy.testing.assert_array_equal(written, data)
+
+    def test_a_file_declaring_no_nodata_is_not_given_one(self):
+        data = numpy.full((8, 8), 255, dtype="uint8")
+
+        written, nodata = self.copy_of(data, nodata=None)
+
+        numpy.testing.assert_array_equal(written, data)
+        self.assertIsNone(nodata)
+        self.assertEqual(self.asset.stats_max, 255)
+
+    def test_every_band_is_copied(self):
+        data = numpy.stack([numpy.full((8, 8), band, dtype="float32") for band in (1.0, 2.0, 3.0)])
+
+        written, _ = self.copy_of(data)
+
+        numpy.testing.assert_array_equal(written, data)
+        self.assertEqual(self.asset.bands, 3)
+
+    def test_statistics_are_the_first_bands_and_leave_out_nodata(self):
+        """Band 1 is the band the Variable maps, and the one every reader draws."""
+        first = numpy.arange(64, dtype="int16").reshape(8, 8) + 10
+        first[0, :] = -9999
+        data = numpy.stack([first, numpy.full((8, 8), 500, dtype="int16")])
+
+        self.copy_of(data)
+
+        self.assertEqual((self.asset.stats_min, self.asset.stats_max), (18, 73))
+
+
 class AMaterializedAssetKeepsItsUpstreamAsHistoryTests(MaterializeMixin, TestCase):
     UPDATED = day(20)
 
@@ -219,7 +286,8 @@ class AMaterializedAssetKeepsItsUpstreamAsHistoryTests(MaterializeMixin, TestCas
         self.assertEqual(self.asset.checksum, "")
 
     def test_its_extra_fields_describe_the_local_bytes(self):
-        self.assertIsNone(self.asset.extra_fields["nodata"])
+        # The file's own nodata, which is what the copy keeps — not what the Upstream's catalog said of it.
+        self.assertEqual(self.asset.extra_fields["nodata"], -9999.0)
         self.assertNotIn("upstream_updated", self.asset.extra_fields)
 
     def test_where_it_came_from_is_kept_as_history(self):

@@ -160,7 +160,7 @@ class BoundaryClipper:
         Mask data to boundary geometry.
 
         Args:
-            data: 2D array to mask
+            data: 2D array to mask, or a 3D one (bands first), masked band by band
             bounds: Data bounds
             nodata: Value to use outside geometry
 
@@ -170,10 +170,10 @@ class BoundaryClipper:
         if not self.apply_mask or not self.shapely_geom:
             return data
 
-        height, width = data.shape[:2]
+        height, width = data.shape[-2:]
         mask = self.create_mask(bounds, width, height)
 
         result = data.copy()
-        result[~mask] = nodata
+        result[..., ~mask] = nodata
 
         return result

@@ -5,13 +5,19 @@ archive stays Remote (ADR 0042 §8, #640).
 A feed with a materialization window sends, from each of its runs, the Remote
 COGs of its Jurisdiction inside that window to the ingestion queue, one asset
 per task. There each is fetched — its href, and any redirect, past the same
-Asset host allowlist a harvested href passes (§9) — read as ingestion reads a
-GeoTIFF, and handed to the shared write step ingestion and derivation end in
-(`AssetMaterializer`). That step writes the COG into our storage, rewrites the
-same Asset row in place — its href now a key of ours — computes its statistics
-from the local bytes, widens the collection's extent and runs the after-save
-hooks, so the asset gets zonal statistics and a virtual-Zarr manifest like any
-ingested one.
+Asset host allowlist a harvested href passes (§9) — read north up, and handed
+to the shared write step ingestion and derivation end in (`AssetMaterializer`).
+That step writes the COG into our storage, rewrites the same Asset row in place
+— its href now a key of ours — computes its statistics from the local bytes,
+widens the collection's extent and runs the after-save hooks, so the asset gets
+zonal statistics and a virtual-Zarr manifest like any ingested one.
+
+The copy holds what the upstream file held: every band, in its own dtype, with
+its own nodata value — not re-encoded as ingestion re-encodes a source file,
+narrowed to band 1 with nodata as NaN (#725). A file declaring no nodata is
+given none, unless the catalog's boundary mask cuts it, which needs a value to
+write outside the boundary. Its statistics are band 1's, the band its Variable
+maps and every reader draws, without the nodata value.
 
 The rewritten href fails the Jurisdiction's "still Remote" test, so the asset
 has left the Mirror for good: no later harvest removes or rewrites it, even
@@ -45,6 +51,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.db import transaction
@@ -58,6 +65,9 @@ from georiva.core.storage.asset_location import remote_q
 from .asset_hosts import AssetHostAllowlist
 from .extra_fields import rewritten
 from .upstream import UpstreamUnreachable
+
+if TYPE_CHECKING:
+    import numpy
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +223,7 @@ def materialize(asset_id: int, *, upstream=None, writer=None) -> str:
         path = Path(folder) / "asset.tif"
         try:
             upstream.fetch_asset(asset.href, path, addresses=allowlist.addresses)
-            extracted = _read(path)
+            raster = _read(path)
         except UpstreamUnreachable as unreachable:
             logger.warning("Harvest %s: asset %s not kept locally — %s", feed.name, asset.pk, unreachable)
             return UNREACHABLE
@@ -221,24 +231,40 @@ def materialize(asset_id: int, *, upstream=None, writer=None) -> str:
             logger.warning("Harvest %s: asset %s not kept locally — unreadable: %s", feed.name, asset.pk, unreadable)
             return UNREACHABLE
 
-    return MATERIALIZED if _write(asset, feed, extracted, writer) else LEFT
+    return MATERIALIZED if _write(asset, feed, raster, writer) else LEFT
 
 
-def _read(path: Path):
-    """The file's first band as ingestion reads a GeoTIFF: nodata as NaN, north up."""
+@dataclass(frozen=True)
+class _Raster:
+    """An upstream file as read: in its own dtype, north up — a grid for a
+    one-band file, else its bands first — and the nodata value it declares, or None."""
+
+    data: numpy.ndarray
+    nodata: float | None
+    bounds: tuple[float, float, float, float]
+    crs: str
+
+
+def _read(path: Path) -> _Raster:
+    """The file's every band as it holds them, north up."""
     import numpy
+    import rasterio
 
     from georiva.formats.geotiff import GeoTIFFFormatPlugin
 
-    extracted = GeoTIFFFormatPlugin().extract_variable(path, "band_1")
-    if extracted.data.dtype == numpy.float64:
-        # Widened only to hold NaN where nodata was: the upstream's own precision is kept.
-        extracted.data = extracted.data.astype("float32")
-    return extracted
+    with rasterio.open(path) as src:
+        data = src.read()
+        bounds, _, crs, needs_flip = GeoTIFFFormatPlugin._spatial_from_rasterio(src, None)
+        nodata = src.nodata
+    if needs_flip:
+        data = numpy.flip(data, axis=1)
+    if len(data) == 1:
+        data = data[0]
+    return _Raster(data=data, nodata=nodata, bounds=bounds, crs=crs)
 
 
-def _write(asset, feed, extracted, writer) -> bool:
-    """Ingest `extracted` as `asset`, if it is still the feed's and still
+def _write(asset, feed, raster: _Raster, writer) -> bool:
+    """Ingest `raster` as `asset`, if it is still the feed's and still
     Remote; False when it has left the Jurisdiction meanwhile.
 
     The COG is written to storage first, and only then is the row locked and
@@ -254,15 +280,16 @@ def _write(asset, feed, extracted, writer) -> bool:
     item = asset.item
     clipper = catalog_clipper(item.collection)
     materializer = AssetMaterializer(writer or AssetWriter(storage.assets))
-    data, bounds = materializer.clip_array(extracted.data, extracted.bounds, clipper)
+    data, bounds = materializer.clip_array(raster.data, raster.bounds, clipper)
     written = materializer.write_cog(
         item=item,
         variable=asset.variable,
         data=data,
         bounds=bounds,
-        crs=extracted.crs or "EPSG:4326",
+        crs=raster.crs,
         timestamp=item.time,
         clipper=clipper,
+        nodata=raster.nodata,
     )
 
     with transaction.atomic():

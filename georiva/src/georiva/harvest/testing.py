@@ -92,8 +92,11 @@ class FakeUpstream:
         self.probed: list[tuple[str, bool]] = []
 
         # What only a materialization asks: a file's whole bytes.
-        #: The pixels of each file, by href; one not here is an 8×8 grid of 7.0 over the items' usual box.
+        #: The pixels of each file, by href — a grid, or bands of grids; one not here is an 8×8 grid of
+        #: 7.0 over the items' usual box.
         self.rasters: dict = {}
+        #: The nodata value each file declares, by href — None for none; one not here declares -9999.
+        self.nodata: dict = {}
         #: Where each href redirects to, when it does.
         self.redirects: dict[str, str] = {}
         #: Why a file cannot be had, by href.
@@ -327,20 +330,21 @@ class FakeUpstream:
         data = self.rasters.get(href)
         if data is None:
             data = numpy.full((8, 8), 7.0, dtype="float32")
-        height, width = data.shape
+        bands = data if data.ndim == 3 else data[numpy.newaxis]
+        count, height, width = bands.shape
         with rasterio.open(
             dest,
             "w",
             driver="GTiff",
             width=width,
             height=height,
-            count=1,
+            count=count,
             dtype=str(data.dtype),
             crs="EPSG:4326",
-            nodata=-9999.0,
+            nodata=self.nodata.get(href, -9999.0),
             transform=from_bounds(33.0, -5.0, 42.0, 5.0, width, height),
         ) as out:
-            out.write(data, 1)
+            out.write(bands)
         from pathlib import Path
 
         return Path(dest).stat().st_size
