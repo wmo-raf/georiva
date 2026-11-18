@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import warnings
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -221,6 +220,15 @@ class MinioVirtualTIFF(VirtualTIFF):
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class OpenedCog:
+    """One COG's header, scanned: its virtual dataset, not yet stacked."""
+
+    url: str
+    time: pd.Timestamp
+    vds: xr.Dataset
+
+
 @dataclass
 class VirtualZarrBuilder:
     """
@@ -239,35 +247,54 @@ class VirtualZarrBuilder:
         self._registry = self.config.build_registry()
         self._parser = MinioVirtualTIFF(self.config)
 
-    def build(
-        self,
-        url_df: pd.DataFrame,
-        variable_name: str = "data",
-        per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
-    ) -> xr.Dataset:
+    def build(self, url_df: pd.DataFrame, variable_name: str = "data") -> xr.Dataset:
         """
         Build a virtual dataset of chunk references over the given COGs.
 
-        Parameters
-        ----------
-        url_df : pd.DataFrame
-            Columns: ``date`` (datetime-like, tz-naive UTC) and ``url`` (str).
-        variable_name : str
-            Name for the data variable in the output dataset.  The raw IFD
-            index variable (``"0"``) is renamed to this value.
-        per_cog_check : callable, optional
-            Called with each raw single-COG virtual dataset and its URL before
-            concatenation — the append path uses this for the heterogeneity
-            guard, so a mismatch fails naming the offending asset.
+        ``url_df`` has columns ``date`` (datetime-like) and ``url`` (str);
+        the result is a (time, lat, lon) dataset whose chunk refs are s3://
+        URIs, its data variable named ``variable_name``.
+        """
+        return self.assemble(self.open(url_df), variable_name)
 
-        Returns
-        -------
-        xr.Dataset
-            Virtual dataset (time, lat, lon) whose chunk refs are s3:// URIs.
+    def open(self, url_df: pd.DataFrame) -> list[OpenedCog]:
+        """
+        Scan each COG's header — range requests only, no pixel data — in the
+        order given, so a caller can choose which to hold before any are
+        stacked (``compat.select``).
         """
         logger.info("Scanning %d COG headers…", len(url_df))
-        combined = self._build_virtual_dataset(url_df, per_cog_check)
+        opened = []
+        for _, row in url_df.iterrows():
+            with warnings.catch_warnings():
+                # virtual-tiff's predictor codecs are outside the zarr v3
+                # spec and warn on every COG — expected noise, keep worker
+                # logs readable.
+                warnings.filterwarnings("ignore", category=UserWarning, module="virtual_tiff")
+                vds = open_virtual_dataset(
+                    url=row["url"],
+                    registry=self._registry,
+                    parser=self._parser,
+                )
+            # Normalise to tz-naive UTC — TimescaleDB returns timezone-aware
+            # datetime64[us, UTC] which numpy/xarray cannot use as a coord dtype.
+            ts = pd.Timestamp(row["date"])
+            if ts.tzinfo is not None:
+                ts = ts.tz_convert("UTC").tz_localize(None)
+            opened.append(OpenedCog(url=row["url"], time=ts, vds=vds))
+        return opened
 
+    def assemble(self, opened: list[OpenedCog], variable_name: str = "data") -> xr.Dataset:
+        """
+        Stack opened COGs along ``time``, attach lat/lon, name the data
+        variable ``variable_name`` (the raw IFD index variable is ``"0"``)
+        and rewrite chunk URLs to s3:// URIs. Every COG must share one
+        signature — a caller with mixed ones chooses first.
+        """
+        combined = xr.concat(
+            [cog.vds.assign_coords(time=cog.time).expand_dims("time") for cog in opened],
+            dim="time",
+        )
         combined = self._assign_geo_coords(combined)
 
         raw_var = list(combined.data_vars)[0]
@@ -280,35 +307,6 @@ class VirtualZarrBuilder:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _build_virtual_dataset(
-        self,
-        url_df: pd.DataFrame,
-        per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
-    ) -> xr.Dataset:
-        virtual_datasets = []
-        for _, row in url_df.iterrows():
-            with warnings.catch_warnings():
-                # virtual-tiff's predictor codecs are outside the zarr v3
-                # spec and warn on every COG — expected noise, keep worker
-                # logs readable.
-                warnings.filterwarnings("ignore", category=UserWarning, module="virtual_tiff")
-                vds = open_virtual_dataset(
-                    url=row["url"],
-                    registry=self._registry,
-                    parser=self._parser,
-                )
-            if per_cog_check is not None:
-                per_cog_check(vds, row["url"])
-            # Normalise to tz-naive UTC — TimescaleDB returns timezone-aware
-            # datetime64[us, UTC] which numpy/xarray cannot use as a coord dtype.
-            ts = pd.Timestamp(row["date"])
-            if ts.tzinfo is not None:
-                ts = ts.tz_convert("UTC").tz_localize(None)
-
-            vds = vds.assign_coords(time=ts).expand_dims("time")
-            virtual_datasets.append(vds)
-        return xr.concat(virtual_datasets, dim="time")
 
     @staticmethod
     def _assign_geo_coords(ds: xr.Dataset) -> xr.Dataset:

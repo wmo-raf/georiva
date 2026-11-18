@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from .compat import LeftOut, left_out_count, left_out_from_json
+
 if TYPE_CHECKING:
     from georiva.core.models import Variable
 
@@ -120,6 +122,8 @@ class VariableCoverage:
     repo_object_count: int
     error: str  # manifest.error (last failure message)
     repo_read_error: str  # non-empty when the live repo read itself failed
+    # Assets the repo does not hold, by reason (#732) — as of the last build.
+    left_out: tuple[LeftOut, ...] = ()
 
     @property
     def display_status(self) -> str:
@@ -137,6 +141,15 @@ class VariableCoverage:
     @property
     def repo_count(self) -> int:
         return len(self.repo_timestamps)
+
+    @property
+    def left_out_count(self) -> int:
+        return left_out_count(self.left_out)
+
+    @property
+    def left_out_summary(self) -> str:
+        """Every reason in one line, for a hover."""
+        return "; ".join(f"{entry.count} × {entry.reason}" for entry in self.left_out)
 
     @property
     def missing_count(self) -> int:
@@ -278,6 +291,7 @@ def _one_variable(variable, manifest, catalog: _CatalogState, now) -> VariableCo
         repo_object_count=(manifest.repo_object_count if manifest is not None else 0),
         error=manifest.error if manifest is not None else "",
         repo_read_error=repo_read_error,
+        left_out=left_out_from_json(manifest.left_out) if manifest is not None else (),
     )
 
 

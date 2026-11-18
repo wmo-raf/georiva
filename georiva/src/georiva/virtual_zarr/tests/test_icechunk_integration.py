@@ -68,13 +68,13 @@ class IcechunkStorageChecks(SimpleTestCase):
         _write_cog(key, data)
         return key
 
-    def _build_vds(self, dated_keys, variable="precip", per_cog_check=None):
+    def _build_vds(self, dated_keys, variable="precip"):
         from georiva.virtual_zarr.virtual_zarr import VirtualZarrBuilder
 
         url_df = pd.DataFrame(
             [{"date": pd.Timestamp(date), "url": self.config.url_for(key)} for date, key in dated_keys]
         )
-        return VirtualZarrBuilder(self.config).build(url_df, variable_name=variable, per_cog_check=per_cog_check)
+        return VirtualZarrBuilder(self.config).build(url_df, variable_name=variable)
 
     def _commit_rebuild(self, repo, vds, item_count):
         from georiva.virtual_zarr.repo import commit_metadata
@@ -259,7 +259,7 @@ class BuildTaskEndToEndTests(TestCase):
         self.addCleanup(_purge_prefix, storage.assets, self.catalog.storage_prefix)
         self.addCleanup(_purge_prefix, storage.zarr, self.catalog.storage_prefix)
 
-    def _add_item(self, day: int):
+    def _add_item(self, day: int, data=None):
         from georiva.core.models import Asset, Item
 
         ts = datetime(2026, 3, day, tzinfo=UTC)
@@ -272,7 +272,7 @@ class BuildTaskEndToEndTests(TestCase):
             height=64,
         )
         key = f"{self.catalog.storage_prefix}/daily/precip/2026/03/{day:02d}/precip.tif"
-        _write_cog(key, self.rng.random((64, 64), dtype="float32"))
+        _write_cog(key, self.rng.random((64, 64), dtype="float32") if data is None else data)
         asset = Asset.objects.create(
             item=item,
             variable=self.variable,
@@ -413,3 +413,71 @@ class BuildTaskEndToEndTests(TestCase):
         manifest.refresh_from_db()
         self.assertGreater(manifest.repo_size_bytes, 0)
         self.assertGreater(manifest.repo_object_count, 0)
+
+    def test_a_newer_signature_rebuilds_and_leaves_the_older_assets_out(self):
+        """#732: copies materialized as float32 (#640) meet one in the upstream's
+        own int16 (#725) — the build holds the newest and names the rest."""
+        from georiva.virtual_zarr.models import VirtualZarrManifest
+        from georiva.virtual_zarr.tasks import _run_build
+
+        self._add_item(1)
+        self._add_item(2)
+        manifest = self._manifest()
+        _run_build(manifest)
+
+        self._add_item(3, data=np.arange(64 * 64, dtype="int16").reshape(64, 64))
+        report = _run_build(manifest)
+        manifest.refresh_from_db()
+
+        self.assertEqual(report.mode, "rebuild")
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
+        self.assertEqual(manifest.item_count, 1)
+        ds = manifest.open_dataset(chunks=None)
+        self.assertEqual(ds.sizes["time"], 1)
+        self.assertEqual(str(ds["precip"].encoding["dtype"]), "int16")  # stored, before decoding
+        (left_out,) = manifest.left_out
+        self.assertEqual(left_out["count"], 2)
+        self.assertIn("dtype float32, not int16", left_out["reason"])
+
+        # Settled: the left-out assets do not force a rebuild every cycle.
+        self.assertEqual(_run_build(manifest).mode, "up_to_date")
+
+        # And a later asset of the held signature appends, the record kept.
+        self._add_item(4, data=np.ones((64, 64), dtype="int16"))
+        self.assertEqual(_run_build(manifest).mode, "append")
+        manifest.refresh_from_db()
+        self.assertEqual(manifest.item_count, 2)
+        self.assertEqual(manifest.left_out[0]["count"], 2)
+
+    def test_a_multi_band_asset_is_left_out_with_a_reason(self):
+        from georiva.virtual_zarr.models import VirtualZarrManifest
+        from georiva.virtual_zarr.tasks import _run_build
+
+        self._add_item(1)
+        self._add_item(2, data=self.rng.random((3, 64, 64), dtype="float32"))
+        self._add_item(3)
+        manifest = self._manifest()
+
+        _run_build(manifest)
+        manifest.refresh_from_db()
+
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
+        ds = manifest.open_dataset(chunks=None)
+        self.assertEqual(ds["precip"].dims, ("time", "lat", "lon"))
+        self.assertEqual(ds.sizes["time"], 2)
+        (left_out,) = manifest.left_out
+        self.assertEqual(left_out["count"], 1)
+        self.assertIn("3 bands", left_out["reason"])
+
+    def test_only_multi_band_assets_park_the_manifest_with_the_reason(self):
+        from georiva.virtual_zarr.models import VirtualZarrManifest
+        from georiva.virtual_zarr.tasks import _run_build
+
+        self._add_item(1, data=self.rng.random((2, 64, 64), dtype="float32"))
+        manifest = self._manifest()
+
+        _run_build(manifest)
+        manifest.refresh_from_db()
+
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.NO_DATA)
+        self.assertIn("2 bands", manifest.left_out[0]["reason"])

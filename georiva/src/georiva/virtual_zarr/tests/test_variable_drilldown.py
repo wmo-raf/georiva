@@ -182,6 +182,24 @@ class VariableDrilldownTests(TestCase):
         self.assertContains(response, "disk full")
         self.assertContains(response, "vz-last-failure")
 
+    def test_assets_left_out_of_the_repo_are_listed_by_reason(self):
+        """#732: the drill-down says what the repo does not hold, and why."""
+        variable = self._variable()
+        self._manifest(
+            variable,
+            status=VirtualZarrManifest.Status.READY,
+            left_out=[
+                {"reason": "dtype float32, not int16 (the newest asset's)", "count": 4},
+                {"reason": "3 bands — the virtual Zarr holds single-band arrays only", "count": 1},
+            ],
+        )
+
+        response = self._get(variable)
+
+        self.assertContains(response, "vz-left-out")
+        self.assertContains(response, "dtype float32, not int16")
+        self.assertContains(response, "3 bands")
+
     def test_variable_with_no_repo_yet_degrades_gracefully(self):
         variable = self._variable()
         self._manifest(variable)

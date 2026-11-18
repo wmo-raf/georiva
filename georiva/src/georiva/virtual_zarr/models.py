@@ -5,6 +5,8 @@ from django.db import models
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
 
+from .compat import left_out_to_json
+
 if TYPE_CHECKING:
     from georiva.core.models import Variable
 
@@ -87,6 +89,15 @@ class VirtualZarrManifest(TimeStampedModel):
         default="",
         editable=False,
         help_text="Icechunk snapshot id of the last successful commit.",
+    )
+    left_out = models.JSONField(
+        default=list,
+        blank=True,
+        editable=False,
+        help_text=(
+            "Assets the repo does not hold, by reason: another array signature than "
+            "the newest asset's, or several bands (#732). [{reason, count}]"
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -193,8 +204,12 @@ class VirtualZarrManifest(TimeStampedModel):
         time_end,
         snapshot_id: str = "",
         watermark=None,
+        left_out=(),
     ) -> None:
+        """``item_count`` is the timesteps the repo holds; ``left_out`` the
+        assets it does not, as ``compat.LeftOut``."""
         self.__class__.objects.filter(pk=self.pk).update(
+            left_out=left_out_to_json(left_out),
             status=self.Status.READY,
             repo_path=repo_path,
             item_count=item_count,
@@ -216,15 +231,17 @@ class VirtualZarrManifest(TimeStampedModel):
             error=error[:2000],
         )
 
-    def mark_no_data(self) -> None:
+    def mark_no_data(self, left_out=()) -> None:
         """
-        Park the manifest when its variable has no COG assets at all.
+        Park the manifest when its variable has no COG assets at all, or
+        none the repo can hold (``left_out``, as ``compat.LeftOut``).
 
         Unlike FAILED, NO_DATA is not retried by the sweep — retrying cannot
         succeed until data actually arrives, at which point the COG save
         signal transitions it back to STALE.
         """
         self.__class__.objects.filter(pk=self.pk).update(
+            left_out=left_out_to_json(left_out),
             status=self.Status.NO_DATA,
             locked_at=None,
             locked_by="",

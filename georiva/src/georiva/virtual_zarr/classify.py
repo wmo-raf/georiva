@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from georiva.virtual_zarr.compat import LeftOut
+
 
 class BuildMode(Enum):
     REBUILD = "rebuild"
@@ -44,7 +46,9 @@ class CommittedState:
 
     watermark: datetime
     time_end: datetime
+    # Every asset accounted for in range, held or left out (#732).
     item_count: int
+    left_out: tuple[LeftOut, ...] = ()
 
 
 @dataclass(frozen=True)
