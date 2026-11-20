@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from wagtail.test.utils.form_data import inline_formset, nested_form_data, streamfield
 
-from georiva.core.models import Asset, Catalog, Collection, Item, SourceUnitCorrected, Unit, Variable
+from georiva.core.models import Asset, Catalog, Collection, Item, SourceUnitCorrected, Unit, Variable, VariableStyle
 from georiva.core.unit_utils import Conversion, ureg
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.testing import dial_org, make_organisation
@@ -126,6 +126,36 @@ class SourceUnitMigrationTests(VariableUnitsFixture, TestCase):
 
         variable.refresh_from_db()
         self.assertAlmostEqual(variable.offset, -273.15)
+
+    def test_a_range_and_stops_written_in_the_served_unit_keep_their_meaning(self):
+        # Before ADR 0046 a range and a style's stops were written in the served
+        # unit; a K source served in °C had −60…60 meaning °C.
+        variable = self.saved("K", "degC")
+        Variable.objects.filter(pk=variable.pk).update(value_min=-60.0, value_max=60.0, scale=1.0, offset=0.0)
+        style = VariableStyle.objects.create(
+            variable=variable,
+            name="Default",
+            slug="default",
+            is_default=True,
+            stops=[{"value": -60.0, "color": "#0000ff"}, {"value": 0.0, "color": "#ffffff"}],
+        )
+
+        migration.fill_source_units(apps, None)
+
+        variable.refresh_from_db()
+        style.refresh_from_db()
+        self.assertEqual((variable.value_min, variable.value_max), (213.15, 333.15))
+        self.assertEqual([stop["value"] for stop in style.stops], [213.15, 273.15])
+        self.assertEqual(style.stops[1]["color"], "#ffffff")
+
+    def test_a_range_already_in_the_source_unit_is_left_alone(self):
+        variable = self.saved("mm", "mm")
+        Variable.objects.filter(pk=variable.pk).update(value_min=0.0, value_max=500.0)
+
+        migration.fill_source_units(apps, None)
+
+        variable.refresh_from_db()
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 500.0))
 
 
 class AdminFixture(VariableUnitsFixture):
