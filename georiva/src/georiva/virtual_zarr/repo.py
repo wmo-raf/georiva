@@ -126,6 +126,7 @@ def commit_metadata(
     time_start: datetime,
     time_end: datetime,
     left_out: Sequence[LeftOut] = (),
+    cf: dict | None = None,
 ) -> dict:
     """
     Properties recorded on every commit; values must be JSON-friendly.
@@ -133,6 +134,8 @@ def commit_metadata(
     ``item_count`` and the time range cover every asset the build accounted
     for, held or ``left_out`` (#732) — what ``classify`` compares the
     catalog against, so assets left out do not read as a backfill.
+    ``cf`` is the description the array was written with (ADR 0046 §18), so a
+    change to the served unit is seen without opening the array.
     """
     return {
         "watermark": watermark.isoformat(),
@@ -140,6 +143,7 @@ def commit_metadata(
         "time_start": time_start.isoformat(),
         "time_end": time_end.isoformat(),
         "left_out": left_out_to_json(left_out),
+        "cf": cf,
     }
 
 
@@ -176,6 +180,7 @@ def latest_committed_state(repo: icechunk.Repository) -> CommittedState | None:
             time_end=datetime.fromisoformat(metadata["time_end"]),
             item_count=int(metadata["item_count"]),
             left_out=left_out_from_json(metadata.get("left_out")),
+            cf=metadata.get("cf"),
         )
     except (KeyError, TypeError, ValueError):
         logger.info(

@@ -117,22 +117,28 @@ class STACAssetSerializer(serializers.Serializer):
         if instance.location.is_store:
             data["georiva:array"] = instance.store_array
 
-        # Raster extension for data assets
+        # Raster extension for data assets. The bytes hold the source unit;
+        # `scale` and `offset` turn them into the served `unit` (ADR 0046 §18),
+        # generated here so they follow the Variable's served unit. Statistics
+        # are stored raw and served converted; a spread has no offset.
         if instance.is_data:
-            raster_bands = [
-                {
-                    "nodata": instance.nodata,
-                    "unit": instance.variable.unit.symbol if instance.variable.unit else None,
-                }
-            ]
+            variable = instance.variable
+            band = {
+                "nodata": instance.nodata,
+                "scale": variable.scale,
+                "offset": variable.offset,
+                "unit": variable.unit.symbol if variable.unit else None,
+            }
             if instance.stats_min is not None:
-                raster_bands[0]["statistics"] = {
-                    "minimum": instance.stats_min,
-                    "maximum": instance.stats_max,
-                    "mean": instance.stats_mean,
-                    "stddev": instance.stats_std,
+                band["statistics"] = {
+                    "minimum": variable.served(instance.stats_min),
+                    "maximum": variable.served(instance.stats_max),
+                    "mean": variable.served(instance.stats_mean),
+                    "stddev": None
+                    if instance.stats_std is None
+                    else float(f"{instance.stats_std * abs(variable.scale):.12g}"),
                 }
-            data["raster:bands"] = raster_bands
+            data["raster:bands"] = [band]
 
         # File extension
         if instance.file_size:
