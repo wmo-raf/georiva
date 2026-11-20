@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
@@ -27,10 +28,16 @@ class PlannedVariable:
     #: The upstream asset key, or for an Upstream store the array's full path in it.
     asset_key: str
     name: str
+    #: The served unit: the operator's choice of how its values are shown.
     unit_id: int
+    #: The value range, in the source unit, as every stored number is (ADR 0046 §9).
     value_min: float
     value_max: float
     description: str = ""
+    #: The unit the Upstream's bytes are in (ADR 0046 §9); the served unit when `None`.
+    source_unit_id: int | None = None
+    #: Whether its values are water, so that kg m-2 may be shown in mm (ADR 0046 §6).
+    water: bool = False
 
 
 @dataclass(frozen=True)
@@ -96,7 +103,8 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                     defaults={
                         "name": planned.name[:255] or planned.asset_key,
                         "unit_id": planned.unit_id,
-                        "source_unit_id": planned.unit_id,
+                        "source_unit_id": planned.source_unit_id or planned.unit_id,
+                        "water": planned.water,
                         "value_min": planned.value_min,
                         "value_max": planned.value_max,
                         "description": planned.description,
@@ -105,6 +113,9 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                 VariableMapping.objects.create(feed=feed, asset_key=planned.asset_key, variable=variable)
     except IntegrityError as clash:
         raise SetupRefused(_("This could not be saved: %(why)s") % {"why": clash}) from clash
+    except ValidationError as refused:
+        # A served unit the source unit cannot be shown in (ADR 0046 §4).
+        raise SetupRefused(" ".join(refused.messages)) from refused
     return feed
 
 

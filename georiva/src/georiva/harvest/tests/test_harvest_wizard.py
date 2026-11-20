@@ -195,6 +195,43 @@ class WizardSetsUpAFeedTests(WizardMixin, TestCase):
         self.assertEqual((row["low"], row["high"]), (0.0, 300.0))
         self.assertTrue(row["use"])
 
+    def test_the_unit_the_files_declare_is_the_source_unit_shown_and_not_asked(self):
+        self.reach_step(4)
+
+        page = self.client.get(step(4))
+
+        (row,) = page.context["rows"]
+        self.assertEqual(row["source_unit"], self.mm)
+        self.assertNotContains(page, 'name="source_unit_0"')
+        self.assertTrue(row["water"], "rainfall is water: proposed for the operator to confirm")
+
+    def test_the_variable_is_saved_with_the_files_unit_and_the_served_unit_picked(self):
+        metres = Unit.objects.get(symbol="m")
+        self.reach_step(4)
+
+        # A source unit posted beside one the files declare is not the operator's to give.
+        self.choose_images(unit_0=metres.pk, source_unit_0=metres.pk, low_0="0", high_0="0.3")
+        self.save()
+
+        variable = Variable.objects.get()
+        self.assertEqual((variable.source_unit, variable.unit), (self.mm, metres))
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 300.0), "kept in the files' unit")
+
+    def test_files_that_declare_no_unit_have_the_operator_say_what_their_values_are_in(self):
+        self.upstream.items = []
+        for n in (1, 2, 3):
+            self.add_month(n, unit="")
+        self.reach_step(4)
+
+        page = self.client.get(step(4))
+
+        self.assertIsNone(page.context["rows"][0]["source_unit"])
+        self.assertContains(page, 'name="source_unit_0"')
+        self.assertIn("Say which unit the provider", self.errors(self.choose_images()))
+        self.assertRedirects(self.choose_images(source_unit_0=self.mm.pk), step(5))
+        self.save()
+        self.assertEqual(Variable.objects.get().source_unit, self.mm)
+
     def test_the_catalog_short_name_offered_is_one_the_form_accepts(self):
         # An upstream id often has underscores; a catalog's short name has none.
         self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"

@@ -130,6 +130,37 @@
             min-width: 0;
         }
 
+        /* One row's units: the provider's, what to show them in, and the water flag. */
+        .hwiz-units {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35em;
+            max-width: 16em;
+        }
+
+        .hwiz-units p {
+            margin: 0;
+        }
+
+        .hwiz-units__label,
+        .hwiz-units__range {
+            color: var(--w-color-text-meta);
+            font-size: 0.9em;
+        }
+
+        .hwiz-units__water {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.4em;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+
+        .hwiz-units__hint {
+            display: block;
+            color: var(--w-color-warning-100);
+        }
+
         /* A list that is open on the page is not a dropdown: no arrow over its first row. */
         .hwiz-list {
             background-image: none;
