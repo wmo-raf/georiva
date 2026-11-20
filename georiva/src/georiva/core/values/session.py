@@ -166,19 +166,13 @@ class Session:
         The Variable's array (named by its slug) is converted lazily, like
         every other read.
 
-        The manifest's CF attributes already decode its raw bytes into the
-        served unit it was built for (ADR 0046 §18). That decoding is undone
-        here and the Variable's conversion applied, so values are converted
-        once, and into today's unit even before a stale manifest is rebuilt."""
+        The manifest is opened undescribed — its raw values — and converted
+        here, so values are converted once, into the unit this session reads in."""
         to = self._conversions.of(manifest.variable_id)
         self._check_open()
-        dataset = manifest.open_dataset(internal=internal, chunks={})
+        dataset = manifest.open_dataset(internal=internal, chunks={}, described=False)
         name = manifest.variable.slug
-        if name not in dataset:
-            return dataset
-        encoding = dataset[name].encoding
-        to = to.after(encoding.get("scale_factor", 1.0), encoding.get("add_offset", 0.0))
-        if not to.is_identity:
+        if name in dataset and not to.is_identity:
             dataset = dataset.assign({name: dataset[name] * to.scale + to.offset})
         return dataset
 

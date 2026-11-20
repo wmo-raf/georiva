@@ -523,19 +523,24 @@ class ManifestDescribesRawBytesTests(BuiltVariableFixture):
         self.assertAlmostEqual(array.encoding["add_offset"], -273.15)
         np.testing.assert_allclose(array.isel(time=0).values, self.KELVIN - 273.15, atol=1e-3)
 
-    def test_a_served_unit_change_regenerates_the_manifest_not_the_bytes(self):
+    def test_a_served_unit_change_rewrites_nothing_and_the_manifest_follows_it(self):
+        """The CF attributes are generated when the manifest is read (ADR 0046
+        §2, §18): a served-unit change leaves the manifest READY, rebuilds
+        nothing, and the next open describes the bytes in the new unit."""
         from georiva.core.models import Asset, Unit
         from georiva.virtual_zarr.models import VirtualZarrManifest
 
         _, asset = self._add_item(1, data=self.KELVIN)
-        self._built()
+        manifest = self._built()
         before = Asset.objects.values().get(pk=asset.pk)
+        snapshot = manifest.snapshot_id
 
         self.variable.unit, _ = Unit.objects.get_or_create(symbol="°F", defaults={"name": "test °F"})
         self.variable.save()
-        self.assertEqual(self._manifest().status, VirtualZarrManifest.Status.STALE)
 
-        manifest = self._built()
+        manifest = self._manifest()
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
+        self.assertEqual(manifest.snapshot_id, snapshot)
         array = manifest.open_dataset(chunks=None)["precip"]
         self.assertEqual(array.attrs["units"], "°F")
         np.testing.assert_allclose(array.isel(time=0).values, self.KELVIN * 1.8 - 459.67, atol=1e-3)
@@ -555,22 +560,15 @@ class ManifestDescribesRawBytesTests(BuiltVariableFixture):
             served = session.virtual_dataset(manifest)["precip"].isel(time=0).values
         np.testing.assert_allclose(served, self.KELVIN - 273.15, atol=1e-3)
 
-    def test_the_read_module_follows_the_served_unit_before_the_manifest_does(self):
-        """Between a served-unit change and the rebuild, the manifest still
-        says °C; the read module reads what the Variable says now."""
+    def test_the_read_module_reads_a_manifest_in_the_unit_asked_for(self):
         from georiva.core import values
-        from georiva.core.models import Unit
 
         self._add_item(1, data=self.KELVIN)
         manifest = self._built()
-        self.variable.unit, _ = Unit.objects.get_or_create(symbol="°F", defaults={"name": "test °F"})
-        self.variable.save()
-        manifest.refresh_from_db()
-        manifest.status = manifest.Status.READY  # opened before the sweep rebuilds it
 
-        with values.session() as session:
-            served = session.virtual_dataset(manifest)["precip"].isel(time=0).values
-        np.testing.assert_allclose(served, self.KELVIN * 1.8 - 459.67, atol=1e-3)
+        with values.session(in_unit="°F") as session:
+            read = session.virtual_dataset(manifest)["precip"].isel(time=0).values
+        np.testing.assert_allclose(read, self.KELVIN * 1.8 - 459.67, atol=1e-3)
 
 
 def manifest_config_url(key: str) -> str:

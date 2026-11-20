@@ -247,7 +247,7 @@ class VirtualZarrBuilder:
         self._registry = self.config.build_registry()
         self._parser = MinioVirtualTIFF(self.config)
 
-    def build(self, url_df: pd.DataFrame, variable_name: str = "data", attrs: dict | None = None) -> xr.Dataset:
+    def build(self, url_df: pd.DataFrame, variable_name: str = "data") -> xr.Dataset:
         """
         Build a virtual dataset of chunk references over the given COGs.
 
@@ -255,7 +255,7 @@ class VirtualZarrBuilder:
         the result is a (time, lat, lon) dataset whose chunk refs are s3://
         URIs, its data variable named ``variable_name``.
         """
-        return self.assemble(self.open(url_df), variable_name, attrs)
+        return self.assemble(self.open(url_df), variable_name)
 
     def open(self, url_df: pd.DataFrame) -> list[OpenedCog]:
         """
@@ -284,16 +284,12 @@ class VirtualZarrBuilder:
             opened.append(OpenedCog(url=row["url"], time=ts, vds=vds))
         return opened
 
-    def assemble(self, opened: list[OpenedCog], variable_name: str = "data", attrs: dict | None = None) -> xr.Dataset:
+    def assemble(self, opened: list[OpenedCog], variable_name: str = "data") -> xr.Dataset:
         """
         Stack opened COGs along ``time``, attach lat/lon, name the data
         variable ``variable_name`` (the raw IFD index variable is ``"0"``)
         and rewrite chunk URLs to s3:// URIs. Every COG must share one
         signature — a caller with mixed ones chooses first.
-
-        ``attrs`` are set on the data variable: the CF ``scale_factor``,
-        ``add_offset`` and ``units`` that describe the COGs' raw bytes in the
-        served unit (ADR 0046 §18).
         """
         combined = xr.concat(
             [cog.vds.assign_coords(time=cog.time).expand_dims("time") for cog in opened],
@@ -304,8 +300,6 @@ class VirtualZarrBuilder:
         raw_var = list(combined.data_vars)[0]
         if raw_var != variable_name:
             combined = combined.rename({raw_var: variable_name})
-        if attrs:
-            combined[variable_name].attrs.update(attrs)
 
         logger.info("Rewriting chunk URLs to s3:// URIs…")
         return combined.vz.rename_paths(self.config.s3_uri_for)

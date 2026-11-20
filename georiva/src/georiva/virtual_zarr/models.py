@@ -396,13 +396,21 @@ class VirtualZarrManifest(TimeStampedModel):
     # `chunks={}` is not the mutable-default bug B006 catches: it is never
     # mutated, only handed to xr.open_zarr, and to xarray `{}` and `None` mean
     # different things — dask with default chunk sizes, versus no dask at all.
-    def open_dataset(self, *, internal: bool = True, chunks: dict | None = {}):  # noqa: B006
+    def open_dataset(self, *, internal: bool = True, chunks: dict | None = {}, described: bool = True):  # noqa: B006
         """
         Open this variable's Icechunk repo as a lazy xarray Dataset.
 
         A read-only session is opened at the tip of ``main``; the container
         endpoint/credentials for the virtual COG chunks are supplied here at
         open time (late binding), not baked into the committed refs.
+
+        The chunks are the COGs' raw bytes, in the source unit. Opened
+        ``described``, the Variable's array carries CF ``scale_factor``,
+        ``add_offset`` and ``units`` for the served unit *now*, and xarray
+        decodes into it: the description is generated when read, never built
+        into the repo, so a served-unit change rewrites nothing (ADR 0046 §2,
+        §18). Not ``described``, the array is the raw values, for a reader that
+        converts them itself (the read module).
 
         Parameters
         ----------
@@ -426,7 +434,21 @@ class VirtualZarrManifest(TimeStampedModel):
 
         repo = open_repo(self.get_repo_path(), internal=internal)
         session = repo.readonly_session(branch="main")
-        return xr.open_zarr(session.store, consolidated=False, chunks=chunks)
+        dataset = xr.open_zarr(session.store, consolidated=False, chunks=chunks, mask_and_scale=False)
+        name = self.variable.slug
+        if name in dataset:
+            attrs = {k: v for k, v in dataset[name].attrs.items() if k not in _CF_DESCRIPTION}
+            if described:
+                from georiva.core.values import conversion_for
+
+                attrs.update(conversion_for(self.variable).cf_attributes)
+            dataset[name].attrs = attrs
+        return xr.decode_cf(dataset)
+
+
+#: What says which unit an array's values are in, and how to decode them into
+#: it — supplied when a repo is opened, never read from the repo.
+_CF_DESCRIPTION = ("scale_factor", "add_offset", "units")
 
 
 class VirtualZarrBuildLog(models.Model):

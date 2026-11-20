@@ -10,9 +10,9 @@ never the Django row).  At build time:
       same-key COG overwrite, deletion)                     → REBUILD
     * nothing new and nothing changed                       → UP_TO_DATE
 
-A change to the CF attributes describing the bytes (``scale_factor``,
-``add_offset``, ``units``: the served unit, ADR 0046 §18) rebuilds too — the
-bytes are untouched, only the manifest describing them is regenerated.
+The served unit is not part of what is built: the CF attributes describing
+the raw bytes are supplied when the repo is opened (ADR 0046 §18), so a change
+to it rebuilds nothing.
 
 Pure functions only — no ORM, no I/O — so the decision table is unit-testable.
 """
@@ -53,9 +53,6 @@ class CommittedState:
     # Every asset accounted for in range, held or left out (#732).
     item_count: int
     left_out: tuple[LeftOut, ...] = ()
-    # The CF attributes the repo's array was written with; None for a repo
-    # built before they were recorded.
-    cf: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -68,8 +65,6 @@ class BuildPlan:
 def classify(
     committed: CommittedState | None,
     rows: list[SourceRow],
-    *,
-    cf: dict | None = None,
 ) -> BuildPlan:
     """
     Decide how this build cycle updates the repo.
@@ -77,7 +72,6 @@ def classify(
     ``rows`` is the full current set of COG assets for the variable; the
     returned plan carries only the rows to write (all of them for a rebuild,
     the new tail for an append, none when up to date), sorted by time.
-    ``cf`` is the description the repo's array should carry now.
     """
     if not rows:
         raise ValueError("classify() needs at least one source row")
@@ -85,7 +79,7 @@ def classify(
     ordered = tuple(sorted(rows, key=lambda r: r.time))
     watermark = max(r.modified for r in ordered)
 
-    if committed is None or committed.cf != cf:
+    if committed is None:
         return BuildPlan(BuildMode.REBUILD, ordered, watermark)
 
     in_range = [r for r in ordered if r.time <= committed.time_end]

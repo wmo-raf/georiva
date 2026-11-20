@@ -155,38 +155,3 @@ class ForecastNewRunTests(SimpleTestCase):
     def test_new_run_entirely_after_committed_end_rebuilds(self):
         rows = [_row(20, 60), _row(21, 60)]
         self.assertEqual(classify(self.committed, rows).mode, BuildMode.REBUILD)
-
-
-class ServedUnitTests(SimpleTestCase):
-    """The CF attributes describing the raw bytes (ADR 0046 §18) are the
-    manifest's, not the COGs': a change to them rebuilds the manifest even
-    when no asset changed."""
-
-    CELSIUS = {"scale_factor": 1.0, "add_offset": -273.15, "units": "°C"}
-    FAHRENHEIT = {"scale_factor": 1.8, "add_offset": -459.67, "units": "°F"}
-
-    def committed(self, cf):
-        return CommittedState(
-            watermark=T0 + timedelta(hours=50),
-            time_end=T0 + timedelta(hours=2),
-            item_count=3,
-            cf=cf,
-        )
-
-    def test_the_same_description_is_up_to_date(self):
-        rows = [_row(0, 10), _row(1, 10), _row(2, 10)]
-        self.assertEqual(classify(self.committed(self.CELSIUS), rows, cf=self.CELSIUS).mode, BuildMode.UP_TO_DATE)
-
-    def test_a_changed_description_rebuilds_with_nothing_new(self):
-        rows = [_row(0, 10), _row(1, 10), _row(2, 10)]
-        plan = classify(self.committed(self.CELSIUS), rows, cf=self.FAHRENHEIT)
-        self.assertEqual(plan.mode, BuildMode.REBUILD)
-        self.assertEqual(len(plan.rows), 3)
-
-    def test_a_changed_description_rebuilds_rather_than_appends(self):
-        rows = [_row(0, 10), _row(1, 10), _row(2, 10), _row(3, 60)]
-        self.assertEqual(classify(self.committed(self.CELSIUS), rows, cf=self.FAHRENHEIT).mode, BuildMode.REBUILD)
-
-    def test_a_repo_built_before_it_was_described_rebuilds(self):
-        rows = [_row(0, 10), _row(1, 10), _row(2, 10)]
-        self.assertEqual(classify(self.committed(None), rows, cf=self.CELSIUS).mode, BuildMode.REBUILD)
