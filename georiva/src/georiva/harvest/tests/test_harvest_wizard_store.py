@@ -8,6 +8,7 @@ organisation's admin. The only fake is the Upstream — here one that is a store
 
 from datetime import timedelta
 from unittest import mock
+from urllib.parse import urlsplit
 
 from django.test import TestCase
 from django.utils import timezone
@@ -598,6 +599,34 @@ class WizardConfirmsWhereAStoresDataIsTests(StoreWizardMixin, TestCase):
         self.assertNotContains(verdict, step(4))
         self.assertRedirects(self.client.get(step(4)), step(3))
         self.assertEqual(self.upstream.stores_opened, [])
+
+
+class WizardJudgesTheStoresAddressTests(StoreWizardMixin, TestCase):
+    """The store's own address is judged as an asset href is, before anything
+    opens it; with no feed yet, plain http is never allowed (ADR 0042 §9)."""
+
+    def verdict(self):
+        self.give_address(STATIC)
+        self.pick_collection("noaa-gfs-forecast-virtual")
+        return self.client.get(step(3))
+
+    def assert_refused_unopened(self, verdict, why):
+        self.assertContains(verdict, "GeoRiva cannot show “NOAA GFS forecast”")
+        self.assertContains(verdict, why)
+        self.assertNotContains(verdict, step(4))
+        self.assertRedirects(self.client.get(step(4)), step(3))
+        self.assertEqual(self.upstream.stores_opened, [])
+        self.assertEqual(self.upstream.samples_asked, [])
+
+    def test_a_store_at_a_plain_http_address_is_refused_with_why_and_never_opened(self):
+        self.store(STORE.replace("https://", "http://"))
+
+        self.assert_refused_unopened(self.verdict(), "scheme &#x27;http&#x27; is not allowed")
+
+    def test_a_store_on_a_host_resolving_to_a_private_address_is_refused_with_why_and_never_opened(self):
+        self.upstream.addresses[urlsplit(STORE).hostname] = ["169.254.169.254"]
+
+        self.assert_refused_unopened(self.verdict(), "resolves to a private, loopback or link-local address")
 
 
 class WizardSavesAStoreFeedTogetherOrNotAtAllTests(StoreWizardMixin, TestCase):

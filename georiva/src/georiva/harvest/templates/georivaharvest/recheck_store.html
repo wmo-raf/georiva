@@ -28,7 +28,10 @@
     <div class="hrc-panel">
         <div class="hrc-panel__header">{% trans "Where this collection is kept" %}</div>
         <div class="hrc-panel__body">
-            {% if moved_to %}
+            {% if moved_to and moved_refusal %}
+                <p>{% blocktrans with old=feed.store_href new=moved_to %}The provider now publishes this collection at <strong>{{ new }}</strong>. This feed still reads it from <strong>{{ old }}</strong>.{% endblocktrans %}</p>
+                <p class="hrc-note">{% blocktrans with why=moved_refusal %}GeoRiva will not read from the new address: {{ why }}.{% endblocktrans %}</p>
+            {% elif moved_to %}
                 <label class="hrc-check">
                     <input type="checkbox" name="adopt_store" value="{{ moved_to }}">
                     <span>

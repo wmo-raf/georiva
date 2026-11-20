@@ -15,8 +15,14 @@ published pins alone, anonymously, at the provider's public endpoint, no further
 than each prefix. A chunk anywhere else fails to read, and the response says the
 map's data is kept somewhere this feed was not allowed to read.
 
+**It opens plain HTTP only where Django said so** (ADR 0042 §9). A store at an
+``http://`` address is opened only when its published entry says its feed allows
+plain HTTP; the tile server makes no decision of its own (ADR 0043 §3). An entry
+that does not say so does not allow it.
+
 **It keeps a store open.** Opening one costs seconds, reading a field does not
-(#656), so one open store is kept per process for each (address, pins), and its
+(#656), so one open store is kept per process for each (address, pins, plain
+HTTP allowed), and its
 coordinates and arrays with it. The same function in core opens a store the same
 way (``harvest.upstream.open_repository``); tests on each side keep the two in
 agreement.
@@ -98,7 +104,8 @@ class StoreSlice:
     Handed to the reader in place of a COG's URL. ``chunk_locations`` are the
     feed's Pinned locations for the store's data, each prefix as the store
     declares it with its region (empty where it has none), sorted, so that two
-    requests naming the same pins share one open store.
+    requests naming the same pins share one open store. ``allow_http`` is the
+    feed's word on whether a plain ``http`` store may be opened.
     """
 
     store: str
@@ -106,13 +113,21 @@ class StoreSlice:
     chunk_locations: tuple[tuple[str, str], ...]
     time: datetime
     reftime: datetime | None = None
+    allow_http: bool = False
 
     @classmethod
     def published(cls, entry: dict, time: datetime, reftime: datetime | None) -> StoreSlice:
         """The slice a published entry names at this timestep. Raises
         :class:`StoreMisdescribed` for an entry that is not Django's shape."""
-        store, array, chunk_locations = published_store(entry)
-        return cls(store=store, array=array, chunk_locations=chunk_locations, time=time, reftime=reftime)
+        store, array, chunk_locations, allow_http = published_store(entry)
+        return cls(
+            store=store,
+            array=array,
+            chunk_locations=chunk_locations,
+            time=time,
+            reftime=reftime,
+            allow_http=allow_http,
+        )
 
     def __str__(self) -> str:
         at = self.time.isoformat() if self.reftime is None else f"{self.reftime.isoformat()}+{self.time.isoformat()}"
@@ -127,11 +142,12 @@ def is_store_entry(value: str) -> bool:
     return value.startswith("{")
 
 
-def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...]]:
-    """The store, the array and the pins a published entry names, the pins as
-    every request spells them. Raises :class:`StoreMisdescribed` for an entry
-    that is not Django's shape. What a tile reads and what the warm-up opens are
-    both named here, so a warmed store is the one a tile finds."""
+def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...], bool]:
+    """The store, the array, the pins and whether plain HTTP is allowed, as a
+    published entry names them, the pins as every request spells them. Raises
+    :class:`StoreMisdescribed` for an entry that is not Django's shape, or for
+    a plain ``http`` store its feed does not allow. What a tile reads and what
+    the warm-up opens are both named here, so a warmed store is the one a tile finds."""
     if not isinstance(entry, dict):
         entry = {}
     store, array, places = entry.get("store"), entry.get("array"), entry.get("chunk_locations") or {}
@@ -139,7 +155,11 @@ def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...]]:
         raise StoreMisdescribed("The published description of this upstream store is incomplete.")
     if not store.startswith(("https://", "http://")):
         raise StoreMisdescribed("The upstream store's address is not an http(s) URL.")
-    return store, array, tuple(sorted((str(prefix), str(region or "")) for prefix, region in places.items()))
+    # Only Django's own `true` allows it: anything else, or nothing, does not.
+    allow_http = entry.get("allow_http") is True
+    _may_open(store, allow_http)
+    pins = tuple(sorted((str(prefix), str(region or "")) for prefix, region in places.items()))
+    return store, array, pins, allow_http
 
 
 # ---------------------------------------------------------------------------
@@ -248,12 +268,20 @@ def _container(prefix: str, region: str):
     raise StoreMisdescribed("This feed names a place for its data that maps are never read from.")
 
 
-def storage(href: str):
-    """The repository at ``href``, read over HTTP with every request bounded."""
+def _may_open(href: str, allow_http: bool) -> None:
+    """Raise :class:`StoreMisdescribed` for a plain ``http`` store whose feed does not allow it."""
+    if href[: len("http://")].lower() == "http://" and not allow_http:
+        raise StoreMisdescribed("This upstream store is at a plain http address, which its feed does not allow.")
+
+
+def storage(href: str, *, allow_http: bool = False):
+    """The repository at ``href``, read over HTTP with every request bounded:
+    over plain HTTP only where ``allow_http``, the feed's word as Django published it."""
     import icechunk
 
+    _may_open(href, allow_http)
     options = dict(_TIMEOUTS)
-    if href.startswith("http://"):
+    if allow_http and href[: len("http://")].lower() == "http://":
         options["allow_http"] = "true"
     return icechunk.http_storage(href, opts=options)
 
@@ -515,31 +543,34 @@ def _key_lock(key) -> threading.Lock:
         return _opened.locks.setdefault(key, threading.Lock())
 
 
-def _open(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> OpenStore:
+def _open(href: str, chunk_locations: tuple[tuple[str, str], ...], allow_http: bool) -> OpenStore:
     """The store at ``href`` opened at the tip of its branch, and kept for this process.
 
     Unless it was let go while this opened: the request that opened it draws
     from it, and the next opens it again, rather than a store no published
     asset names coming back to stay.
     """
-    key = (href, chunk_locations)
+    key = (href, chunk_locations, allow_http)
     with _opened.lock:
         forgets = _opened.forgets.get(key, 0)
-    opened = OpenStore(open_repository(storage(href), chunk_locations).readonly_session(BRANCH).store)
+    repository = open_repository(storage(href, allow_http=allow_http), chunk_locations)
+    opened = OpenStore(repository.readonly_session(BRANCH).store)
     with _opened.lock:
         if _opened.forgets.get(key, 0) == forgets:
             _opened.stores[key] = opened
     return opened
 
 
-def opened_store(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> OpenStore:
-    """The store at ``href`` read with these pins, opened once per process.
+def opened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], allow_http: bool = False) -> OpenStore:
+    """The store at ``href`` read with these pins, opened once per process —
+    over plain HTTP only where ``allow_http``.
 
     Concurrent first requests wait on one open rather than each paying for
     their own. An open that fails leaves nothing behind, so the next request
     tries again. Unbounded itself: :func:`read_field` bounds it with the read.
     """
-    key = (href, chunk_locations)
+    _may_open(href, allow_http)
+    key = (href, chunk_locations, allow_http)
     with _opened.lock:
         if key in _opened.stores:
             return _opened.stores[key]
@@ -548,10 +579,12 @@ def opened_store(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> Ope
             if key in _opened.stores:
                 return _opened.stores[key]
         logger.info("Opening upstream store %s", href)
-        return _open(href, chunk_locations)
+        return _open(href, chunk_locations, allow_http)
 
 
-def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stale: OpenStore) -> OpenStore:
+def reopened_store(
+    href: str, chunk_locations: tuple[tuple[str, str], ...], allow_http: bool, stale: OpenStore
+) -> OpenStore:
     """The store at ``href`` reopened at the tip of its branch, because ``stale``
     did not hold a step a request asked for.
 
@@ -561,7 +594,7 @@ def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stal
     replacement. A reopen that fails leaves ``stale`` open, so the steps it
     holds still draw.
     """
-    key = (href, chunk_locations)
+    key = (href, chunk_locations, allow_http)
     with _opened.lock:
         current = _opened.stores.get(key)
         if current is not None and current is not stale:
@@ -575,7 +608,7 @@ def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stal
     try:
         logger.info("Reopening upstream store %s: a requested step is not in the snapshot it has open", href)
         with _key_lock(key):
-            opened = _open(href, chunk_locations)
+            opened = _open(href, chunk_locations, allow_http)
     except BaseException as failed:
         underway.set_exception(failed)
         raise
@@ -587,13 +620,13 @@ def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stal
             _opened.reopens.pop(key, None)
 
 
-def open_keys() -> set[tuple[str, tuple[tuple[str, str], ...]]]:
-    """The (address, pins) of every store this process has open."""
+def open_keys() -> set[tuple[str, tuple[tuple[str, str], ...], bool]]:
+    """The (address, pins, plain HTTP allowed) of every store this process has open."""
     with _opened.lock:
         return set(_opened.stores)
 
 
-def forget(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> None:
+def forget(href: str, chunk_locations: tuple[tuple[str, str], ...], allow_http: bool = False) -> None:
     """Let go of the store at ``href`` read with these pins, and every field
     kept from it (#706). A request holding it already draws on; the next one
     opens it again.
@@ -603,7 +636,7 @@ def forget(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> None:
     finds missing. The store's lock is
     kept, so a request that opens it again waits on one still opening.
     """
-    key = (href, chunk_locations)
+    key = (href, chunk_locations, allow_http)
     with _opened.lock:
         _opened.forgets[key] = _opened.forgets.get(key, 0) + 1
         _opened.stores.pop(key, None)
@@ -612,8 +645,8 @@ def forget(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> None:
     _fields.forget(key)
 
 
-def _store_key(target: StoreSlice) -> tuple[str, tuple[tuple[str, str], ...]]:
-    return target.store, target.chunk_locations
+def _store_key(target: StoreSlice) -> tuple[str, tuple[tuple[str, str], ...], bool]:
+    return target.store, target.chunk_locations, target.allow_http
 
 
 def forget_all() -> None:
@@ -640,13 +673,13 @@ def _decode(target: StoreSlice) -> Field:
     def read() -> Field:
         with _opened.lock:
             forgets = _opened.forgets.get(_store_key(target), 0)
-        opened = opened_store(target.store, target.chunk_locations)
+        opened = opened_store(*_store_key(target))
         try:
             return opened.field(target.array, target.time, target.reftime)
         except StoreStepNotHeld:
             if _remembered_missing(target):
                 raise
-            fresher = reopened_store(target.store, target.chunk_locations, stale=opened)
+            fresher = reopened_store(*_store_key(target), stale=opened)
         try:
             return fresher.field(target.array, target.time, target.reftime)
         except StoreStepNotHeld:
@@ -672,7 +705,7 @@ class FieldCache:
         #: The read under way for each field not yet kept, which requests for it meanwhile wait on.
         self._reads: dict[StoreSlice, Future] = {}
         #: How many times each store's fields have been let go: a read begun before the latest is not kept.
-        self._forgets: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
+        self._forgets: dict[tuple[str, tuple[tuple[str, str], ...], bool], int] = {}
         self._lock = threading.Lock()
 
     def get(self, target: StoreSlice) -> Field | None:
@@ -731,7 +764,7 @@ class FieldCache:
             self._kept[target] = found
             self.size += cost
 
-    def forget(self, store_key: tuple[str, tuple[tuple[str, str], ...]]) -> None:
+    def forget(self, store_key: tuple[str, tuple[tuple[str, str], ...], bool]) -> None:
         """Drop every field kept from the store at this (address, pins).
 
         A read under way finishes for the requests waiting on it, and is not kept.

@@ -59,8 +59,9 @@ class LocalStore:
         opening.start()
         self.addCleanup(opening.stop)
 
-    def storage_at(self, href):
+    def storage_at(self, href, *, allow_http=False, **_options):
         self.assertEqual(href, STORE)
+        self.opened_allowing_http = allow_http
         return self.storage
 
     def commit(self, build):
@@ -104,6 +105,34 @@ class LocalStore:
             reference_time=RUNS[run],
             chunk_locations=places or {},
         )
+
+
+class AStoresAddressTests(SimpleTestCase):
+    """How a store's address is reached: plain HTTP only where the caller says it may be (ADR 0042 §9)."""
+
+    def test_a_plain_http_address_is_refused_unless_plain_http_is_allowed(self):
+        from georiva.core.values.store import StoreAddressRefused, repository_storage
+
+        with mock.patch.object(icechunk, "http_storage") as opened:
+            with self.assertRaises(StoreAddressRefused):
+                repository_storage("http://stores.example.org/gfs.icechunk")
+            with self.assertRaises(StoreAddressRefused):
+                repository_storage("HTTP://stores.example.org/gfs.icechunk")
+        opened.assert_not_called()
+
+    def test_a_plain_http_address_is_opened_over_plain_http_where_allowed(self):
+        from georiva.core.values.store import repository_storage
+
+        with mock.patch.object(icechunk, "http_storage") as opened:
+            repository_storage("http://stores.example.org/gfs.icechunk", allow_http=True)
+        self.assertEqual(opened.call_args.kwargs["opts"]["allow_http"], "true")
+
+    def test_an_https_address_never_allows_plain_http(self):
+        from georiva.core.values.store import repository_storage
+
+        with mock.patch.object(icechunk, "http_storage") as opened:
+            repository_storage(STORE, allow_http=True)
+        self.assertNotIn("allow_http", opened.call_args.kwargs["opts"])
 
 
 class StoreReadTests(LocalStore, SimpleTestCase):
@@ -263,6 +292,14 @@ class StoreAssetRowTests(LocalStore, TestCase):
 
         np.testing.assert_array_equal(field.data, expected(1, 1))
         self.assertEqual(opening.call_args.args[1], self.PINS)
+
+    def test_the_row_is_opened_without_plain_http_unless_its_feed_allows_it(self):
+        values.field(Asset.objects.get(pk=self.asset.pk))
+        self.assertFalse(self.opened_allowing_http)
+
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(allow_http=True)
+        values.field(Asset.objects.get(pk=self.asset.pk))
+        self.assertTrue(self.opened_allowing_http)
 
     def test_a_row_whose_feed_is_gone_follows_its_data_nowhere(self):
         # Provenance outlives its feed, and then names one that is not there.

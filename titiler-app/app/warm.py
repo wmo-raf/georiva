@@ -200,21 +200,22 @@ def warm_stores(stopping: threading.Event | None = None) -> None:
     _named.update(stores)
     # A store a reading named once, and none names now; not one a tile opened with no hash to name it.
     gone = (already_open & _named) - stores.keys()
-    for href, chunk_locations in gone:
-        logger.info("Letting go of upstream store %s: no published asset names it under these Pinned locations", href)
-        store.forget(href, chunk_locations)
+    for key in gone:
+        logger.info("Letting go of upstream store %s: no published asset names it under these Pinned locations", key[0])
+        store.forget(*key)
 
     warmed = failed = opened_now = 0
-    for (href, chunk_locations), arrays in stores.items():
+    for key, arrays in stores.items():
+        href = key[0]
         if stopping is not None and stopping.is_set():
             break
         try:
-            opened = store.opened_store(href, chunk_locations)
+            opened = store.opened_store(*key)
         except Exception as exc:
             logger.warning("Could not warm upstream store %s: %s", href, _first_line(exc))
             failed += 1
             continue
-        if (href, chunk_locations) not in already_open:
+        if key not in already_open:
             opened_now += 1
         for array in sorted(arrays):
             try:
@@ -234,14 +235,14 @@ def warm_stores(stopping: threading.Event | None = None) -> None:
     )
 
 
-def published_stores() -> dict[tuple[str, tuple[tuple[str, str], ...]], set[str]]:
-    """Each published store, by (address, pins), with the arrays published from it.
+def published_stores() -> dict[tuple[str, tuple[tuple[str, str], ...], bool], set[str]]:
+    """Each published store, by (address, pins, plain HTTP allowed), with the arrays published from it.
 
     Read from every Variable's remote-assets hash. A Remote COG's href is not a
     store and is passed over, as is an entry not in Django's shape.
     """
     redis_client = dependencies.redis_client
-    stores: dict[tuple[str, tuple[tuple[str, str], ...]], set[str]] = {}
+    stores: dict[tuple[str, tuple[tuple[str, str], ...], bool], set[str]] = {}
     seen: set[str] = set()
     for key in redis_client.scan_iter(match=f"{REMOTE_ASSETS_KEY_PREFIX}:*", count=500):
         try:
@@ -255,11 +256,11 @@ def published_stores() -> dict[tuple[str, tuple[tuple[str, str], ...]], set[str]
                 continue
             seen.add(value)
             try:
-                href, array, chunk_locations = store.published_store(json.loads(value))
+                href, array, chunk_locations, allow_http = store.published_store(json.loads(value))
             except (ValueError, store.StoreError) as exc:
                 logger.debug("Not warming a published entry in %s: %s", key, exc)
                 continue
-            stores.setdefault((href, chunk_locations), set()).add(array)
+            stores.setdefault((href, chunk_locations, allow_http), set()).add(array)
     return stores
 
 

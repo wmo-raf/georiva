@@ -47,7 +47,7 @@ from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
 from georiva.organisations.access import require_active_org, scoped_queryset
 
 from . import background_survey
-from .asset_hosts import chunk_place
+from .asset_hosts import AssetHostAllowlist, chunk_place
 from .models import DEFAULT_ROLLING_WINDOW_DAYS, MAX_ROLLING_WINDOW_DAYS
 from .setup import FeedPlan, PlannedVariable, SetupRefused, provision_harvest_feed
 from .survey import Shape, reason_for, survey_catalog
@@ -1284,6 +1284,9 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
     if moved_to and own is not None and own.proposed:
         pinned = feed.pinned_buckets.get(own.bucket) == own.host if own.bucket else own.host in feed.allowed_asset_hosts
         own_to_pin = None if pinned else own
+    # Judged now, as each harvest will judge it, by the feed's own rules: the
+    # survey shown may be older than where the host resolves (ADR 0042 §9).
+    moved_refusal = _store_address_refusal(feed, moved_to, own_to_pin) if moved_to else ""
 
     if request.method == "POST":
         posted = request.POST
@@ -1299,7 +1302,13 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
         if pins != feed.pinned_chunk_locations:
             feed.pinned_chunk_locations = pins
             changed.append("pinned_chunk_locations")
-        if moved_to and posted.get("adopt_store") == moved_to:
+        if moved_to and posted.get("adopt_store") == moved_to and moved_refusal:
+            messages.error(
+                request,
+                _("The new address was not adopted: %(why)s. This feed still reads from %(old)s.")
+                % {"why": moved_refusal, "old": feed.store_href},
+            )
+        elif moved_to and posted.get("adopt_store") == moved_to:
             feed.store_href = moved_to
             changed.append("store_href")
             if own_to_pin is not None:
@@ -1342,11 +1351,21 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             "new_places": new_places,
             "gone_places": gone_places,
             "moved_to": moved_to,
+            "moved_refusal": moved_refusal,
             "new_host": own_to_pin.host if own_to_pin is not None else "",
             "check": token,
             **_recheck_chrome(feed),
         },
     )
+
+
+def _store_address_refusal(feed, href: str, own_to_pin) -> str:
+    """Why `feed` may not adopt the store at `href`, or "": the Asset host
+    allowlist's rules with the feed's word on plain `http`, the host it would
+    pin on adopting counted as allowed."""
+    hosts = {*feed.allowed_asset_hosts, *([own_to_pin.host] if own_to_pin is not None else [])}
+    allowlist = AssetHostAllowlist(hosts, allow_http=feed.allow_http, resolve=feed.upstream_client().resolve_host)
+    return allowlist.refusal(href) or ""
 
 
 def _republish(feed) -> None:

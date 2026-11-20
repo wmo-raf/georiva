@@ -254,9 +254,18 @@ class FakeUpstream:
         return found if self.fails_after is None else self._break_after(found, self.fails_after)
 
     def list_held_steps(
-        self, href: str, fields: list[StoreField], window: Window, *, skip_runs: frozenset = frozenset()
+        self,
+        href: str,
+        fields: list[StoreField],
+        window: Window,
+        *,
+        skip_runs: frozenset = frozenset(),
+        allow_http: bool = False,
     ) -> list[HeldStep]:
         self._answer()
+        if href.lower().startswith("http://") and not allow_http:
+            # As the real one: a plain http store is opened only where the feed allows it.
+            raise UpstreamUnreachable("upstream store is at a plain http address its feed does not allow")
         self.steps_asked.append((href, [field.path for field in fields], window))
         if self.store_unreachable:
             raise UpstreamUnreachable(self.store_unreachable)
