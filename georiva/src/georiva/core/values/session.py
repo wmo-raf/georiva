@@ -156,9 +156,7 @@ class Session:
             fh.flush()
             with xr.open_dataset(fh.name) as dataset:
                 array = _data_variable(dataset, asset).load()
-        if not to.is_identity:
-            array = array * to.scale + to.offset
-        return array
+        return to.apply(array)
 
     def virtual_dataset(self, manifest, *, internal: bool = True):
         """A Variable's virtual Zarr store as a lazy xarray Dataset — its local
@@ -173,7 +171,7 @@ class Session:
         dataset = manifest.open_dataset(internal=internal, chunks={}, described=False)
         name = manifest.variable.slug
         if name in dataset and not to.is_identity:
-            dataset = dataset.assign({name: dataset[name] * to.scale + to.offset})
+            dataset = dataset.assign({name: to.apply(dataset[name])})
         return dataset
 
     # ---- helpers -------------------------------------------------------------

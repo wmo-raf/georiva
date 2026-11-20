@@ -82,8 +82,7 @@ def correct_source_unit(request, collection_pk, variable_pk):
     if request.method == "POST" and form.is_valid():
         before = variable.source_unit.symbol
         with transaction.atomic():
-            variable.source_unit = form.cleaned_data["source_unit"]
-            variable.save(update_fields=["source_unit"])
+            variable.correct_source_unit(form.cleaned_data["source_unit"])
             record(
                 SourceUnitCorrected,
                 variable=variable,

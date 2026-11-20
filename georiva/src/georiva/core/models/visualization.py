@@ -8,6 +8,8 @@ from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel, InlinePanel
 from wagtail.models import Orderable
 
+from georiva.core.unit_utils import significant
+
 #: '#RRGGBB' or '#RRGGBBAA', with the '#' and shorthand '#RGB'/'#RGBA' allowed —
 #: the same shapes :func:`hex_to_rgba_list` accepts.
 HEX_COLOR_VALIDATOR = RegexValidator(
@@ -127,7 +129,7 @@ def _scaled_position(value_min: float, value_max: float, t: float, scale_type: s
         value = value_min + t * t * (value_max - value_min)
     else:
         value = value_min + t * (value_max - value_min)
-    return float(f"{value:.12g}")
+    return significant(value)
 
 
 def generate_stops(

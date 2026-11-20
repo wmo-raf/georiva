@@ -63,7 +63,7 @@ def _source_unit_locking_form(form_class):
             super().__init__(*args, **kwargs)
             field = self.fields.get("source_unit")
             variable = self.instance
-            if field is None or variable.pk is None or not variable.assets.exists():
+            if field is None or not variable.source_unit_locked():
                 return
             from django.urls import reverse
             from django.utils.html import format_html

@@ -10,43 +10,8 @@ A unit the source unit cannot reach is refused before anything is read.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
 
-import numpy as np
-
-from georiva.core.unit_utils import ConversionRefused, affine_conversion
-
-
-@dataclass(frozen=True)
-class Conversion:
-    """``value · scale + offset``: raw values into ``unit``."""
-
-    scale: float = 1.0
-    offset: float = 0.0
-    #: The unit the converted values are in; empty when nobody stated one.
-    unit: str = ""
-
-    @property
-    def is_identity(self) -> bool:
-        return self.scale == 1.0 and self.offset == 0.0
-
-    @property
-    def cf_attributes(self) -> dict:
-        """The conversion as CF attributes on an array of raw values (ADR 0046
-        §18): a CF reader decodes ``raw · scale_factor + add_offset`` into ``units``."""
-        return {"scale_factor": self.scale, "add_offset": self.offset, "units": self.unit}
-
-    def after(self, scale_factor: float, add_offset: float) -> Conversion:
-        """This conversion, for values already decoded by ``raw · scale_factor +
-        add_offset``: undo that decoding, then convert the raw values."""
-        scale = self.scale / scale_factor
-        return Conversion(scale, self.offset - add_offset * scale, self.unit)
-
-    def array(self, data: np.ndarray) -> np.ndarray:
-        if self.is_identity:
-            return data
-        return (data * np.float32(self.scale) + np.float32(self.offset)).astype(np.float32)
-
+from georiva.core.unit_utils import Conversion, ConversionRefused, affine_conversion
 
 #: Raw bytes whose unit no row states, read as they are.
 AS_STORED = Conversion()
@@ -98,6 +63,5 @@ def conversion_for(variable, in_unit: str | None = None) -> Conversion:
     served unit when none is named. :class:`ConversionRefused` when ``in_unit``
     cannot be reached from the source unit."""
     if in_unit is None:
-        return Conversion(variable.scale, variable.offset, variable.unit.symbol)
-    scale, offset = affine_conversion(variable.source_unit.symbol, in_unit, water=variable.water)
-    return Conversion(scale, offset, in_unit)
+        return variable.served_conversion
+    return affine_conversion(variable.source_unit.symbol, in_unit, water=variable.water)

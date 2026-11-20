@@ -42,7 +42,7 @@ from django.utils.translation import gettext as _
 
 # The Push Feed Wizard's Sample File needs the same two things of a scanned
 # variable — a Unit for its unit string, and bounds rounded outward — and has them.
-from georiva.core.unit_utils import ConversionRefused, affine_conversion
+from georiva.core.unit_utils import Conversion, ConversionRefused, proposes_water
 from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
 from georiva.organisations.access import require_active_org, scoped_queryset
 
@@ -50,7 +50,7 @@ from . import background_survey
 from .asset_hosts import chunk_place
 from .models import DEFAULT_ROLLING_WINDOW_DAYS, MAX_ROLLING_WINDOW_DAYS
 from .setup import FeedPlan, PlannedVariable, SetupRefused, provision_harvest_feed
-from .survey import Shape, proposes_water, reason_for, survey_catalog
+from .survey import Shape, reason_for, survey_catalog
 from .upstream import StoreField, UpstreamTimedOut, UpstreamUnreachable
 
 _SESSION_KEY = "georiva_harvest_wizard"
@@ -467,11 +467,6 @@ def _declared_unit(declared: str):
     return unit
 
 
-def _tidy(number: float) -> float:
-    """A number converted, without the float dust of the conversion: 233.15 − 273.15 is −40, not −40.000000000000014."""
-    return float(f"{number:.12g}")
-
-
 def _shown_range(source_id, unit_id, water: bool, low, high) -> tuple:
     """A range kept in the source unit, as it is shown in the served unit; as kept when the two cannot be converted."""
     from georiva.core.models import Unit
@@ -480,10 +475,10 @@ def _shown_range(source_id, unit_id, water: bool, low, high) -> tuple:
     if low is None or high is None or source_id not in units or unit_id not in units:
         return low, high
     try:
-        scale, offset = affine_conversion(units[source_id].symbol, units[unit_id].symbol, water=water)
+        served = Conversion.between(units[source_id].symbol, units[unit_id].symbol, water=water)
     except ConversionRefused:
         return low, high
-    return _tidy(low * scale + offset), _tidy(high * scale + offset)
+    return served.forward(low), served.forward(high)
 
 
 def _unit_row(declared: str, *names: str) -> dict:
@@ -560,7 +555,7 @@ def _settled_units(index: int, declared: str, name: str, posted) -> tuple[dict, 
     if not errors:
         source_symbol = units[source_id].symbol
         try:
-            scale, offset = affine_conversion(source_symbol, units[unit_id].symbol, water=water)
+            typed_in = Conversion.between(source_symbol, units[unit_id].symbol, water=water)
         except ConversionRefused as refused:
             errors.append(
                 _("“%(name)s” cannot be shown in %(unit)s: %(why)s")
@@ -569,10 +564,10 @@ def _settled_units(index: int, declared: str, name: str, posted) -> tuple[dict, 
         else:
             if shown_id != unit_id and shown_id in units:
                 try:
-                    scale, offset = affine_conversion(source_symbol, units[shown_id].symbol, water=water)
+                    typed_in = Conversion.between(source_symbol, units[shown_id].symbol, water=water)
                 except ConversionRefused:
                     pass  # Not a unit these values can be in: the range was typed in the served unit.
-            low, high = _tidy((low - offset) / scale), _tidy((high - offset) / scale)
+            low, high = typed_in.inverse(low), typed_in.inverse(high)
     settled = {"source_unit_id": source_id, "unit_id": unit_id, "water": water, "value_min": low, "value_max": high}
     return settled, errors
 

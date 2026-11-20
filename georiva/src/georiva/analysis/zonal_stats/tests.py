@@ -238,8 +238,9 @@ class BoundaryStatsServedUnitTests(TestCase):
         boundary = _whole_world_boundary()
         tree = make_org_tree(make_organisation("ghana"), name="ghana")
         cls.variable = tree["variable"]
-        cls.variable.source_unit = _unit("K")
+        # The tree's asset is Kelvin: say so, past the lock (ADR 0046 §8).
         cls.variable.unit = _unit("degC")
+        cls.variable.correct_source_unit(_unit("K"))
         cls.variable.save()
         cls.row = BoundaryZonalStats.objects.create(
             item=tree["item"],

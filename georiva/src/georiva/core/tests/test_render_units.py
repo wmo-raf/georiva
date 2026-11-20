@@ -39,7 +39,9 @@ class KelvinVariable:
         tree = make_org_tree(make_organisation("kenya"))
         Collection.objects.filter(pk=tree["collection"].pk).update(visibility=Collection.Visibility.PUBLIC)
         variable = tree["variable"]
-        variable.source_unit, variable.unit = unit("K"), unit("K")
+        # The tree's asset is Kelvin: say so, past the lock (ADR 0046 §8).
+        variable.unit = unit("K")
+        variable.correct_source_unit(unit("K"))
         variable.value_min, variable.value_max = RANGE_K
         variable.save()
         VariableStyle.objects.create(variable=variable, name="Temp", slug="temp", is_default=True, stops=STOPS_K)

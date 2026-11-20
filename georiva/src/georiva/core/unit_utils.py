@@ -2,7 +2,9 @@
 
 import contextlib
 import re
+from dataclasses import dataclass
 
+import numpy as np
 import pint
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
@@ -161,9 +163,79 @@ class ConversionRefused(ValueError):
 #: How closely ``f(2)`` must match ``offset + 2·scale`` for a conversion to count as affine.
 _AFFINE_TOLERANCE = 1e-9
 
+#: The significant digits a converted number people read is rounded to.
+SIGNIFICANT_DIGITS = 12
 
-def affine_conversion(source_symbol: str, served_symbol: str, *, water: bool = False) -> tuple[float, float]:
-    """``(scale, offset)`` such that ``served = raw·scale + offset`` (ADR 0046 §4).
+
+def significant(value: float) -> float:
+    """``value`` without the float dust of a conversion: 300 K reads 26.85 °C,
+    not 26.850000000000023 — rounded to :data:`SIGNIFICANT_DIGITS` significant digits."""
+    return float(f"{value:.{SIGNIFICANT_DIGITS}g}")
+
+
+@dataclass(frozen=True)
+class Conversion:
+    """``value · scale + offset``: raw values (in a source unit) into ``unit``.
+
+    The one place a conversion's arithmetic lives (ADR 0046 §4, §5): a number
+    people read goes :meth:`forward` and comes back :meth:`inverse`, a spread
+    (a standard deviation) by :meth:`spread`, and an array by :meth:`apply`.
+    """
+
+    scale: float = 1.0
+    offset: float = 0.0
+    #: The unit the converted values are in; empty when nobody stated one.
+    unit: str = ""
+
+    @classmethod
+    def between(cls, source_symbol: str, unit_symbol: str, *, water: bool = False) -> "Conversion":
+        """Values in ``source_symbol`` into ``unit_symbol``; see :func:`affine_conversion`."""
+        return affine_conversion(source_symbol, unit_symbol, water=water)
+
+    @property
+    def is_identity(self) -> bool:
+        return self.scale == 1.0 and self.offset == 0.0
+
+    def forward(self, value):
+        """A raw number converted; ``None`` stays ``None``."""
+        if value is None:
+            return None
+        return significant(value * self.scale + self.offset)
+
+    def inverse(self, value):
+        """A converted number as raw; ``None`` stays ``None``."""
+        if value is None:
+            return None
+        return significant((value - self.offset) / self.scale)
+
+    def spread(self, value):
+        """A difference of raw values — a standard deviation — converted: by the
+        scale alone, which is positive (ADR 0046 §7); ``None`` stays ``None``."""
+        if value is None:
+            return None
+        return significant(value * abs(self.scale))
+
+    def apply(self, data):
+        """An array of raw values (numpy, xarray, lazy or not) converted, unrounded."""
+        if self.is_identity:
+            return data
+        return data * self.scale + self.offset
+
+    def array(self, data: np.ndarray) -> np.ndarray:
+        """A float32 numpy array converted, still float32."""
+        if self.is_identity:
+            return data
+        return (data * np.float32(self.scale) + np.float32(self.offset)).astype(np.float32)
+
+    @property
+    def cf_attributes(self) -> dict:
+        """The conversion as CF attributes on an array of raw values (ADR 0046
+        §18): a CF reader decodes ``raw · scale_factor + add_offset`` into ``units``."""
+        return {"scale_factor": self.scale, "add_offset": self.offset, "units": self.unit}
+
+
+def affine_conversion(source_symbol: str, served_symbol: str, *, water: bool = False) -> Conversion:
+    """The :class:`Conversion` such that ``served = raw·scale + offset`` (ADR 0046 §4).
 
     Computed with pint as ``offset = f(0)`` and ``scale = f(1) − f(0)``, and
     checked with ``f(2) = offset + 2·scale``. Refused — :class:`ConversionRefused`
@@ -173,7 +245,7 @@ def affine_conversion(source_symbol: str, served_symbol: str, *, water: bool = F
     ``precipitation`` context for this computation only.
     """
     if source_symbol == served_symbol:
-        return 1.0, 0.0
+        return Conversion(1.0, 0.0, served_symbol)
     try:
         source, served = ureg(source_symbol).units, ureg(served_symbol).units
     except (pint.errors.PintError, AttributeError, TypeError, ValueError) as e:
@@ -214,7 +286,7 @@ def affine_conversion(source_symbol: str, served_symbol: str, *, water: bool = F
         raise ConversionRefused(
             f"{source_symbol} → {served_symbol} has a scale of {scale:g}; only a positive scale can be served."
         )
-    return scale, offset
+    return Conversion(scale, offset, served_symbol)
 
 
 def _converts_as_water(f) -> bool:
@@ -224,6 +296,21 @@ def _converts_as_water(f) -> bool:
     except pint.errors.PintError:
         return False
     return True
+
+
+#: What a field's own name says when its values are water (ADR 0046 §6): precipitation,
+#: snowfall or runoff water equivalent, or column water. kg m-2 is also an aerosol's or
+#: ozone's column load, so only a name like these proposes the flag.
+_WATER_WORDS = re.compile(
+    r"\b(precipitation|precip|rain|rainfall|snowfall|runoff|water equivalent|column (integrated )?water)\b"
+)
+
+
+def proposes_water(*names: str) -> bool:
+    """Whether any of a field's names — its key or path, title, standard name —
+    says its values are water: the Water flag every creation path proposes, for
+    the operator to confirm (ADR 0046 §6)."""
+    return any(_WATER_WORDS.search(re.sub(r"[_/.\-]+", " ", name.lower())) for name in names if name)
 
 
 def difference_unit(symbol: str) -> str:

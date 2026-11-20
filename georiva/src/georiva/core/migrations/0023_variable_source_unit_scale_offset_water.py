@@ -29,10 +29,10 @@ def fill_source_units(apps, schema_editor):
     Variable.objects.filter(source_unit__isnull=True).update(source_unit=models.F("unit"))
     for variable in Variable.objects.select_related("source_unit", "unit"):
         try:
-            scale, offset = affine_conversion(variable.source_unit.symbol, variable.unit.symbol, water=variable.water)
+            conversion = affine_conversion(variable.source_unit.symbol, variable.unit.symbol, water=variable.water)
         except ConversionRefused:
             continue
-        Variable.objects.filter(pk=variable.pk).update(scale=scale, offset=offset)
+        Variable.objects.filter(pk=variable.pk).update(scale=conversion.scale, offset=conversion.offset)
 
 
 def create_delta_units(apps, schema_editor):

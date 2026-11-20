@@ -214,8 +214,8 @@ class _ClimatologyOverKelvin(IngestedInSourceUnit):
     def _run(self, quantity, *, source_unit="K", served_unit="degC"):
         from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
-        self.variable.source_unit = unit(source_unit)
         self.variable.unit = unit(served_unit)
+        self.variable.correct_source_unit(unit(source_unit))
         self.variable.save()
         catalog = self.variable.collection.catalog
         scol = StagingCollection.objects.create(catalog=catalog, slug="t2m-series", name="t2m")

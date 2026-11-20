@@ -12,12 +12,12 @@ from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from wagtail.test.utils.form_data import inline_formset, nested_form_data, streamfield
 
 from georiva.core.models import Asset, Catalog, Collection, Item, SourceUnitCorrected, Unit, Variable
-from georiva.core.unit_utils import ureg
+from georiva.core.unit_utils import Conversion, ureg
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.organisations.tests.factories import PASSWORD, grant_everything, make_user
@@ -215,6 +215,49 @@ class SourceUnitLockTests(AdminFixture, TestCase):
         self.assertEqual(variable.source_unit.symbol, "degF")
 
 
+class SourceUnitLockedOnEveryPathTests(AdminFixture, TestCase):
+    """The lock is the Variable's, not one form's (ADR 0046 §8): whatever saves
+    it — a plugin's re-provision, a feed's edit page, a script — cannot change
+    what existing bytes are said to hold. Only Correct source unit can."""
+
+    def test_saving_another_source_unit_for_a_variable_with_data_is_refused(self):
+        variable = self.with_asset(self.saved("K", "degC"))
+
+        variable.source_unit = unit("degC")
+        with self.assertRaises(ValidationError) as refused:
+            variable.save()
+
+        self.assertIn("source_unit", refused.exception.error_dict)
+        variable.refresh_from_db()
+        self.assertEqual(variable.source_unit.symbol, "K")
+
+    def test_without_data_the_source_unit_can_be_saved(self):
+        variable = self.saved("K", "degC")
+
+        variable.source_unit = unit("degF")
+        variable.save()
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.source_unit.symbol, "degF")
+
+    def test_saving_anything_else_of_a_variable_with_data_is_allowed(self):
+        variable = self.with_asset(self.saved("K", "degC"))
+
+        variable.unit = unit("degF")
+        variable.save()
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.unit.symbol, "degF")
+
+    def test_the_correction_changes_it(self):
+        variable = self.with_asset(self.saved("K", "degC"))
+
+        variable.correct_source_unit(unit("degC"))
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.source_unit.symbol, "degC")
+
+
 class CorrectSourceUnitTests(AdminFixture, TestCase):
     """Correct source unit: the one way to change what existing bytes are said to hold."""
 
@@ -335,3 +378,26 @@ class RefusedConversionTests(VariableUnitsFixture, TestCase):
         self.assertIn("source_unit", ctx.exception.message_dict)
         with self.assertRaises(IntegrityError):
             variable.save()
+
+
+class ConversionArithmeticTests(SimpleTestCase):
+    """One type holds a conversion's arithmetic (ADR 0046 §4, §7): numbers go
+    forward and back without float dust, and a spread is scaled, never offset."""
+
+    def test_a_number_goes_forward_without_float_dust(self):
+        self.assertEqual(Conversion.between("K", "degC").forward(300.0), 26.85)
+
+    def test_a_number_comes_back(self):
+        self.assertEqual(Conversion.between("K", "degC").inverse(0.0), 273.15)
+
+    def test_a_spread_is_scaled_and_never_offset(self):
+        self.assertEqual(Conversion.between("K", "degF").spread(2.0), 3.6)
+
+    def test_none_stays_none(self):
+        conversion = Conversion.between("K", "degC")
+        self.assertEqual((conversion.forward(None), conversion.inverse(None), conversion.spread(None)), (None,) * 3)
+
+    def test_an_array_is_converted_whole(self):
+        import numpy as np
+
+        np.testing.assert_allclose(Conversion.between("Pa", "hPa").apply(np.array([101325.0])), [1013.25])

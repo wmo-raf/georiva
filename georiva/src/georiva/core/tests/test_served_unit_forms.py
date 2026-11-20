@@ -27,8 +27,9 @@ class ServedUnitStylingTestCase(TestCase):
         tree = make_org_tree(cls.org)
         cls.collection = tree["collection"]
         cls.variable = tree["variable"]
-        cls.variable.source_unit = unit("K")
+        # The tree's asset is Kelvin: say so, past the lock (ADR 0046 §8).
         cls.variable.unit = unit("degC")
+        cls.variable.correct_source_unit(unit("K"))
         cls.variable.value_min, cls.variable.value_max = 233.15, 323.15
         cls.variable.save()
         cls.ramp = ColorRamp.objects.create(name="Three", organisation=cls.org)
