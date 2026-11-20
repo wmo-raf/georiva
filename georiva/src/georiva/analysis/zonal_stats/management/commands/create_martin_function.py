@@ -26,6 +26,12 @@ Requiring the triple also settles a bug that predates tenancy: a bare variable
 slug is ambiguous across catalogs, so a map asking for `precipitation` could be
 served another collection's statistics under its own palette.
 
+Statistics are stored as produced, in the Variable's source unit, and the
+function serves them in its served unit with the Variable's ``scale`` and
+``offset`` (ADR 0046): mean/min/max as ``x·scale + offset``, sum as
+``sum·scale + offset·count``, std as ``std·|scale|``. Changing a Variable's
+served unit changes the tiles at once and touches no stored row.
+
 Usage
 -----
     python manage.py create_martin_function
@@ -111,11 +117,15 @@ BEGIN
             b.name_1,
             b.name_2,
             b.name_3,
-            s.mean,
-            s.min,
-            s.max,
-            s.sum,
-            s.std,
+            -- Rows are stored as produced, in the source unit; the tile shows
+            -- the served unit (ADR 0046): served = raw·scale + offset. A sum
+            -- gains the offset once per cell; a spread gains none. A negative
+            -- scale would swap the extremes, so LEAST/GREATEST keep min ≤ max.
+            s.mean * v.scale + v."offset"                       AS mean,
+            LEAST(s.min * v.scale, s.max * v.scale) + v."offset"    AS min,
+            GREATEST(s.min * v.scale, s.max * v.scale) + v."offset" AS max,
+            s.sum * v.scale + v."offset" * s.count              AS sum,
+            s.std * ABS(v.scale)                                AS std,
             s.count,
             s.time              AS valid_time,
             i.reference_time,
@@ -196,9 +206,9 @@ DO $do$
 BEGIN
     EXECUTE 'COMMENT ON FUNCTION georiva_boundary_stats(integer, integer, integer, json) IS $tj$' || $$
     {
-        "description": "Boundary zonal statistics as vector tiles. Required query parameters: org (string), catalog (string), collection (string), variable (string), time (ISO 8601 datetime), admin_level (integer). Optional query parameter: reference_time (ISO 8601 datetime). If reference_time is omitted and matching rows have reference_time values, the latest available reference_time is used. The org/catalog/collection triple identifies the variable unambiguously; a triple naming no such variable yields an empty tile.",
+        "description": "Boundary zonal statistics as vector tiles. Required query parameters: org (string), catalog (string), collection (string), variable (string), time (ISO 8601 datetime), admin_level (integer). Optional query parameter: reference_time (ISO 8601 datetime). If reference_time is omitted and matching rows have reference_time values, the latest available reference_time is used. The org/catalog/collection triple identifies the variable unambiguously; a triple naming no such variable yields an empty tile. Statistics are stored in the source unit of the variable and served here in its served unit.",
         "attribution": "GeoRiva",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "parameters": {
             "org": {
                 "type": "string",
