@@ -15,6 +15,7 @@ what the assertions read.
 """
 
 import json
+import struct
 from datetime import UTC, datetime
 
 from adminboundarymanager.models import AdminBoundary
@@ -24,6 +25,7 @@ from django.db import InternalError, connection, transaction
 from django.test import TestCase
 
 from georiva.analysis.zonal_stats.models import BoundaryZonalStats
+from georiva.core.models import Unit
 from georiva.organisations.testing import (
     SHARED_TREE_SLUG as SHARED_SLUG,
 )
@@ -137,3 +139,176 @@ class BoundaryStatsTileScopingTests(TestCase):
                 # next subtest able to query at all.
                 with self.assertRaises(InternalError), transaction.atomic():
                     self._tile(**self._params(**{missing: ""}))
+
+
+# -- reading a tile back -----------------------------------------------------
+#
+# Just enough of the Mapbox Vector Tile protobuf to read feature properties: a
+# tile holds layers (3); a layer holds features (2), keys (3) and values (4); a
+# feature's tags (2) are packed key/value index pairs. A value is a string (1),
+# float (2), double (3), int (4), uint (5) or zigzag sint (6).
+
+
+def _varint(buf, pos):
+    shift = result = 0
+    while True:
+        byte = buf[pos]
+        pos += 1
+        result |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return result, pos
+        shift += 7
+
+
+def _fields(buf):
+    """(field number, value) for each field of one message."""
+    pos = 0
+    while pos < len(buf):
+        key, pos = _varint(buf, pos)
+        number, wire = key >> 3, key & 7
+        if wire == 0:
+            value, pos = _varint(buf, pos)
+        elif wire == 1:
+            value, pos = buf[pos : pos + 8], pos + 8
+        elif wire == 2:
+            length, pos = _varint(buf, pos)
+            value, pos = buf[pos : pos + length], pos + length
+        elif wire == 5:
+            value, pos = buf[pos : pos + 4], pos + 4
+        else:  # pragma: no cover - ST_AsMVT emits no other wire type
+            raise ValueError(f"wire type {wire}")
+        yield number, value
+
+
+def _value(buf):
+    for number, value in _fields(buf):
+        if number == 1:
+            return value.decode()
+        if number == 2:
+            return struct.unpack("<f", value)[0]
+        if number == 3:
+            return struct.unpack("<d", value)[0]
+        if number == 6:
+            return (value >> 1) ^ -(value & 1)
+        return value
+    return None
+
+
+def _features(tile):
+    """Each feature's properties, as a dict, across every layer of ``tile``."""
+    features = []
+    for number, layer in _fields(tile):
+        if number != 3:
+            continue
+        keys, values, tagged = [], [], []
+        for field, value in _fields(layer):
+            if field == 3:
+                keys.append(value.decode())
+            elif field == 4:
+                values.append(_value(value))
+            elif field == 2:
+                tags = next((v for f, v in _fields(value) if f == 2), b"")
+                indices, pos = [], 0
+                while pos < len(tags):
+                    index, pos = _varint(tags, pos)
+                    indices.append(index)
+                tagged.append(indices)
+        for indices in tagged:
+            features.append({keys[k]: values[v] for k, v in zip(indices[::2], indices[1::2], strict=True)})
+    return features
+
+
+def _unit(symbol):
+    return Unit.objects.get_or_create(symbol=symbol, defaults={"name": f"test {symbol}"})[0]
+
+
+class BoundaryStatsServedUnitTests(TestCase):
+    """The tile shows statistics in the Variable's served unit (ADR 0046).
+
+    The rows stay as produced — in the source unit — and the function converts
+    them on the way out with the Variable it already joins: ``mean``, ``min``
+    and ``max`` as ``x·scale + offset``, ``sum`` as ``sum·scale + offset·count``
+    (every cell gains the offset), ``std`` as ``std·scale`` (a spread has no
+    offset).
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        call_command("create_martin_function", verbosity=0)
+        boundary = _whole_world_boundary()
+        tree = make_org_tree(make_organisation("ghana"), name="ghana")
+        cls.variable = tree["variable"]
+        cls.variable.source_unit = _unit("K")
+        cls.variable.unit = _unit("degC")
+        cls.variable.save()
+        cls.row = BoundaryZonalStats.objects.create(
+            item=tree["item"],
+            variable=cls.variable,
+            boundary=boundary,
+            time=VALID_TIME,
+            mean=290.5,
+            min=280.25,
+            max=300.75,
+            sum=1162.0,
+            std=4.5,
+            count=4,
+        )
+
+    def _served(self):
+        tile = BoundaryStatsTileScopingTests._tile(
+            org="ghana",
+            catalog=SHARED_SLUG,
+            collection=SHARED_SLUG,
+            variable=SHARED_SLUG,
+            admin_level=1,
+            time=VALID_TIME.isoformat(),
+        )
+        (feature,) = _features(tile)
+        return feature
+
+    def assertServed(self, feature, expected):
+        for stat, value in expected.items():
+            with self.subTest(stat=stat):
+                self.assertAlmostEqual(feature[stat], value, places=6)
+
+    def test_a_kelvin_source_is_served_in_celsius(self):
+        self.assertServed(
+            self._served(),
+            {
+                "mean": 17.35,
+                "min": 7.1,
+                "max": 27.6,
+                "sum": 69.4,  # 1162 K over 4 cells: each cell loses 273.15
+                "std": 4.5,
+                "count": 4,
+            },
+        )
+
+    def test_changing_the_served_unit_changes_the_tile_not_the_rows(self):
+        self.variable.unit = _unit("degF")
+        self.variable.save()
+
+        self.assertServed(
+            self._served(),
+            {
+                "mean": 63.23,
+                "min": 44.78,
+                "max": 81.68,
+                "sum": 252.92,  # four cells of 63.23 °F
+                "std": 8.1,
+            },
+        )
+        stored = BoundaryZonalStats.objects.get(pk=self.row.pk)
+        self.assertEqual(
+            (stored.mean, stored.min, stored.max, stored.sum, stored.std),
+            (290.5, 280.25, 300.75, 1162.0, 4.5),
+        )
+
+    def test_a_variable_served_in_its_source_unit_is_unchanged(self):
+        self.variable.unit = self.variable.source_unit
+        self.variable.save()
+
+        self.assertServed(
+            self._served(),
+            {"mean": 290.5, "min": 280.25, "max": 300.75, "sum": 1162.0, "std": 4.5, "count": 4},
+        )
