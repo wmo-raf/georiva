@@ -244,7 +244,9 @@ class StoreAssetRowTests(LocalStore, TestCase):
         )
         unit, _ = Unit.objects.get_or_create(name="Kelvin", symbol="K")
         collection = self.feed.ensure_collection()
-        variable = Variable.objects.create(collection=collection, slug="temperature-2m", name="T2m", unit=unit)
+        variable = Variable.objects.create(
+            collection=collection, slug="temperature-2m", name="T2m", unit=unit, source_unit=unit
+        )
         item = Item.objects.create(collection=collection, time=RUNS[1] + LEADS[1], reference_time=RUNS[1])
         self.asset = Asset.objects.create(
             item=item,
