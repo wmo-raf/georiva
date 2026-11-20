@@ -14,7 +14,6 @@ catalog of plain files whose collections are Upstream stores (ADR 0044 §1).
 from __future__ import annotations
 
 import logging
-import re
 import socket
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
@@ -24,6 +23,8 @@ from typing import Protocol
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import urllib3
+
+from georiva.core.values.store import refused_place, repository_storage, store_coordinate
 
 logger = logging.getLogger(__name__)
 
@@ -669,10 +670,8 @@ def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
     from concurrent.futures import TimeoutError as TimedOut
 
     def read():
-        import icechunk
-
         each = f"{max(1, int(min(timeout, 20)))}s"
-        return read_store_codecs(icechunk.http_storage(href, opts={"timeout": each, "connect_timeout": "5s"}))
+        return read_store_codecs(repository_storage(href, timeout=each))
 
     # Its own thread, so a store that stops answering costs the wait and no more.
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-probe")
@@ -700,7 +699,6 @@ RUNS_IN_REACH = 8
 TIMES_IN_REACH = 64
 
 #: An address in what the store's library says of a read it would not make.
-_ADDRESS = re.compile(r"[a-z][a-z0-9+.-]*://[^\s()'\"]+", re.IGNORECASE)
 
 
 def open_repository(storage, chunk_locations: Mapping[str, str]):
@@ -837,13 +835,11 @@ def read_field_samples(
             found[field_.path] = _sample(store, field_)
         except Exception as exc:  # whatever the store or its library raises is an answer
             logger.warning("Upstream store field %s could not be read: %s", field_.path, exc)
-            said = str(exc)
             # Only a read the store's reader refused to follow names where it would have gone.
-            address = _ADDRESS.search(said) if "virtual chunk" in said else None
             found[field_.path] = FieldSample(
                 readable=False,
                 problem="it could not be read by a reader with no account",
-                elsewhere=address.group(0) if address else "",
+                elsewhere=refused_place(str(exc)) or "",
             )
     return found
 
@@ -860,10 +856,8 @@ def sample_store(
     found: dict[str, FieldSample] = {}
 
     def read():
-        import icechunk
-
         each = f"{max(1, int(min(timeout, 20)))}s"
-        storage = icechunk.http_storage(href, opts={"timeout": each, "connect_timeout": "5s"})
+        storage = repository_storage(href, timeout=each)
         read_field_samples(storage, fields, chunk_locations, into=found)
 
     problem = f"it did not answer within {int(timeout)} seconds"
@@ -903,48 +897,14 @@ class _StoreMisdescribed(Exception):
 
 
 def _coordinate(store, path: str, name: str, known: dict):
-    """The values of the coordinate a dimension of the array at `path` is
-    measured on, as numpy dates or lengths of time. It sits beside the array
-    or at the store's root, under the dimension's own name."""
-    import numpy as np
-    import zarr
-    from xarray.coding.times import decode_cf_datetime, decode_cf_timedelta
-
-    group = path.rpartition("/")[0]
-    for at in dict.fromkeys([f"{group}/{name}" if group else name, name]):
-        if at in known:
-            return known[at]
-        try:
-            coordinate = zarr.open_array(store, path=at, mode="r")
-        except (FileNotFoundError, KeyError, zarr.errors.ArrayNotFoundError):
-            continue
-        values = np.asarray(coordinate[:])
-        if values.dtype.kind not in "Mm":
-            # As xarray writes times: whole numbers, with what they count in their attributes.
-            units = str(coordinate.attrs.get("units") or "")
-            values = _masked(values, coordinate.attrs.get("_FillValue"))
-            if " since " in units:
-                values = np.asarray(decode_cf_datetime(values, units, coordinate.attrs.get("calendar")))
-            elif units:
-                values = np.asarray(decode_cf_timedelta(values, units))
-        if values.dtype.kind not in "Mm" or values.ndim != 1:
-            raise _StoreMisdescribed(f"its “{name}” is not a list of times")
-        known[at] = values
-        return values
-    raise _StoreMisdescribed(f"it has no “{name}” to say when its steps are")
-
-
-def _masked(values, fill):
-    """Whole numbers counting time, with the missing ones as NaN: xarray writes
-    a missing time (NaT) as the smallest int64, and a declared fill as itself."""
-    import numpy as np
-
-    if values.dtype.kind not in "iu":
-        return values
-    missing = values == np.iinfo(np.int64).min if values.dtype.kind == "i" else np.zeros(values.shape, bool)
-    if fill is not None:
-        missing |= values == fill
-    return np.where(missing, np.nan, values.astype("f8")) if missing.any() else values
+    """The times a dimension of the array at `path` is measured on, decoded by
+    core's store decoder, as numpy dates or lengths of time."""
+    values = store_coordinate(store, path, name, known)
+    if values is None:
+        raise _StoreMisdescribed(f"it has no “{name}” to say when its steps are")
+    if values.dtype.kind not in "Mm" or values.ndim != 1:
+        raise _StoreMisdescribed(f"its “{name}” is not a list of times")
+    return values
 
 
 def _moment(value) -> datetime | None:
@@ -1108,9 +1068,7 @@ def list_held_steps(
     from concurrent.futures import TimeoutError as TimedOut
 
     def read():
-        import icechunk
-
-        storage = icechunk.http_storage(href, opts={"timeout": "30s", "connect_timeout": "5s"})
+        storage = repository_storage(href)
         return read_held_steps(storage, fields, window, skip_runs=skip_runs)
 
     # Its own thread, so a store that stops answering costs the wait and no more.

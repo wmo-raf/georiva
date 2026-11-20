@@ -12,6 +12,13 @@ locations replace the repository's own word on where its data lives, so a
 chunk anywhere else fails to read — :class:`StoreDataNotPinned`, naming the
 place.
 
+**It is core's one store decoder.** How a store is reached over HTTP
+(:func:`repository_storage`), where a dimension's coordinate is found and how
+its times are decoded (:func:`store_coordinate`), and what the store's library
+says of a read it would not follow (:func:`refused_place`) are here, and the
+Upstream client (``harvest.upstream``) reads stores through them. Titiler keeps
+its own copy, across the process boundary (``titiler-app/app/store.py``).
+
 **A session holds what it opened** (:class:`OpenStores`): each store opened
 once, read-only at the snapshot it was opened on, for the session's life — a
 batch reads one moment of a store that commits every few seconds — and each
@@ -40,6 +47,16 @@ CONNECT_TIMEOUT = "5s"
 
 #: An address in what the store's library says of a read it would not make.
 _ADDRESS = re.compile(r"[a-z][a-z0-9+.-]*://[^\s()'\"]+", re.IGNORECASE)
+
+
+def refused_place(said: str) -> str | None:
+    """Where a read the store's library would not follow would have gone, from
+    what it said; ``None`` when it said no such thing (another failure)."""
+    if "virtual chunk" not in said:
+        return None
+    address = _ADDRESS.search(said)
+    return address.group(0) if address else ""
+
 
 _TIMEDELTA_UNITS = frozenset({"days", "hours", "minutes", "seconds", "milliseconds", "microseconds", "nanoseconds"})
 
@@ -105,11 +122,11 @@ def store_slice(asset) -> StoreSlice:
     )
 
 
-def repository_storage(href: str):
-    """Where the repository at ``href`` is read from: over HTTP, every request bounded."""
+def repository_storage(href: str, *, timeout: str = READ_TIMEOUT):
+    """Where the repository at ``href`` is read from: over HTTP, every request bounded by ``timeout``."""
     import icechunk
 
-    options = {"timeout": READ_TIMEOUT, "connect_timeout": CONNECT_TIMEOUT}
+    options = {"timeout": timeout, "connect_timeout": CONNECT_TIMEOUT}
     if href.startswith("http://"):
         options["allow_http"] = "true"
     return icechunk.http_storage(href, opts=options)
@@ -187,10 +204,9 @@ class _OpenStore:
         try:
             data = np.asarray(array[tuple(at.get(part, slice(None)) for part in axes)])
         except Exception as exc:
-            said = str(exc)
-            if "virtual chunk" in said:
-                address = _ADDRESS.search(said)
-                raise StoreDataNotPinned(address.group(0) if address else "") from exc
+            place = refused_place(str(exc))
+            if place is not None:
+                raise StoreDataNotPinned(place) from exc
             raise
         if axes.index("x") < axes.index("y"):
             data = data.T
@@ -205,26 +221,13 @@ class _OpenStore:
             return self._arrays[path]
 
     def _coordinate(self, path: str, name: str) -> np.ndarray:
-        """The values a dimension of the array at ``path`` is measured on: beside
-        the array or at the store's root, under the dimension's own name."""
-        import zarr
-
-        group = path.rpartition("/")[0]
-        for at in dict.fromkeys([f"{group}/{name}" if group else name, name]):
-            with self._lock:
-                if at in self._coordinates:
-                    return self._coordinates[at]
-            try:
-                coordinate = zarr.open_array(self.store, path=at, mode="r")
-            except (FileNotFoundError, KeyError, zarr.errors.ArrayNotFoundError):
-                continue
-            decoded = _decoded(np.asarray(coordinate[:]), coordinate.attrs)
-            if decoded.ndim != 1:
-                raise StoreUnreadable(f"The upstream store's “{name}” is not a list of values.")
-            with self._lock:
-                self._coordinates[at] = decoded
-            return decoded
-        raise StoreUnreadable(f"The upstream store has no “{name}” to place its maps by.")
+        with self._lock:
+            decoded = store_coordinate(self.store, path, name, self._coordinates)
+        if decoded is None:
+            raise StoreUnreadable(f"The upstream store has no “{name}” to place its maps by.")
+        if decoded.ndim != 1:
+            raise StoreUnreadable(f"The upstream store's “{name}” is not a list of values.")
+        return decoded
 
     def _measured(self, path: str):
         array = self._array(path)
@@ -334,6 +337,25 @@ def _when(wanted: StoreSlice) -> str:
     if wanted.reference_time is None:
         return wanted.time.isoformat()
     return f"{wanted.time.isoformat()} (run {wanted.reference_time.isoformat()})"
+
+
+def store_coordinate(store, path: str, name: str, known: dict) -> np.ndarray | None:
+    """The decoded values a dimension of the array at ``path`` is measured on —
+    beside the array or at the store's root, under the dimension's own name —
+    or ``None`` when the store has none. ``known`` caches them by where they were found."""
+    import zarr
+
+    group = path.rpartition("/")[0]
+    for at in dict.fromkeys([f"{group}/{name}" if group else name, name]):
+        if at in known:
+            return known[at]
+        try:
+            coordinate = zarr.open_array(store, path=at, mode="r")
+        except (FileNotFoundError, KeyError, zarr.errors.ArrayNotFoundError):
+            continue
+        known[at] = _decoded(np.asarray(coordinate[:]), coordinate.attrs)
+        return known[at]
+    return None
 
 
 def _decoded(raw: np.ndarray, attrs) -> np.ndarray:
