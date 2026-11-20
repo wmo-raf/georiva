@@ -118,8 +118,18 @@ class PushFeedEditTests(PushFeedEditBase):
         self.variable.refresh_from_db()
         self.assertEqual(self.variable.unit, self.celsius)
         self.assertEqual(self.variable.source_unit, self.kelvin)
-        self.assertEqual((self.variable.value_min, self.variable.value_max), (-23, 47))
+        # Typed in the output unit, stored in the incoming one (ADR 0046 §3).
+        self.assertEqual(self.variable.value_range, (250.15, 320.15))
+        self.assertEqual(self.variable.served_range, (-23.0, 47.0))
         self.assertEqual(self.variable.name, "Temp")
+
+    def test_the_range_reads_in_the_output_unit(self):
+        self.variable.unit = self.celsius
+        self.variable.value_min, self.variable.value_max = 250.15, 320.15
+        self.variable.save()
+
+        row = self.client.get(self.url).context["variable_rows"][0]
+        self.assertEqual((row["value_min"], row["value_max"]), (-23.0, 47.0))
 
     def test_renaming_leaves_the_files_own_name_alone(self):
         Variable.objects.filter(pk=self.variable.pk).update(source_long_name="2 metre temperature")

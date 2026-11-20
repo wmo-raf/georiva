@@ -937,6 +937,12 @@ def upload_wizard_provision(request):
                     transform = Variable.TransformType.PASSTHROUGH
                     sources = passthrough_sources(variable_name)
 
+                # The range was typed in the output unit; it is stored in the
+                # unit the files carry (ADR 0046 §3).
+                source_unit = _source_unit_for_assignment(assignment) or unit
+                seeding = Variable(source_unit=source_unit, unit=unit)
+                seeding.set_served_range(assignment["value_min"], assignment["value_max"])
+
                 # get_or_create: re-provisioning into an existing collection must
                 # not clobber hand-tuned Variables (styling, transform, ranges).
                 Variable.objects.get_or_create(
@@ -947,10 +953,10 @@ def upload_wizard_provision(request):
                         "source_long_name": (assignment.get("source_long_name") or "").strip(),
                         "transform_type": transform,
                         # A file that names no unit is taken to hold the one chosen for it.
-                        "source_unit": _source_unit_for_assignment(assignment) or unit,
+                        "source_unit": source_unit,
                         "unit": unit,
-                        "value_min": assignment["value_min"],
-                        "value_max": assignment["value_max"],
+                        "value_min": seeding.value_min,
+                        "value_max": seeding.value_max,
                         "sources": sources,
                     },
                 )

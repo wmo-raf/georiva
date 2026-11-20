@@ -96,6 +96,44 @@ class UpsertVariableUnitsTests(TestCase):
         self.assertEqual(variable.unit_id, variable.source_unit_id)
         self.assertEqual(variable.unit.symbol, "m/s")
 
+    # -------- seeds are served-unit values, stored converted (ADR 0046 §3) --------
+
+    def _kelvin_served_in_celsius(self, **fields):
+        return CollectionVariable(
+            key="2t",
+            name="2m Temperature",
+            source_units="K",
+            output_units="degC",
+            source_variable=SourceKey(name="2t"),
+            **fields,
+        )
+
+    def test_a_seeded_range_is_read_in_the_output_unit_and_stored_in_the_source_unit(self):
+        variable = self.service._upsert_variable(
+            self.collection, self._kelvin_served_in_celsius(value_range=(-40.0, 50.0))
+        )
+
+        self.assertEqual(variable.value_range, (233.15, 323.15))
+        self.assertEqual(variable.served_range, (-40.0, 50.0))
+
+    def test_seeded_stops_are_read_in_the_output_unit_and_stored_in_the_source_unit(self):
+        variable = self.service._upsert_variable(
+            self.collection,
+            self._kelvin_served_in_celsius(palette_stops=((0.0, "#0000ff"), (30.0, "#ff0000"))),
+        )
+
+        style = variable.styles.get()
+        self.assertEqual(style.stops, [{"value": 273.15, "color": "#0000ff"}, {"value": 303.15, "color": "#ff0000"}])
+        self.assertEqual(variable.value_range, (273.15, 303.15))
+
+    def test_a_seeded_ramp_is_laid_over_the_output_unit_range_and_stored_converted(self):
+        variable = self.service._upsert_variable(
+            self.collection, self._kelvin_served_in_celsius(value_range=(-40.0, 50.0), palette="viridis")
+        )
+
+        stops = variable.styles.get().stops
+        self.assertEqual((stops[0]["value"], stops[-1]["value"]), (233.15, 323.15))
+
     def test_geopotential_context_converts_specific_energy_to_decametres(self):
         # m2/s2 -> gpdam rides the global geopotential context (divide by g)
         # plus the gpdam definition (divide by 10), in a single pint conversion.

@@ -23,13 +23,15 @@ class CollectionVariable:
     of source_variable.
 
     source_units (required) is the raw unit of the data as it leaves the source
-    file (or, for transforms, as it leaves the transform). output_units is the
-    unit this variable is exposed in: when set and different from source_units,
-    the ingestion pipeline converts source_units -> output_units via pint. When
-    output_units is None it defaults to source_units, i.e. no conversion.
+    file (or, for transforms, as it leaves the transform); data is stored in it.
+    output_units is the unit this variable is served in, converted to when read
+    (ADR 0046). When output_units is None it defaults to source_units, i.e. no
+    conversion.
 
     Styling seed (ADR 0022) — all optional, all create-only (a re-provision
-    never touches an existing Variable's range or styles):
+    never touches an existing Variable's range or styles). Range and stop values
+    are in the exposed unit (``exposed_units``) and are stored converted to
+    source_units (ADR 0046 §3):
 
     - palette: a ColorRamp catalog name (e.g. "viridis"); the system stretches
       it over the value range into the variable's default style.

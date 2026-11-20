@@ -411,3 +411,40 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def served_palette(self, palette: list) -> list:
         """``[[value, color], ...]`` stops with each value in the served unit."""
         return [[self.served(value), color] for value, color in palette]
+
+    # -------- the form boundary (ADR 0046 §3) --------
+    #
+    # Operators type and read ranges and stops in the served unit; they are
+    # stored in the source unit. Forms convert both ways through these.
+
+    def stored(self, value):
+        """A served-unit number as stored (in the source unit); ``None`` stays ``None``.
+
+        The inverse of :meth:`served`, rounded the same way, so 0 °C stores
+        273.15 K rather than 273.15000000000003.
+        """
+        if value is None:
+            return None
+        return float(f"{(value - self.offset) / self.scale:.12g}")
+
+    def served_stops(self, stops: list) -> list:
+        """``[{"value", "color"}, ...]`` stops with each value in the served unit."""
+        return [{**stop, "value": self.served(stop["value"])} for stop in stops]
+
+    def stored_stops(self, stops: list) -> list:
+        """Served-unit ``[{"value", "color"}, ...]`` stops as stored."""
+        return [{**stop, "value": self.stored(stop["value"])} for stop in stops]
+
+    def refresh_conversion(self):
+        """Recompute ``scale`` and ``offset`` from the units now set, before
+        :meth:`stored` is asked of a Variable not yet saved with them. A refused
+        conversion raises as :meth:`save` would."""
+        try:
+            self.scale, self.offset = self.conversion()
+        except ConversionRefused as e:
+            raise ValidationError({"unit": str(e)}) from None
+
+    def set_served_range(self, value_min, value_max):
+        """Set the range from served-unit numbers, stored in the source unit."""
+        self.refresh_conversion()
+        self.value_min, self.value_max = self.stored(value_min), self.stored(value_max)

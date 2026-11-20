@@ -62,9 +62,9 @@
                         <code class="w-font-mono help-text">{{ row.variable.slug }}</code>
                     </td>
                     <td class="styling-range">
-                        {{ row.variable.value_min|floatformat:"-4" }}
+                        {{ row.served_min|floatformat:"-4" }}
                         &ndash;
-                        {{ row.variable.value_max|floatformat:"-4" }}
+                        {{ row.served_max|floatformat:"-4" }}
                         {% if row.variable.units %}
                             <span class="help-text">{{ row.variable.units }}</span>
                         {% endif %}
