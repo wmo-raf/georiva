@@ -277,7 +277,24 @@ class SourceSetupService:
             "description": var_def.description,
             "unit": output_unit,
             "source_unit": source_unit,
+            "water": var_def.water,
         }
+        existing = Variable.objects.filter(collection=collection, slug=slug).select_related("source_unit").first()
+        if existing is not None and existing.source_unit_locked():
+            # The bytes already held say what they hold (ADR 0046 §8): a
+            # declaration that changed is not a relabelling of them.
+            base_defaults.pop("source_unit")
+            if existing.source_unit_id != source_unit.pk:
+                logger.warning(
+                    "Variable %s/%s: the plugin now declares source unit %s, but its data is held as %s. "
+                    "Kept %s; if the data is in fact %s, use Correct source unit.",
+                    collection.slug,
+                    slug,
+                    source_unit.symbol,
+                    existing.source_unit.symbol,
+                    existing.source_unit.symbol,
+                    source_unit.symbol,
+                )
         # Seed-vs-tune (ADR 0022): the plugin's declared range and styling
         # only seed a new Variable — an operator-tuned range or style must
         # survive re-provisioning. Canonical stops outrank the declared range:
@@ -308,7 +325,7 @@ class SourceSetupService:
         # A plugin declares its range and stops as numbers people read — in the
         # unit the variable is served in — and they are stored in the source
         # unit (ADR 0046 §3). Saving refuses a conversion that cannot be made.
-        seeding = Variable(source_unit=source_unit, unit=output_unit)
+        seeding = Variable(source_unit=source_unit, unit=output_unit, water=var_def.water)
         seeding.set_served_range(seed_min, seed_max)
         seed_defaults = {"value_min": seeding.value_min, "value_max": seeding.value_max}
         if seed_stops:

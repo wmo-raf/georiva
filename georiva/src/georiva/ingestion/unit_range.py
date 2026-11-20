@@ -3,15 +3,7 @@
 from django.http import JsonResponse
 from django.utils.translation import gettext as _
 
-from georiva.core.unit_utils import ureg
-
-
-def convert_value(value: float, from_symbol: str, to_symbol: str) -> float:
-    """``value`` in ``from_symbol`` expressed in ``to_symbol``. Offset units (K → °C) are handled."""
-    if from_symbol == to_symbol:
-        return value
-    quantity = ureg.Quantity(value, ureg(from_symbol).units)
-    return float(quantity.to(ureg(to_symbol).units).magnitude)
+from georiva.core.unit_utils import Conversion, ConversionRefused, ureg
 
 
 def same_unit(a: str, b: str) -> bool:
@@ -22,19 +14,11 @@ def same_unit(a: str, b: str) -> bool:
         return a.strip().lower() == b.strip().lower()
 
 
-def units_convertible(from_symbol: str, to_symbol: str) -> bool:
-    try:
-        convert_value(1.0, from_symbol, to_symbol)
-    except Exception:
-        return False
-    return True
-
-
-def convert_range(vmin: float, vmax: float, from_symbol: str, to_symbol: str) -> tuple[float, float]:
-    """A range across a unit change, ordered min < max (a decreasing conversion swaps the ends)."""
-    low, high = convert_value(vmin, from_symbol, to_symbol), convert_value(vmax, from_symbol, to_symbol)
-    low, high = sorted((low, high))
-    return round(low, 6), round(high, 6)
+def convert_range(vmin: float, vmax: float, from_symbol: str, to_symbol: str, *, water: bool = False) -> tuple:
+    """A range across a unit change, by the conversion a Variable would be
+    served through (ADR 0046 §4, §6). :class:`ConversionRefused` when it would be refused."""
+    conversion = Conversion.between(from_symbol, to_symbol, water=water)
+    return conversion.forward(vmin), conversion.forward(vmax)
 
 
 def _symbol(request, prefix: str) -> str:
@@ -59,10 +43,7 @@ def convert_range_view(request):
     if not from_symbol or not to_symbol:
         return JsonResponse({"error": str(_("Unknown unit."))}, status=400)
     try:
-        low, high = convert_range(vmin, vmax, from_symbol, to_symbol)
-    except Exception:
-        return JsonResponse(
-            {"error": str(_("%(a)s cannot be converted to %(b)s.") % {"a": from_symbol, "b": to_symbol})},
-            status=400,
-        )
+        low, high = convert_range(vmin, vmax, from_symbol, to_symbol, water=request.GET.get("water") == "1")
+    except ConversionRefused as refused:
+        return JsonResponse({"error": str(refused)}, status=400)
     return JsonResponse({"value_min": low, "value_max": high})

@@ -96,6 +96,64 @@ class UpsertVariableUnitsTests(TestCase):
         self.assertEqual(variable.unit_id, variable.source_unit_id)
         self.assertEqual(variable.unit.symbol, "m/s")
 
+    def test_a_reprovision_never_changes_the_source_unit_of_a_variable_with_data(self):
+        """The bytes already held say what they hold (ADR 0046 §8): a plugin
+        that now declares another source unit does not relabel them."""
+        from datetime import UTC, datetime
+
+        from georiva.core.models import Asset, Item
+
+        declared = self._kelvin_served_in_celsius()
+        variable = self.service._upsert_variable(self.collection, declared)
+        item = Item.objects.create(collection=self.collection, time=datetime(2026, 3, 1, tzinfo=UTC))
+        Asset.objects.create(item=item, variable=variable, href="x/1.tif")
+
+        redeclared = CollectionVariable(
+            key="2t",
+            name="2m Temperature",
+            source_units="degC",
+            output_units="degF",
+            source_variable=SourceKey(name="2t"),
+        )
+        with self.assertLogs("georiva.sources.setup_service", "WARNING") as logged:
+            self.service._upsert_variable(self.collection, redeclared)
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.source_unit.symbol, "K")
+        self.assertEqual(variable.unit.symbol, "degF")
+        self.assertIn("Correct source unit", "\n".join(logged.output))
+
+    def test_a_plugin_declares_a_variable_of_water(self):
+        """kg m-2 is mm only of water (ADR 0046 §6); the plugin's declaration is the confirmation."""
+        variable = self.service._upsert_variable(
+            self.collection,
+            CollectionVariable(
+                key="tp",
+                name="Total precipitation",
+                source_units="kg m-2",
+                output_units="mm",
+                water=True,
+                source_variable=SourceKey(name="tp"),
+                value_range=(0.0, 100.0),
+            ),
+        )
+
+        self.assertTrue(variable.water)
+        self.assertEqual(variable.value_range, (0.0, 100.0))
+
+    def test_a_reprovision_updates_the_source_unit_of_a_variable_without_data(self):
+        variable = self.service._upsert_variable(self.collection, self._kelvin_served_in_celsius())
+
+        self.service._upsert_variable(
+            self.collection,
+            CollectionVariable(
+                key="2t", name="2m Temperature", source_units="degC", source_variable=SourceKey(name="2t")
+            ),
+        )
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.source_unit.symbol, "degC")
+
     # -------- seeds are served-unit values, stored converted (ADR 0046 §3) --------
 
     def _kelvin_served_in_celsius(self, **fields):

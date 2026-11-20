@@ -209,6 +209,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 value_min: a ? a.value_min : (v.value_min != null ? v.value_min : null),
                 value_max: a ? a.value_max : (v.value_max != null ? v.value_max : null),
                 has_data: false,
+                // Proposed from the file's own names; the person confirms it (ADR 0046 §6).
+                water: a ? !!a.water : !!v.water,
             }, sel);
         });
 
@@ -235,6 +237,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     incoming_symbol: a.source_symbol || '',
                     value_min: a.value_min,
                     value_max: a.value_max,
+                    water: !!a.water,
                 });
                 const c = collections[a.collection_idx];
                 if (c) card.querySelector('.gr-vc-collection select').value = String(c.id);
@@ -300,6 +303,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     unit_display:   r.unit_display,
                     value_min:      r.value_min,
                     value_max:      r.value_max,
+                    water:          r.water,
                     collection_idx: derivedIdx >= 0 ? derivedIdx : 0,
                 };
             }
@@ -319,6 +323,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 unit_display:   r.unit_display,
                 value_min:      r.value_min,
                 value_max:      r.value_max,
+                water:          r.water,
                 collection_idx: collIdx >= 0 ? collIdx : 0,
             };
         });

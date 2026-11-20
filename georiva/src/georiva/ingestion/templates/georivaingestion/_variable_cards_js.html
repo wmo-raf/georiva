@@ -6,6 +6,9 @@
  *
  * The range is always in the OUTPUT unit. Picking another output unit re-expresses the
  * range through the server (pint), because offset units (K to degC) are not a plain factor.
+ * Changing the output unit rewrites no data: values are stored as the files carry them and
+ * converted when read (ADR 0046 §2). "Water" lets kg m-2 and mm convert into each other (§6);
+ * it is proposed from the variable's own names and the person confirms it.
  *
  * A card is a passthrough variable, a stored derived variable (wind speed or direction, its
  * components fixed), or a new derived variable still being filled in.
@@ -25,7 +28,7 @@ window.GrVariableCards = (function () {
         min: '{% trans "min" %}',
         max: '{% trans "max" %}',
         converted: '{% trans "Range converted from" %}',
-        confirm: '{% trans "Existing data keeps its old unit and range and is not reprocessed. I understand." %}',
+        water: '{% trans "Water (kg m⁻² and mm convert into each other)" %}',
         fromFile: '{% trans "From file:" %}',
         reset: '{% trans "Reset" %}',
         notSet: '{% trans "not set" %}',
@@ -34,7 +37,6 @@ window.GrVariableCards = (function () {
         needUnit: '{% trans "Choose an output unit for" %}',
         needRange: '{% trans "Enter a value range for" %}',
         minMax: '{% trans "min must be less than max." %}',
-        needConfirm: '{% trans "Confirm the unit change for" %}',
         derivedLabel: '{% trans "Derived:" %}',
         newDerived: '{% trans "New derived variable" %}',
         speed: '{% trans "wind speed" %}',
@@ -127,9 +129,11 @@ window.GrVariableCards = (function () {
         const units = !isDirection(card) && incoming && out && incoming !== out ? incoming + ' → ' + out : out;
         const range = min !== '' && max !== '' ? min + '–' + max : '';
         card.querySelector('.gr-vc-summary').textContent = [units, range].filter(Boolean).join(' · ');
+    }
 
-        const changed = card.querySelector('.gr-vc-out').value !== card.dataset.originalOut;
-        card.querySelector('.gr-vc-confirm').hidden = !(card.dataset.hasData === '1' && changed);
+    function isWater(card) {
+        const box = card.querySelector('.gr-vc-water-box');
+        return !!(box && box.checked);
     }
 
     function onOutputChange(card) {
@@ -143,7 +147,7 @@ window.GrVariableCards = (function () {
         if (!from || !to || from === to || minEl.value === '' || maxEl.value === '') return;
 
         const params = new URLSearchParams({
-            from_symbol: from, to_symbol: to, min: minEl.value, max: maxEl.value,
+            from_symbol: from, to_symbol: to, min: minEl.value, max: maxEl.value, water: isWater(card) ? '1' : '0',
         });
         fetch(cfg.convertUrl + '?' + params.toString())
             .then(function (r) { return r.json(); })
@@ -192,7 +196,9 @@ window.GrVariableCards = (function () {
             '<div class="gr-vc-units"><span class="gr-vc-in-wrap"></span><span class="gr-vc-arrow">→</span>' +
             '<select class="w-field__input gr-vc-unit-select gr-vc-out" required>' +
                 unitOptions(row.unit_id, createSymbol, !!row.unit_create, T.chooseUnit) +
-            '</select></div></div>' +
+            '</select></div>' +
+            '<label class="gr-vc-water"><input type="checkbox" class="gr-vc-water-box"' +
+                (row.water ? ' checked' : '') + '> ' + esc(T.water) + '</label></div>' +
             '<div class="gr-vc-fixed-unit gr-vc-note" hidden>' + esc(T.degrees) + '</div>';
     }
 
@@ -208,9 +214,7 @@ window.GrVariableCards = (function () {
     }
 
     function footerHtml() {
-        return '<div class="gr-vc-note" aria-live="polite"></div>' +
-            '<div class="gr-vc-confirm" hidden><label>' +
-                '<input type="checkbox" class="gr-vc-confirm-box"> ' + esc(T.confirm) + '</label></div>';
+        return '<div class="gr-vc-note" aria-live="polite"></div>';
     }
 
     /** Direction is always degrees: no incoming unit, nothing to convert. **/
@@ -248,7 +252,7 @@ window.GrVariableCards = (function () {
 
     /**
      * row: {key, name, long_name, source_long_name, incoming_symbol, incoming_unit_id, unit_id,
-     *       unit_create, can_create, value_min, value_max, has_data,
+     *       unit_create, can_create, value_min, value_max, has_data, water,
      *       derived: {transform, u_source, v_source} for a stored derived variable}
      * collectionNode: the DOM node for the collection. A select is a field in the card body;
      * with collectionBadge it is plain text and goes in the card header instead.
@@ -263,7 +267,6 @@ window.GrVariableCards = (function () {
         card.dataset.label = row.long_name ? row.long_name + ' (' + row.name + ')' : row.name;
         const createSymbol = row.can_create ? row.incoming_symbol : '';
         card.dataset.createSymbol = createSymbol;
-        card.dataset.originalOut = row.unit_create ? '__create__' : (row.unit_id != null ? String(row.unit_id) : '');
 
         const heading = derived
             ? esc(T.derivedLabel) + ' ' + esc(transformName(derived.transform)) + ' ' + esc(T.from) + ' ' +
@@ -341,7 +344,6 @@ window.GrVariableCards = (function () {
         card.dataset.hasData = '0';
         card.dataset.label = T.newDerived;
         card.dataset.createSymbol = '';
-        card.dataset.originalOut = '';
 
         card.innerHTML =
             '<div class="gr-vc-card-head">' +
@@ -359,7 +361,7 @@ window.GrVariableCards = (function () {
                 sourceSelect(T.vComponent, 'gr-vc-v', opts.sourceOptions, opts.allowOther) +
                 '<div><label class="gr-vc-label">' + esc(T.displayName) + '</label>' +
                     '<input type="text" class="w-field__input gr-vc-ln" value="' + esc(pre.long_name || '') + '"></div>' +
-                unitsFieldHtml({unit_id: pre.unit_id != null ? pre.unit_id : null}, '') +
+                unitsFieldHtml({unit_id: pre.unit_id != null ? pre.unit_id : null, water: !!pre.water}, '') +
                 rangeFieldHtml({value_min: pre.value_min, value_max: pre.value_max}) +
                 '<div><label class="gr-vc-label">' + esc(T.collection) + '</label>' +
                     '<div class="gr-vc-collection"></div></div>' +
@@ -473,8 +475,6 @@ window.GrVariableCards = (function () {
             const inChosen = inSel && !inSel.hidden && inSel.value;
             const vmin = minEl.value !== '' ? parseFloat(minEl.value) : null;
             const vmax = maxEl.value !== '' ? parseFloat(maxEl.value) : null;
-            const confirmBox = tr.querySelector('.gr-vc-confirm-box');
-            const needsConfirm = !tr.querySelector('.gr-vc-confirm').hidden;
             const direction = isDirection(tr);
             const collectionSel = tr.querySelector('.gr-vc-collection select');
 
@@ -497,7 +497,6 @@ window.GrVariableCards = (function () {
                 error = T.needRange + ' ' + name + '.';
             }
             if (!error && vmin >= vmax) error = name + ': ' + T.minMax;
-            if (!error && needsConfirm && !confirmBox.checked) error = T.needConfirm + ' ' + name + '.';
             if (error && !errorCard) errorCard = tr;
 
             return {
@@ -513,7 +512,7 @@ window.GrVariableCards = (function () {
                 unit_display: outEl.value ? outEl.options[outEl.selectedIndex].textContent : '',
                 value_min: vmin,
                 value_max: vmax,
-                confirm_unit_change: !!(confirmBox && confirmBox.checked),
+                water: !direction && isWater(tr),
             };
         });
         return { rows: rows, error: error, errorCard: errorCard };

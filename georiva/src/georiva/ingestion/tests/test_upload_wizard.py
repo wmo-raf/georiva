@@ -685,6 +685,68 @@ class Step4CollectionsTests(TestCase):
 # =============================================================================
 
 
+class Step4WaterFlagTests(TestCase):
+    """kg m-2 is mm only of water (ADR 0046 §6): the wizard proposes the flag
+    from the file's own names and the operator confirms it."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("water4", "w@e.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        self.mm = Unit.objects.get_or_create(symbol="mm", defaults={"name": "Millimetre"})[0]
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "WM",
+                "new_catalog_slug": "wm",
+                "new_catalog_format": "grib2",
+                "feed_name": "Rain",
+                "variables": [
+                    {"name": "tp", "long_name": "Total precipitation", "units": "kg m-2"},
+                    {"name": "aod", "long_name": "Dust column load", "units": "kg m-2"},
+                ],
+                "selected_variable_names": ["tp", "aod"],
+                "sample_filename": "20250115.grib2",
+                "valid_time_format": "CONTENT",
+                "is_forecast": False,
+            },
+        )
+
+    def _post(self, **overrides):
+        assignment = _assignment(
+            variable_name="tp",
+            long_name="Total precipitation",
+            units="kg m-2",
+            source_symbol="kg m-2",
+            unit_id=self.mm.pk,
+            unit_create="",
+            value_min=0.0,
+            value_max=100.0,
+            **overrides,
+        )
+        return self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps([{"name": "Rain", "slug": "rain"}]),
+                "assignments_json": json.dumps([assignment]),
+            },
+        )
+
+    def test_the_flag_is_proposed_from_the_files_own_names(self):
+        variables = json.loads(self.client.get(STEP4_URL).context["selected_variables_json"])
+        self.assertEqual({v["name"]: v["water"] for v in variables}, {"tp": True, "aod": False})
+
+    def test_kg_m2_served_in_mm_without_the_flag_is_refused(self):
+        response = self._post()
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("assignments", self.client.session[SESSION_KEY])
+
+    def test_kg_m2_served_in_mm_as_water_is_accepted(self):
+        response = self._post(water=True)
+        self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
+
+
 class Step4DuplicateSourceNameTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4dup", "dup@test.com", "pw")
@@ -882,6 +944,29 @@ class ProvisionTests(TestCase):
         var = Variable.objects.get()
         self.assertEqual(var.value_range, (233.15, 323.15))
         self.assertEqual(var.served_range, (-40.0, 50.0))
+
+    def test_provision_stores_the_water_flag(self):
+        mm = Unit.objects.get_or_create(symbol="mm", defaults={"name": "Millimetre"})[0]
+        session = _full_session()
+        session["assignments"] = [
+            _assignment(
+                variable_name="tp",
+                units="kg m-2",
+                source_symbol="kg m-2",
+                unit_id=mm.pk,
+                unit_create="",
+                value_min=0.0,
+                value_max=100.0,
+                water=True,
+            )
+        ]
+        _seed_session(self.client, session)
+        self.client.post(PROVISION_URL)
+
+        var = Variable.objects.get()
+        self.assertTrue(var.water)
+        self.assertEqual((var.source_unit.symbol, var.unit), ("kg m-2", mm))
+        self.assertEqual(var.value_range, (0.0, 100.0))
 
     def test_provision_keeps_the_files_own_name_when_the_display_name_is_edited(self):
         session = _full_session()
