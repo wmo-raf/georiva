@@ -747,6 +747,7 @@ class Step4DuplicateSourceNameTests(TestCase):
             collection=existing_col,
             slug="2t",
             name="2m temperature",
+            source_unit=Unit.objects.get(symbol="K"),
             unit=Unit.objects.get(symbol="K"),
         )
         _seed_session(
@@ -775,6 +776,7 @@ class Step4DuplicateSourceNameTests(TestCase):
             collection=existing_col,
             slug="2t",
             name="2m temperature",
+            source_unit=Unit.objects.get(symbol="K"),
             unit=Unit.objects.get(symbol="K"),
         )
         _seed_session(
@@ -995,6 +997,7 @@ class ProvisionTests(TestCase):
             slug="2t",
             name="Hand-tuned temperature",
             transform_type=Variable.TransformType.PASSTHROUGH,
+            source_unit=unit,
             unit=unit,
             value_min=-10.0,
             value_max=10.0,

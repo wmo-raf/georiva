@@ -180,6 +180,7 @@ class _MultiInputFixture(TestCase):
             collection=self.out_col,
             slug="cdi",
             name="CDI",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=-3,
             value_max=3,

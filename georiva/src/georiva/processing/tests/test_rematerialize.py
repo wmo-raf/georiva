@@ -43,6 +43,7 @@ class RematerializeDerivedAssetsTests(TestCase):
             collection=self.collection,
             slug="precip",
             name="Precipitation",
+            source_unit=unit,
             unit=unit,
             value_min=-150,
             value_max=150,

@@ -65,6 +65,7 @@ class _ClimatologyFixture(TestCase):
             collection=self.src_col,
             slug="tas",
             name="tas",
+            source_unit=self.unit_c,
             unit=self.unit_c,
             value_min=0,
             value_max=50,

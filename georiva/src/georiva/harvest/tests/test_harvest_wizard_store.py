@@ -634,6 +634,7 @@ class WizardSavesAStoreFeedTogetherOrNotAtAllTests(StoreWizardMixin, TestCase):
             collection=collection,
             slug="temperature_2m",
             name="Hand-tuned",
+            source_unit=self.celsius,
             unit=self.celsius,
             value_min=-5,
             value_max=5,

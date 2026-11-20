@@ -96,6 +96,7 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                     defaults={
                         "name": planned.name[:255] or planned.asset_key,
                         "unit_id": planned.unit_id,
+                        "source_unit_id": planned.unit_id,
                         "value_min": planned.value_min,
                         "value_max": planned.value_max,
                         "description": planned.description,

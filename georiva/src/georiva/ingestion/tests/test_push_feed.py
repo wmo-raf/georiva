@@ -103,9 +103,11 @@ class PushFeedVariablesTests(TestCase):
         feed = _make_feed(catalog)
         collection = _make_collection(catalog)
         unit = Unit.objects.get_or_create(name="Kelvin", symbol="K")[0]
-        active = Variable.objects.create(collection=collection, name="Temp", slug="t2m", unit=unit)
-        Variable.objects.create(collection=collection, name="Old", slug="old", is_active=False, unit=unit)
+        active = Variable.objects.create(collection=collection, name="Temp", slug="t2m", source_unit=unit, unit=unit)
+        Variable.objects.create(
+            collection=collection, name="Old", slug="old", is_active=False, source_unit=unit, unit=unit
+        )
         other = _make_collection(_make_catalog("other"), slug="other-col")
-        Variable.objects.create(collection=other, name="Elsewhere", slug="elsewhere", unit=unit)
+        Variable.objects.create(collection=other, name="Elsewhere", slug="elsewhere", source_unit=unit, unit=unit)
 
         self.assertEqual(list(feed.variables()), [active])

@@ -53,7 +53,7 @@ class HarvestFeedAdminMixin:
     def make_variable(self, collection, slug="rain"):
         unit, _ = Unit.objects.get_or_create(name="Millimetre", symbol="mm")
         return Variable.objects.create(
-            collection=collection, slug=slug, name=slug.title(), unit=unit, value_min=0, value_max=100
+            collection=collection, slug=slug, name=slug.title(), source_unit=unit, unit=unit, value_min=0, value_max=100
         )
 
     def posted(self, mappings=(), **fields):

@@ -33,6 +33,7 @@ class STACVisibilityTests(TestCase):
             collection=self.public,
             slug="tas",
             name="tas",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=50,
@@ -48,6 +49,7 @@ class STACVisibilityTests(TestCase):
             collection=self.internal,
             slug="tas",
             name="tas anomaly",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=-25,
             value_max=25,
@@ -103,6 +105,7 @@ class STACRenderExtensionTests(TestCase):
             collection=collection,
             slug="tas",
             name="tas",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=50,
@@ -158,6 +161,7 @@ class STACRenderExtensionTests(TestCase):
             collection=other,
             slug="pr",
             name="pr",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=10,
@@ -200,6 +204,7 @@ class STACRenderExtensionTests(TestCase):
             collection=other,
             slug="pr",
             name="pr",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=10,
@@ -229,7 +234,7 @@ class STACSearchCollectionIdTests(TestCase):
             visibility=Collection.Visibility.PUBLIC,
         )
         Variable.objects.create(
-            collection=collection, slug="precip", name="precip", unit=unit, value_min=0, value_max=500
+            collection=collection, slug="precip", name="precip", source_unit=unit, unit=unit, value_min=0, value_max=500
         )
         Item.objects.create(collection=collection, time=datetime(2026, 6, 1, tzinfo=UTC))
 

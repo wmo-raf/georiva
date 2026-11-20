@@ -55,6 +55,7 @@ class TileConfigVisibilityTests(TestCase):
             collection=coll,
             slug="tas",
             name="tas",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=50,

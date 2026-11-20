@@ -1,0 +1,80 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with name=variable.name %}Correct source unit — {{ name }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gr-correct-lead {
+            max-width: 44rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .gr-correct-list {
+            max-width: 44rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .gr-correct-list li {
+            margin-bottom: 0.4rem;
+        }
+
+        .gr-correct-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-top: 1.5rem;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <p class="gr-correct-lead">
+        {% blocktrans trimmed with name=variable.name unit=variable.source_unit symbol=variable.source_unit.symbol %}
+            <strong>{{ name }}</strong>'s data is said to be stored in <strong>{{ unit }}</strong> ({{ symbol }}).
+            Correct this only when that label is wrong. Nothing is converted: every number already stored is
+            kept as it is and read as the unit you choose.
+        {% endblocktrans %}
+    </p>
+
+    <p class="gr-correct-lead">{% trans "What is reinterpreted:" %}</p>
+    <ul class="gr-correct-list">
+        <li>
+            {% blocktrans trimmed count assets=reinterpreted.assets %}
+                All values of this variable, in its {{ assets }} asset.
+            {% plural %}
+                All values of this variable, in its {{ assets }} assets.
+            {% endblocktrans %}
+        </li>
+        <li>
+            {% blocktrans trimmed with low=reinterpreted.value_min high=reinterpreted.value_max %}
+                Its value range, {{ low }} to {{ high }}.
+            {% endblocktrans %}
+        </li>
+        <li>
+            {% blocktrans trimmed with stops=reinterpreted.stops styles=reinterpreted.styles %}
+                Its style stops: {{ stops }} in {{ styles }} style(s).
+            {% endblocktrans %}
+        </li>
+        <li>
+            {% blocktrans trimmed with count=reinterpreted.asset_statistics %}
+                Asset statistics (minimum, maximum, mean, standard deviation) of {{ count }} asset(s).
+            {% endblocktrans %}
+        </li>
+        <li>
+            {% blocktrans trimmed with count=reinterpreted.zonal_statistics %}
+                {{ count }} zonal statistics row(s).
+            {% endblocktrans %}
+        </li>
+    </ul>
+
+    <form method="post" novalidate>
+        {% csrf_token %}
+        {% formattedfield form.source_unit %}
+        <div class="gr-correct-actions">
+            <button type="submit" class="button">{% trans "Correct source unit" %}</button>
+            <a href="{{ cancel_url }}" class="button button-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+{% endblock %}

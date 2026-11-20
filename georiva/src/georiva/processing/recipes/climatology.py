@@ -301,18 +301,37 @@ class ClimatologyRecipe(BaseRecipe):
         """Quantity-specific (name, unit, value_min, value_max) for the output."""
         span = (src.value_max - src.value_min) / 2.0
         if quantity == "value":
-            return {"name": src.name, "unit": src.unit, "value_min": src.value_min, "value_max": src.value_max}
+            return {
+                "name": src.name,
+                "source_unit": src.source_unit,
+                "unit": src.unit,
+                "value_min": src.value_min,
+                "value_max": src.value_max,
+            }
         if quantity == "anomaly":
-            return {"name": f"{src.name} anomaly", "unit": src.unit, "value_min": -span, "value_max": span}
+            return {
+                "name": f"{src.name} anomaly",
+                "source_unit": src.source_unit,
+                "unit": src.unit,
+                "value_min": -span,
+                "value_max": span,
+            }
         if quantity == "relative_anomaly":
             return {
                 "name": f"{src.name} relative anomaly",
+                "source_unit": self._dimensionless_unit(),
                 "unit": self._dimensionless_unit(),
                 "value_min": -1.0,
                 "value_max": 1.0,
             }
         if quantity == "trend":
-            return {"name": f"{src.name} trend (per year)", "unit": src.unit, "value_min": -span, "value_max": span}
+            return {
+                "name": f"{src.name} trend (per year)",
+                "source_unit": src.source_unit,
+                "unit": src.unit,
+                "value_min": -span,
+                "value_max": span,
+            }
         raise ValueError(f"unknown quantity: {quantity!r}")
 
     @staticmethod

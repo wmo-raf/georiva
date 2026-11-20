@@ -946,7 +946,8 @@ def upload_wizard_provision(request):
                         "name": assignment.get("long_name") or variable_name,
                         "source_long_name": (assignment.get("source_long_name") or "").strip(),
                         "transform_type": transform,
-                        "source_unit": _source_unit_for_assignment(assignment),
+                        # A file that names no unit is taken to hold the one chosen for it.
+                        "source_unit": _source_unit_for_assignment(assignment) or unit,
                         "unit": unit,
                         "value_min": assignment["value_min"],
                         "value_max": assignment["value_max"],

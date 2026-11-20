@@ -251,6 +251,7 @@ class BuildTaskEndToEndTests(TestCase):
             collection=self.collection,
             slug="precip",
             name="Precip",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=500,

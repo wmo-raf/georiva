@@ -71,6 +71,7 @@ class WMTSCapabilitiesCacheTests(CapabilitiesReader, TestCase):
             collection=self.public,
             slug=slug,
             name="Relative Humidity",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=100,
