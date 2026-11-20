@@ -27,7 +27,17 @@ bucket named as :class:`Stored`. A Store asset — or a :class:`StoreSlice`, the
 field it names — is read from its Upstream store, opened with its harvest feed's
 Pinned locations only, once per session and at one snapshot for the session's
 life (``store.py``).
+
+In what unit: every value is held in its Variable's source unit and returned
+in its served unit, or in the unit a session names —
+``values.session(in_unit="degC")``, ``values.point(asset, lon, lat,
+in_unit="K")`` — refused with :class:`ConversionRefused` before anything is
+read when the source unit cannot reach it (ADR 0046 §11, ``units.py``). Bytes
+no Variable describes (an :class:`AssetLocation`, a :class:`Stored` key, a bare
+:class:`StoreSlice`) are read as they are, and refuse an ``in_unit``.
 """
+
+from georiva.core.unit_utils import ConversionRefused
 
 from .session import (
     Field,
@@ -41,8 +51,11 @@ from .session import (
     window,
 )
 from .store import StepNotHeld, StoreDataNotPinned, StoreSlice, StoreUnreadable
+from .units import Conversion, conversion_for
 
 __all__ = [
+    "Conversion",
+    "ConversionRefused",
     "Field",
     "Session",
     "SessionClosed",
@@ -52,6 +65,7 @@ __all__ = [
     "StoreUnreadable",
     "Stored",
     "area",
+    "conversion_for",
     "field",
     "point",
     "session",

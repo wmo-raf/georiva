@@ -14,6 +14,7 @@ from georiva.core.storage import BucketType, storage
 from georiva.core.storage.asset_location import AssetLocation
 
 from .store import OpenStores, StoreSlice, store_slice
+from .units import Conversion, Conversions
 
 #: Upstream reads in flight at once for one series. Each is a few small range
 #: requests; the wait is the upstream's latency, not our CPU.
@@ -77,9 +78,12 @@ class Session:
     the fields it decoded from them, until it ends (ADR 0046 §12).
     """
 
-    def __init__(self):
+    def __init__(self, *, in_unit: str | None = None):
         self._open = True
         self._stores = OpenStores()
+        #: The unit every value is returned in; ``None`` for each Variable's served unit.
+        self.in_unit = in_unit
+        self._conversions = Conversions(in_unit)
 
     @property
     def open_stores(self) -> int:
@@ -94,27 +98,31 @@ class Session:
 
     def field(self, asset) -> Field:
         """The asset's whole field."""
+        to = self._conversion(asset)
         with self._raster(asset) as src:
-            return _read(src)
+            return _read(src, to=to)
 
     def window(self, asset, bbox: Sequence[float]) -> Field:
         """The cells under ``bbox`` — ``(west, south, east, north)`` in WGS84 —
         read by range: only the blocks under it are fetched."""
+        to = self._conversion(asset)
         with self._raster(asset) as src:
-            return _read(src, _window(src, _in_crs_of(src, bbox)))
+            return _read(src, _window(src, _in_crs_of(src, bbox)), to=to)
 
     def point(self, asset, lon: float, lat: float) -> float:
         """The value of the cell containing ``(lon, lat)``; NaN outside the field or on nodata."""
+        to = self._conversion(asset)
         with self._raster(asset) as src:
-            return _point(src, lon, lat)
+            return _point(src, lon, lat, to)
 
     def area(self, asset, geometry: dict, aggregation: str) -> float:
         """``aggregation`` over the cells whose centres fall inside a WGS84 GeoJSON
         ``geometry``; NaN where there are none with a value."""
         if aggregation not in AGGREGATIONS:
             raise ValueError(f"Unsupported aggregation {aggregation!r}. Choose from: {sorted(AGGREGATIONS)}")
+        to = self._conversion(asset)
         with self._raster(asset) as src:
-            return _area(src, geometry, aggregation)
+            return _area(src, geometry, aggregation, to)
 
     def point_series(self, assets: Sequence, lon: float, lat: float) -> list[float]:
         """:meth:`point` of each asset, in the order given. A read that fails raises."""
@@ -126,9 +134,16 @@ class Session:
 
     def virtual_dataset(self, manifest, *, internal: bool = True):
         """A Variable's virtual Zarr store as a lazy xarray Dataset — its local
-        assets' values over time, with no COG opened until a chunk is read."""
+        assets' values over time, with no COG opened until a chunk is read.
+        The Variable's array (named by its slug) is converted lazily, like
+        every other read."""
+        to = self._conversions.of(manifest.variable_id)
         self._check_open()
-        return manifest.open_dataset(internal=internal, chunks={})
+        dataset = manifest.open_dataset(internal=internal, chunks={})
+        name = manifest.variable.slug
+        if not to.is_identity and name in dataset:
+            dataset = dataset.assign({name: dataset[name] * to.scale + to.offset})
+        return dataset
 
     # ---- helpers -------------------------------------------------------------
 
@@ -138,8 +153,16 @@ class Session:
         assets = list(assets)
         if not assets:
             return []
+        for asset in assets:
+            # Every conversion first: one that is refused is refused before any read.
+            self._conversion(asset)
         with ThreadPoolExecutor(max_workers=min(SERIES_READ_WORKERS, len(assets))) as pool:
             return list(pool.map(read, assets))
+
+    def _conversion(self, asset) -> Conversion:
+        """How ``asset``'s raw values become values in the unit this session reads in."""
+        self._check_open()
+        return self._conversions.of(getattr(asset, "variable_id", None))
 
     def _raster(self, asset):
         self._check_open()
@@ -154,32 +177,37 @@ class Session:
 
 
 @contextmanager
-def session() -> Iterator[Session]:
-    """A reading session, ended when the block is left."""
-    s = Session()
+def session(*, in_unit: str | None = None) -> Iterator[Session]:
+    """A reading session, ended when the block is left.
+
+    Every value is returned in its Variable's served unit, or in ``in_unit``
+    when one is named (ADR 0046 §11). A unit the source unit cannot reach is
+    refused — :class:`ConversionRefused` — before anything is read.
+    """
+    s = Session(in_unit=in_unit)
     try:
         yield s
     finally:
         s.close()
 
 
-def field(asset) -> Field:
-    with session() as s:
+def field(asset, *, in_unit: str | None = None) -> Field:
+    with session(in_unit=in_unit) as s:
         return s.field(asset)
 
 
-def window(asset, bbox: Sequence[float]) -> Field:
-    with session() as s:
+def window(asset, bbox: Sequence[float], *, in_unit: str | None = None) -> Field:
+    with session(in_unit=in_unit) as s:
         return s.window(asset, bbox)
 
 
-def point(asset, lon: float, lat: float) -> float:
-    with session() as s:
+def point(asset, lon: float, lat: float, *, in_unit: str | None = None) -> float:
+    with session(in_unit=in_unit) as s:
         return s.point(asset, lon, lat)
 
 
-def area(asset, geometry: dict, aggregation: str) -> float:
-    with session() as s:
+def area(asset, geometry: dict, aggregation: str, *, in_unit: str | None = None) -> float:
+    with session(in_unit=in_unit) as s:
         return s.area(asset, geometry, aggregation)
 
 
@@ -201,9 +229,9 @@ def _location(asset):
     raise TypeError(f"Cannot read values from {asset!r}")
 
 
-def _values(src, raw: np.ndarray) -> np.ndarray:
+def _values(src, raw: np.ndarray, to: Conversion) -> np.ndarray:
     """Band 1's cells as float32 values: nodata and non-finite as NaN, the band's
-    own scale and offset applied."""
+    own scale and offset applied, then converted ``to`` the unit read in."""
     data = raw.astype(np.float32)
     if src.nodata is not None and not math.isnan(src.nodata):
         data[raw == src.nodata] = np.nan
@@ -211,17 +239,17 @@ def _values(src, raw: np.ndarray) -> np.ndarray:
     scale, offset = src.scales[0], src.offsets[0]
     if scale != 1.0 or offset != 0.0:
         data = (data * scale + offset).astype(np.float32)
-    return data
+    return to.array(data)
 
 
-def _read(src, window=None) -> Field:
+def _read(src, window=None, *, to: Conversion) -> Field:
     if window is None:
-        return _north_up(_values(src, src.read(1)), src.transform, src)
+        return _north_up(_values(src, src.read(1), to), src.transform, src)
     transform = src.window_transform(window)
     if window.width == 0 or window.height == 0:
         # Nothing under the box: an empty field, read from nowhere.
         return _north_up(np.empty((0, 0), dtype=np.float32), transform, src)
-    return _north_up(_values(src, src.read(1, window=window)), transform, src)
+    return _north_up(_values(src, src.read(1, window=window), to), transform, src)
 
 
 def _north_up(data: np.ndarray, transform: Affine, src) -> Field:
@@ -263,7 +291,7 @@ def _window(src, bounds: Sequence[float]):
     return Window(col0, row0, max(0, col1 - col0), max(0, row1 - row0))
 
 
-def _point(src, lon: float, lat: float) -> float:
+def _point(src, lon: float, lat: float, to: Conversion) -> float:
     from rasterio.windows import Window
 
     x, y = lon, lat
@@ -275,17 +303,19 @@ def _point(src, lon: float, lat: float) -> float:
     row, col = src.index(x, y)
     if not (0 <= row < src.height and 0 <= col < src.width):
         return math.nan
-    return float(_values(src, src.read(1, window=Window(col, row, 1, 1)))[0, 0])
+    return float(_values(src, src.read(1, window=Window(col, row, 1, 1)), to)[0, 0])
 
 
-def _area(src, geometry: dict, aggregation: str) -> float:
+def _area(src, geometry: dict, aggregation: str, to: Conversion) -> float:
     from rasterio.features import bounds as geometry_bounds
     from rasterio.features import geometry_mask
 
     from georiva.geoprocessing.zonal import reproject_geometry
 
     shape = geometry if src.crs is None else reproject_geometry(geometry, src.crs)
-    field = _read(src, _window(src, geometry_bounds(shape)))
+    # Each cell is converted before it is aggregated: a sum gains the offset
+    # once per cell, a spread none (ADR 0046 §7).
+    field = _read(src, _window(src, geometry_bounds(shape)), to=to)
     if field.data.size == 0:
         return math.nan
     inside = geometry_mask([shape], out_shape=field.data.shape, transform=field.transform, invert=True)

@@ -387,5 +387,27 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     @property
     def value_range(self):
         """The canonical (value_min, value_max) accessor — encoding, legend
-        display, and previews all read this one (ADR 0022)."""
+        display, and previews all read this one (ADR 0022). In the source unit,
+        like every number stored about values (ADR 0046 §3)."""
         return self.value_min, self.value_max
+
+    # -------- served numbers (ADR 0046 §2, §15) --------
+
+    def served(self, value):
+        """A stored (source-unit) number in the served unit; ``None`` stays ``None``.
+
+        Rounded to 12 significant digits, so 300 K reads 26.85 °C rather than
+        26.850000000000023: these are numbers people read.
+        """
+        if value is None:
+            return None
+        return float(f"{value * self.scale + self.offset:.12g}")
+
+    @property
+    def served_range(self) -> tuple:
+        """:attr:`value_range` in the served unit."""
+        return self.served(self.value_min), self.served(self.value_max)
+
+    def served_palette(self, palette: list) -> list:
+        """``[[value, color], ...]`` stops with each value in the served unit."""
+        return [[self.served(value), color] for value, color in palette]

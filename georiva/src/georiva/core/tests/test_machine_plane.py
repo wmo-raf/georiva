@@ -559,6 +559,10 @@ class StyledPayloadTests(TestCase):
             "vmin": self.variable.value_min,
             "vmax": self.variable.value_max,
             "scale_type": "linear",
+            # The served unit's conversion, for the numbers Titiler answers with (ADR 0046 §15).
+            "scale": 1.0,
+            "offset": 0.0,
+            "unit": self.variable.unit.symbol,
             "colormap": build_colormap_256(
                 [[0.0, [0, 0, 0]], [50.0, [255, 0, 0]]],
                 self.variable.value_min,
@@ -574,7 +578,14 @@ class StyledPayloadTests(TestCase):
     def test_a_styleless_variables_payload_still_omits_the_colormap(self):
         self.assertEqual(
             build_variable_payload(self.variable),
-            {"vmin": self.variable.value_min, "vmax": self.variable.value_max, "scale_type": "linear"},
+            {
+                "vmin": self.variable.value_min,
+                "vmax": self.variable.value_max,
+                "scale_type": "linear",
+                "scale": 1.0,
+                "offset": 0.0,
+                "unit": self.variable.unit.symbol,
+            },
         )
 
     def test_a_non_default_style_does_not_color_the_payload(self):

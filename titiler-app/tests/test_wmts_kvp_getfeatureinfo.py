@@ -170,12 +170,13 @@ class TestValueRead:
 
     def test_units_are_carried_only_when_the_tile_config_already_holds_them(self, client, fake_redis, seed_cog):
         """No new metadata plumbing (#363): the answer says what the
-        per-request rendering payload says, and stays silent otherwise."""
+        per-request rendering payload says — its served ``unit`` (ADR 0046
+        §15) — and stays silent otherwise."""
         seed_default(fake_redis, seed_cog)
         assert "units" not in identify(client).json()
 
         fake_redis.store[f"georiva:palette:{ORG}:{CATALOG}:{COLLECTION}:{VARIABLE}"] = json.dumps(
-            dict(TILE_CONFIG, units="degC", label="2m Temperature"),
+            dict(TILE_CONFIG, unit="degC", label="2m Temperature"),
         )
 
         body = identify(client).json()

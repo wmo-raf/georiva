@@ -95,7 +95,7 @@ class TimeseriesService:
         Returns
         -------
         pd.Series
-            Index: UTC datetime.  Values: float (variable's output units).
+            Index: UTC datetime.  Values: float, in the variable's served unit.
             Name: variable.slug.
 
         Raises
@@ -151,7 +151,7 @@ class TimeseriesService:
         Returns
         -------
         pd.Series
-            Index: UTC datetime.  Values: float (aggregated, variable units).
+            Index: UTC datetime.  Values: float (aggregated), in the variable's served unit.
             Name: ``{variable.slug}_{aggregation}``.
 
         Raises
@@ -230,7 +230,7 @@ class TimeseriesService:
             if not has_remote or self._local_assets(variable, time_start, time_end).exists():
                 parts.append(self._to_series(from_store(session), name))
             if remote:
-                parts.append(self._remote_series(remote, from_remote(session, [loc for _, loc in remote]), name))
+                parts.append(self._remote_series(remote, from_remote(session, [asset for _, asset in remote]), name))
         if not parts:
             return pd.Series([], index=pd.DatetimeIndex([]), name=name, dtype="float64")
         if len(parts) == 1:
@@ -254,21 +254,24 @@ class TimeseriesService:
         return self._assets(variable, time_start, time_end).filter(local_q())
 
     def _remote_assets(self, variable, time_start, time_end) -> list:
-        """The Remote assets in the range, as ``(time, location)`` in time order.
+        """The Remote assets in the range, as ``(time, asset)`` in time order.
+        Rows, not locations: a row names its Variable, which is what its values
+        are converted by (ADR 0046 §11).
 
         Raises RemoteRangeTooLarge rather than start more upstream reads than
         one request may make.
         """
         from django.conf import settings
 
-        from georiva.core.storage.asset_location import AssetLocation, remote_q
+        from georiva.core.storage.asset_location import remote_q
 
         limit = settings.GEORIVA_TIMESERIES_MAX_REMOTE_ASSETS
         rows = list(
             self._assets(variable, time_start, time_end)
             .filter(remote_q())
             .order_by("item__time", "item__reference_time")
-            .values_list("item__time", "href")[: limit + 1]
+            .select_related("item")
+            .only("href", "format", "variable_id", "item__time")[: limit + 1]
         )
         if len(rows) > limit:
             raise RemoteRangeTooLarge(
@@ -276,7 +279,7 @@ class TimeseriesService:
                 "while you wait. Narrow the time range with time_start and time_end."
             )
         # One value per valid time: of several runs' assets at one time, the newest run's.
-        return list({time: (time, AssetLocation(href)) for time, href in rows}.values())
+        return list({row.item.time: (row.item.time, row) for row in rows}.values())
 
     @staticmethod
     def _remote_series(remote: list, read: list[float], name: str) -> pd.Series:

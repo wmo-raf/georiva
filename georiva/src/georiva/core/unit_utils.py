@@ -103,7 +103,7 @@ def setup_registry(reg):
 
     # Geopotential height conversion is physically unambiguous (it only ever
     # fires for m²/s² <-> length), so enable it globally — callers of
-    # apply_unit_conversion need not name the context. Precipitation stays
+    # affine_conversion need not name the context. Precipitation stays
     # opt-in because mm <-> kg/m² is genuinely ambiguous.
     reg.enable_contexts("geopotential")
 

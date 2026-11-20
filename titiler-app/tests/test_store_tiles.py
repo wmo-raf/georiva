@@ -492,6 +492,21 @@ class TestCogsAreUnchanged:
         assert tile(client).status_code == 200
 
 
+class TestServedUnit:
+    def test_changing_the_served_unit_converts_the_point_and_does_not_reopen_the_store(
+        self, client, rendering, upstream_store, opens
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        raw = point(client, 0.5, 0.5).json()["values"][0]
+        rendering.store[PALETTE] = json.dumps({**TILE_CONFIG, "scale": 1.0, "offset": -273.15, "unit": "degC"})
+        served = point(client, 0.5, 0.5).json()
+
+        assert served["values"][0] == pytest.approx(raw - 273.15)
+        assert served["unit"] == "degC"
+        assert len(opens) == 1
+
+
 def repository(built):
     """The built repository, opened as its producer opens it: on local disk."""
     return icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder))
