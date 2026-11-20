@@ -104,10 +104,16 @@ for — the Variable's served unit unless the reader names another.**
     commits every few seconds. One-call helpers are one-call sessions. A cache across sessions, should timeseries
     need one, goes behind this interface, not in front of it.
 
-13. **A recipe declares the unit of each input.** Every `InputRef` carries an `in_unit`, and the engine opens one
-    session per production unit and reads each input in it. A recipe declaring none is refused at registration. Its
-    output Variable's `source_unit` is the recipe's declared output unit. A recipe's output is stored bytes under a
-    fixed label, so the unit it read in is written down, never inferred from a setting someone may change.
+13. **A recipe declares the unit of each input.** The recipe names, for every input role, the unit it reads that
+    input in (`input_units`), `SOURCE_UNIT` meaning "as stored". The declaration is the recipe's, not the input
+    binding's (`InputRef`): the unit is what the recipe's arithmetic assumes, whichever product is bound to it, and
+    the registry can check a recipe but cannot see the product definitions that bind it. The engine opens one session
+    per production unit and reads each input in its declared unit; a role with no declared unit is refused, never
+    read in the served unit. A recipe declaring none is refused at registration — for now logged and left
+    unregistered rather than raised, so a plugin not yet declaring its units does not stop the app starting; it
+    raises once those plugins declare theirs. Its output Variable's `source_unit` is the recipe's declared output
+    unit. A recipe's output is stored bytes under a fixed label, so the unit it read in is written down, never
+    inferred from a setting someone may change.
 
 ### Titiler
 
@@ -184,6 +190,8 @@ for — the Variable's served unit unless the reader names another.**
 - **Return raw values and a conversion; the caller applies it.** Every caller can forget, silently.
 - **Convert every pixel in Titiler.** A pass over every tile, ranges and stops converted back to draw with, and a
   decoded-field cache that a unit change invalidates — for the same PNG.
+- **The input unit on each `InputRef`.** Two products bound to one recipe could declare different units for the
+  same arithmetic, and the registry could not check a recipe at registration.
 - **Convert in the browser.** The conversion in every client.
 - **Always enable water equivalence.** An aerosol load shown in millimetres without complaint.
 - **Convention only, no CI guard.** The failure is a wrong number with a right-looking label, and nothing errors.
