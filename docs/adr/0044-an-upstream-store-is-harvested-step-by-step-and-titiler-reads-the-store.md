@@ -22,6 +22,10 @@ Amended when the open was warmed in advance (wmo-raf/georiva#684): each tile ser
 published Store assets as it starts, in the background, so the cost recorded under Consequences falls on the worker
 rather than a user's first map. Nothing is reversed.
 
+Superseded in part by [ADR-0046](0046-values-are-stored-as-produced-and-converted-when-read.md): §9's "nothing is
+converted on the way" no longer holds for units. A store's values are still read as its decode chain produces them,
+in the Variable's source unit, and converted when they leave; still nothing is de-accumulated.
+
 ## Context
 
 Some Upstreams publish no items at all. dynamical.org's catalog is static JSON with 43 collections, each one a single
