@@ -7,7 +7,17 @@ the engine looks them up by name. Adding a family never edits the engine.
 
 import logging
 
+from django.core.exceptions import ImproperlyConfigured
+
 logger = logging.getLogger(__name__)
+
+
+class UndeclaredRecipeUnits(ImproperlyConfigured):
+    """A recipe that does not say which unit it reads each input in, or (when it
+    creates its output Variables) which unit its output is in (ADR 0046 §13).
+    Raised as the recipe registers — at app start for a plugin's recipe — so a
+    missing declaration stops the process instead of leaving a product silently
+    unproduced."""
 
 
 class RecipeRegistry:
@@ -20,10 +30,7 @@ class RecipeRegistry:
             raise ValueError(f"{recipe_cls.__name__} must define a non-empty 'type'")
         refused = cls.undeclared_units(recipe_cls)
         if refused:
-            # Logged, not raised: a plugin's recipe registers as the app loads,
-            # and one refused recipe must not stop the rest from loading.
-            logger.error("Refused recipe %s (v%s): %s", recipe_cls.type, recipe_cls.version, refused)
-            return recipe_cls
+            raise UndeclaredRecipeUnits(f"Recipe {recipe_cls.type} (v{recipe_cls.version}) is refused: {refused}")
         cls._recipes[recipe_cls.type] = recipe_cls
         logger.info("Registered recipe: %s (v%s)", recipe_cls.type, recipe_cls.version)
         return recipe_cls
