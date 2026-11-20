@@ -111,11 +111,14 @@ Access via import: `from georiva.core.storage import storage`
 - **Titiler reads a store itself** (`titiler-app/app/store.py`, ADR 0044 §9, §11): it discards the repository's own
   virtual chunk containers and builds anonymous ones for the pinned `s3://`/`gs://` prefixes only. This restates
   core across the process boundary — `store.open_repository` ↔ `harvest/upstream.open_repository`,
-  `store.place_kind` ↔ `harvest/asset_hosts.chunk_place`, `store._decoded` ↔ `upstream._coordinate`'s time
-  decoding — and a change to one must touch the other; tests on each side assert the container override. A harvest republishes its mapped
-  Variables at the end of a run; an `Asset` save or delete updates its one field. Anything else that rewrites
-  hrefs with `.update()` must call `publish_variable`. Timeseries read Remote assets directly
-  (`geoprocessing/sampling.py`), since the virtual store covers local assets only
+  `store.place_kind` ↔ `harvest/asset_hosts.chunk_place`, and Titiler's field decoding (`store._decoded`, its
+  grid and axes) ↔ core's one store decoder, `core/values/store.py` (`store_coordinate`, `_decoded`, `_grid`,
+  `_axes`, `repository_storage`, `refused_place`), which `harvest/upstream.py` also reads stores through — and a
+  change to one must touch the other; tests on each side assert the container override. A harvest republishes its
+  mapped Variables at the end of a run; an `Asset` save or delete updates its one field. Anything else that
+  rewrites hrefs with `.update()` must call `publish_variable`. Timeseries read Remote assets directly through the
+  read module (`core/values/`: `session.point_series` / `area_series`, ADR 0046 §10), since the virtual store
+  covers local assets only
 
 ## 5. Service Layer Pattern
 
