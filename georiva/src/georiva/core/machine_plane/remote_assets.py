@@ -11,12 +11,15 @@ Titiler reads the hash directly, for a collection of any tier, so a ``private``
 harvested collection tiles for the callers the gateway lets through.
 
 A **Store asset** needs more than an href: its value in the hash is a JSON
-object, :func:`store_entry` — the store's address, the array's path, and the
+object, :func:`store_entry` — the store's address, the array's path, the
 Pinned locations of the feed that harvested it, the only places Titiler may
-follow the store's data into. The run and step are the field itself: Titiler
+follow the store's data into, and whether that feed allows plain ``http``: a
+store at an ``http://`` address is opened only where it does (ADR 0042 §9), and
+Titiler makes no decision of its own (ADR 0043 §3). The run and step are the field itself: Titiler
 selects them by value among the store's own coordinates, so nothing here goes
 stale when the store's coordinates grow (they only grow at the end). A row whose
-feed is gone is published with no pins, so its data is followed nowhere.
+feed is gone is published with no pins and no plain ``http``, so its data is
+followed nowhere.
 
 *The tile-config callback answers it on a miss*, from the row, for ``public``
 collections only, for the reasons ``config_view`` gives.
@@ -54,6 +57,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from django.db.models import Q
@@ -105,23 +109,43 @@ def _published_assets():
     return Asset.objects.filter((remote_q() & Q(format=Asset.Format.COG)) | store_q())
 
 
-def store_entry(href: str, array: str, chunk_locations: dict) -> dict:
-    """What Titiler is told of a Store asset: the store, the array, and where
-    the store's data may be followed (ADR 0044 §9, §11). Titiler reads the same
+def store_entry(href: str, array: str, chunk_locations: dict, allow_http: bool = False) -> dict:
+    """What Titiler is told of a Store asset: the store, the array, where the
+    store's data may be followed (ADR 0044 §9, §11), and whether a plain
+    ``http`` store may be opened at all (ADR 0042 §9). Titiler reads the same
     keys (``titiler-app/app/store.py``)."""
-    return {"store": href, "array": array, "chunk_locations": dict(chunk_locations or {})}
+    return {
+        "store": href,
+        "array": array,
+        "chunk_locations": dict(chunk_locations or {}),
+        "allow_http": bool(allow_http),
+    }
 
 
-def _store_value(href: str, array: str, chunk_locations: dict) -> str:
+def _store_value(href: str, array: str, access: StoreAccess) -> str:
     """A Store asset's value in the hash: its :func:`store_entry` as JSON."""
-    return json.dumps(store_entry(href, array, chunk_locations))
+    return json.dumps(store_entry(href, array, access.chunk_locations, access.allow_http))
 
 
-def feed_chunk_locations(feed_pks) -> dict[int, dict]:
-    """Each harvest feed's Pinned locations for a store's data, by feed.
+@dataclass(frozen=True)
+class StoreAccess:
+    """How a harvest feed lets its Store assets be opened: the Pinned locations
+    its store's data may be followed into, and whether plain ``http`` is allowed."""
+
+    chunk_locations: dict
+    allow_http: bool
+
+
+#: What a Store asset whose feed is gone is opened with: nothing pinned, no plain ``http``.
+NO_FEED = StoreAccess({}, allow_http=False)
+
+
+def feed_store_access(feed_pks) -> dict[int, StoreAccess]:
+    """How each harvest feed lets its Store assets be opened, by feed.
 
     Looked up by model label: the feed is a harvest model, and core is not
-    built on the harvest app. A feed that is gone pins nothing.
+    built on the harvest app. A feed that is gone is not in the answer, and
+    its rows are opened with :data:`NO_FEED`.
     """
     from django.apps import apps
 
@@ -132,18 +156,19 @@ def feed_chunk_locations(feed_pks) -> dict[int, dict]:
         feeds = apps.get_model("georivaharvest", "HarvestFeed")
     except LookupError:
         return {}
-    return dict(feeds.objects.filter(pk__in=feed_pks).values_list("pk", "pinned_chunk_locations"))
+    rows = feeds.objects.filter(pk__in=feed_pks).values_list("pk", "pinned_chunk_locations", "allow_http")
+    return {pk: StoreAccess(dict(pins or {}), bool(allow_http)) for pk, pins, allow_http in rows}
 
 
 def _values(rows) -> dict[tuple, str]:
     """``(variable, field) → the hash value`` for rows of
     ``(variable_id, time, reference_time, format, href, store_array, harvested_by_id)``."""
     rows = [(*row, AssetLocation(row[4], row[3]).is_store) for row in rows]
-    pins = feed_chunk_locations(row[6] for row in rows if row[7])
+    access = feed_store_access(row[6] for row in rows if row[7])
     values = {}
     for variable_pk, time, reference_time, _, href, store_array, harvested_by, is_store in rows:
         if is_store:
-            href = _store_value(href, store_array, pins.get(harvested_by, {}))
+            href = _store_value(href, store_array, access.get(harvested_by, NO_FEED))
         values[variable_pk, timestep_field(time, reference_time)] = href
     return values
 
@@ -281,8 +306,8 @@ def publish_asset(asset) -> None:
 
     location = asset.location
     if location.is_store:
-        pins = feed_chunk_locations([asset.harvested_by_id]).get(asset.harvested_by_id, {})
-        _write_timestep(asset, _store_value(asset.href, asset.store_array, pins))
+        access = feed_store_access([asset.harvested_by_id]).get(asset.harvested_by_id, NO_FEED)
+        _write_timestep(asset, _store_value(asset.href, asset.store_array, access))
     elif asset.format != Asset.Format.COG:
         return
     elif location.is_remote:

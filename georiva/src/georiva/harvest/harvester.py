@@ -153,6 +153,17 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     if feed.upstream_refusal:
         # A re-check found the Upstream no longer usable; its rows stand until one finds it usable again.
         raise RunStopped(f"upstream refused — {feed.upstream_refusal} Re-check the upstream once that is resolved.")
+    allowlist = AssetHostAllowlist(
+        feed.allowed_asset_hosts,
+        allow_http=feed.allow_http,
+        resolve=upstream.resolve_host,
+    )
+    if feed.is_store and feed.store_href:
+        # The store's own address is judged as its assets will be, before anything opens it (ADR 0042 §9).
+        refusal = allowlist.refusal(feed.store_href)
+        if refusal:
+            logger.warning("Harvest %s: store address %s refused — %s", feed.name, feed.store_href, refusal)
+            raise RunStopped(f"store address refused — {refusal}")
     reach = _Reach.of(feed)
     variables = feed.mapped_variables(collection)
     mapped = {variable.pk for variable in variables.values()}
@@ -180,11 +191,6 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     if described is not None:
         _describe(collection, described, feed)
 
-    allowlist = AssetHostAllowlist(
-        feed.allowed_asset_hosts,
-        allow_http=feed.allow_http,
-        resolve=upstream.resolve_host,
-    )
     # The Upstream is asked for the window and is not trusted to have kept to it.
     # Each asset is located before anything looks at it: the href that is judged,
     # compared and stored is the one a reader will open (ADR 0042 §9).
@@ -366,7 +372,13 @@ def _listed(
             f"source unavailable — upstream no longer describes as a map: {', '.join(repr(path) for path in missing)}"
         )
     held = (
-        list(upstream.list_held_steps(feed.store_href, fields, window, skip_runs=frozenset(settled))) if fields else []
+        list(
+            upstream.list_held_steps(
+                feed.store_href, fields, window, skip_runs=frozenset(settled), allow_http=feed.allow_http
+            )
+        )
+        if fields
+        else []
     )
     media_type = store_media_type(described)
     if not media_type or len(media_type) > MAX_MEDIA_TYPE_LENGTH:

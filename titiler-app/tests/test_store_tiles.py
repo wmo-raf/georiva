@@ -220,13 +220,15 @@ def upstream_store(tmp_path, producer):
     return built
 
 
-def published(store_href, chunk_locations=None, array="temperature_2m"):
-    """What Django publishes for one timestep of a Store asset."""
+def published(store_href, chunk_locations=None, array="temperature_2m", allow_http=True):
+    """What Django publishes for one timestep of a Store asset. The stand-in
+    producer answers over plain HTTP, so its feed allows it unless a test says not."""
     return json.dumps(
         {
             "store": store_href,
             "array": array,
             "chunk_locations": {ECMWF: ""} if chunk_locations is None else chunk_locations,
+            "allow_http": allow_http,
         }
     )
 
@@ -474,6 +476,46 @@ class TestFailures:
 
         assert tile(client).status_code == 200
 
+    def test_a_plain_http_store_is_not_opened_unless_its_feed_allows_plain_http(
+        self, client, rendering, upstream_store, opens
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href, allow_http=False)})
+
+        response = tile(client)
+
+        assert response.status_code == 502
+        assert "plain http" in response.json()["detail"]
+        assert opens == []
+        assert upstream_store.requests == []
+
+    def test_an_entry_that_does_not_say_plain_http_is_allowed_does_not_allow_it(
+        self, client, rendering, upstream_store, opens
+    ):
+        entry = json.loads(published(upstream_store.href))
+        del entry["allow_http"]
+        publish(rendering, {FIELD: json.dumps(entry)})
+
+        assert tile(client).status_code == 502
+        assert opens == []
+
+    def test_the_opener_refuses_plain_http_unless_told_it_is_allowed(self, upstream_store):
+        with pytest.raises(store_reader.StoreMisdescribed):
+            store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))
+        with pytest.raises(store_reader.StoreMisdescribed):
+            store_reader.storage(upstream_store.href)
+
+        assert store_reader.opened_store(upstream_store.href, ((ECMWF, ""),), True) is not None
+
+    def test_a_plain_http_store_its_feed_no_longer_allows_is_not_warmed_and_let_go(self, rendering, upstream_store):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        warm.warm_stores()
+        assert store_reader.open_keys() == {(upstream_store.href, ((ECMWF, ""),), True)}
+
+        publish(rendering, {FIELD: published(upstream_store.href, allow_http=False)})
+        warm.warm_stores()
+
+        assert store_reader.open_keys() == set()
+
     def test_a_published_entry_that_is_not_djangos_shape_is_refused(self, client, rendering, upstream_store):
         publish(rendering, {FIELD: json.dumps({"store": "file:///etc/", "array": "temperature_2m"})})
 
@@ -699,7 +741,7 @@ class TestAMissingStepRefreshesTheStore:
     ):
         publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
         assert tile(client).status_code == 200
-        kept = store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))
+        kept = store_reader.opened_store(upstream_store.href, ((ECMWF, ""),), True)
 
         def broken(*args):
             raise OSError("connection reset")
@@ -711,7 +753,7 @@ class TestAMissingStepRefreshesTheStore:
         assert failed.headers["content-type"] == "application/json"
 
         assert tile(client).status_code == 200
-        assert store_reader.opened_store(upstream_store.href, ((ECMWF, ""),)) is kept
+        assert store_reader.opened_store(upstream_store.href, ((ECMWF, ""),), True) is kept
 
     def test_a_missing_step_marks_nothing_and_writes_nothing(self, client, rendering, upstream_store):
         publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
@@ -809,7 +851,7 @@ class TestAStepStillMissingIsRemembered:
         self, client, rendering, upstream_store, monkeypatch
     ):
         publish(rendering, {LATE: published(upstream_store.href)})
-        key = (upstream_store.href, ((ECMWF, ""),))
+        key = (upstream_store.href, ((ECMWF, ""),), True)
         real = store_reader.open_repository
         calls = []
 
@@ -1155,7 +1197,7 @@ class TestStoresAreWarmedAtStart:
         publish(rendering, {FIELD: published(upstream_store.href)})
         warm.warm_stores()
 
-        opened = store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))
+        opened = store_reader.opened_store(upstream_store.href, ((ECMWF, ""),), True)
         assert set(opened._arrays) == {"temperature_2m"}
         assert set(opened._coordinates) >= {"init_time", "lead_time", "latitude", "longitude"}
 
@@ -1211,7 +1253,7 @@ class TestStoresAreWarmedAtStart:
 
         warm.warm_stores()
 
-        assert "temperature_2m" in store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))._arrays
+        assert "temperature_2m" in store_reader.opened_store(upstream_store.href, ((ECMWF, ""),), True)._arrays
 
     def test_a_key_that_is_not_a_hash_costs_only_that_key(self, rendering, upstream_store, opens, monkeypatch):
         rendering.hashes[OTHER_HASH] = {}
@@ -1375,7 +1417,7 @@ class TestARunningWorkerFollowsWhatIsPublished:
         publish(rendering, {FIELD: published(upstream_store.href, new_pins)})
         announce(rendering)
 
-        new_key = (upstream_store.href, ((ECMWF, ""), (GFS, "us-east-1")))
+        new_key = (upstream_store.href, ((ECMWF, ""), (GFS, "us-east-1")), True)
         eventually(lambda: store_reader.open_keys() == {new_key})
         assert tile(worker).status_code == 200
         assert len(opens) == 2, "the tile found the store under its new Pinned locations open"
@@ -1386,8 +1428,8 @@ class TestARunningWorkerFollowsWhatIsPublished:
         _, base = producer
         # The same store, at the address it had before the feed adopted the new one.
         shutil.copytree(upstream_store.folder, tmp_path / "noaa-gfs-forecast-virtual" / "v0.0.9.icechunk")
-        old_key = (f"{base}/noaa-gfs-forecast-virtual/v0.0.9.icechunk", ((ECMWF, ""),))
-        new_key = (upstream_store.href, ((ECMWF, ""),))
+        old_key = (f"{base}/noaa-gfs-forecast-virtual/v0.0.9.icechunk", ((ECMWF, ""),), True)
+        new_key = (upstream_store.href, ((ECMWF, ""),), True)
         publish(rendering, {FIELD: published(old_key[0])})
         announce(rendering)
         eventually(lambda: store_reader.open_keys() == {old_key})
@@ -1449,7 +1491,7 @@ class TestWarmingDropsWhatNoAssetNames:
 
     def test_a_store_a_tile_opened_with_no_hash_to_name_it_is_kept(self, client, rendering, upstream_store):
         # Opened as a tile opens it when Django answers in the hash's place (#706 review).
-        key = (upstream_store.href, ((ECMWF, ""),))
+        key = (upstream_store.href, ((ECMWF, ""),), True)
         store_reader.opened_store(*key)
 
         warm.warm_stores()
@@ -1457,7 +1499,7 @@ class TestWarmingDropsWhatNoAssetNames:
         assert store_reader.open_keys() == {key}
 
     def test_an_open_under_way_when_its_store_is_let_go_is_not_kept(self, upstream_store, monkeypatch):
-        key = (upstream_store.href, ((ECMWF, ""),))
+        key = (upstream_store.href, ((ECMWF, ""),), True)
         real = store_reader.open_repository
 
         def let_go_while_opening(*args):
@@ -1472,7 +1514,7 @@ class TestWarmingDropsWhatNoAssetNames:
         assert store_reader.open_keys() == set()
 
     def test_a_reopen_under_way_when_its_store_is_let_go_is_not_kept(self, upstream_store, monkeypatch):
-        key = (upstream_store.href, ((ECMWF, ""),))
+        key = (upstream_store.href, ((ECMWF, ""),), True)
         stale = store_reader.opened_store(*key)
         real = store_reader.open_repository
 
@@ -1490,7 +1532,7 @@ class TestWarmingDropsWhatNoAssetNames:
         target = slice_at("https://example.org/a", 6)
 
         def let_go_while_reading(_):
-            cache.forget((target.store, target.chunk_locations))
+            cache.forget((target.store, target.chunk_locations, target.allow_http))
             return decoded(1)
 
         assert cache.kept_or_read(target, let_go_while_reading) is not None
@@ -1498,7 +1540,7 @@ class TestWarmingDropsWhatNoAssetNames:
         assert cache.size == 0
 
     def test_a_store_opened_again_after_it_was_let_go_is_kept(self, upstream_store):
-        key = (upstream_store.href, ((ECMWF, ""),))
+        key = (upstream_store.href, ((ECMWF, ""),), True)
         store_reader.opened_store(*key)
         store_reader.forget(*key)
 
@@ -1507,7 +1549,7 @@ class TestWarmingDropsWhatNoAssetNames:
         assert store_reader.open_keys() == {key}
 
     def test_a_store_opened_while_the_hashes_are_read_is_kept(self, rendering, upstream_store, monkeypatch):
-        key = (upstream_store.href, ((ECMWF, ""),))
+        key = (upstream_store.href, ((ECMWF, ""),), True)
         real = warm.published_stores
 
         def a_tile_opens_it_meanwhile():
@@ -1531,7 +1573,7 @@ class TestWarmingDropsWhatNoAssetNames:
         monkeypatch.setattr(rendering, "scan_iter", down)
         warm.warm_stores()
 
-        assert store_reader.open_keys() == {(upstream_store.href, ((ECMWF, ""),))}
+        assert store_reader.open_keys() == {(upstream_store.href, ((ECMWF, ""),), True)}
 
     def test_the_channel_is_the_one_django_announces_on(self):
         assert config.STORES_CHANNEL == "georiva:stores-published"

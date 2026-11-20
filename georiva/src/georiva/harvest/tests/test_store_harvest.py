@@ -209,16 +209,18 @@ class StoreHarvestTests(StoreFeedMixin, TestCase):
 
         self.assertEqual(self.steps(), [(self.run, 0)])
 
-    def test_a_store_on_a_host_that_is_not_allowed_is_rejected(self):
+    def test_a_store_on_a_host_that_is_not_allowed_is_refused_before_it_is_opened(self):
         HarvestFeed.objects.filter(pk=self.feed.pk).update(asset_hosts=[])
         self.feed.refresh_from_db()
         self.hold("temperature_2m", 0, 3)
 
         result = self.harvest()
 
+        self.assertEqual(self.upstream.steps_asked, [], "the store is not opened")
         self.assertFalse(Asset.objects.exists())
         self.assertFalse(Item.objects.exists())
-        self.assertEqual((result.indexed, result.rejected), (0, 2))
+        self.assertEqual(result.indexed, 0)
+        self.assertIn("not in the asset host allowlist", FetchRun.objects.get().error_message)
 
     def test_no_file_is_recorded_and_the_run_has_the_harvests_own_counts(self):
         self.hold("temperature_2m", 0, 3)
@@ -359,6 +361,45 @@ class StoreMirrorTests(StoreFeedMixin, TestCase):
         failed = FetchRun.objects.latest("pk")
         self.assertEqual(failed.status, FetchRun.Status.FAILED)
         self.assertIsNotNone(failed.retry_due_at)
+
+    def test_a_store_whose_host_now_resolves_to_a_private_address_is_not_opened(self):
+        def private_from_now_on():
+            self.upstream.addresses[STORE_HOST] = ["10.0.0.7"]
+
+        self.hold("temperature_2m", 0, 3)
+        self.harvest()
+        before = list(Asset.objects.order_by("pk").values_list("pk", "href", "modified"))
+        self.upstream.steps_asked.clear()
+        private_from_now_on()
+
+        result = self.harvest()
+
+        self.assertEqual(self.upstream.steps_asked, [], "the store is not opened")
+        self.assertEqual(list(Asset.objects.order_by("pk").values_list("pk", "href", "modified")), before)
+        failed = FetchRun.objects.latest("pk")
+        self.assertEqual(failed.status, FetchRun.Status.FAILED)
+        self.assertIn("private", failed.error_message)
+        self.assertIn("store address refused", result.stop_reason)
+
+    def test_a_plain_http_store_is_not_opened_unless_the_feed_allows_plain_http(self):
+        plain = STORE.replace("https://", "http://")
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(store_href=plain)
+        self.feed.refresh_from_db()
+        self.upstream.become_store(plain, self.dimensions, self.arrays, media_type=STORE_TYPE)
+        self.hold("temperature_2m", 0, 3)
+
+        result = self.harvest()
+
+        self.assertEqual(self.upstream.steps_asked, [], "the store is not opened")
+        self.assertFalse(Asset.objects.exists())
+        self.assertIn("scheme 'http' is not allowed", FetchRun.objects.get().error_message)
+        self.assertIn("store address refused", result.stop_reason)
+
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(allow_http=True)
+        self.feed.refresh_from_db()
+        self.harvest()
+
+        self.assertEqual(set(Asset.objects.values_list("href", flat=True)), {plain})
 
     def test_a_collection_that_no_longer_describes_its_store_stops_the_run(self):
         self.hold("temperature_2m", 0)
@@ -536,7 +577,8 @@ class StoreReadPlaneTests(StoreFeedMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertNotIn("remote_href", response.json())
         self.assertEqual(
-            response.json()["remote_store"], {"store": STORE, "array": "temperature_2m", "chunk_locations": {}}
+            response.json()["remote_store"],
+            {"store": STORE, "array": "temperature_2m", "chunk_locations": {}, "allow_http": False},
         )
 
 
@@ -602,7 +644,12 @@ class StoreAssetsArePublishedForTitilerTests(StoreFeedMixin, TestCase):
         return timestep_field(self.run + hours(lead), self.run)
 
     def entry(self, array="temperature_2m", pins=None):
-        return {"store": STORE, "array": array, "chunk_locations": self.PINS if pins is None else pins}
+        return {
+            "store": STORE,
+            "array": array,
+            "chunk_locations": self.PINS if pins is None else pins,
+            "allow_http": False,
+        }
 
     def tile_config(self, lead, variable="temperature-2m"):
         url = reverse("tile_config", args=[self.organisation.slug, "gfs", self.collection.slug, variable])
@@ -642,6 +689,13 @@ class StoreAssetsArePublishedForTitilerTests(StoreFeedMixin, TestCase):
         self.harvest()
 
         self.assertEqual(self.published()[self.field(0)]["chunk_locations"], {"gs://ecmwf-open-data/": ""})
+
+    def test_the_feeds_word_on_plain_http_reaches_the_tile_server_with_the_store(self):
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(allow_http=True)
+
+        self.harvest()
+
+        self.assertIs(self.published()[self.field(0)]["allow_http"], True)
 
     def test_a_store_asset_saved_alone_is_published_at_once(self):
         Asset.objects.filter(variable=self.temperature).delete()

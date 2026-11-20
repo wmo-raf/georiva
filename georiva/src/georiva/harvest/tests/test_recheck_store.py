@@ -216,6 +216,61 @@ class NewStoreAddressTests(StoreRecheckMixin, TestCase):
         self.assertIn("stores.example.org", feed.allowed_asset_hosts)
 
 
+class StoreMovedToARefusedAddressTests(StoreRecheckMixin, TestCase):
+    """A store's new address is judged by the Asset host allowlist's rules before
+    it is adopted, and a refused one is never adopted (ADR 0042 §9)."""
+
+    ELSEWHERE_HOST = "stores.example.org"
+    ELSEWHERE = f"https://{ELSEWHERE_HOST}/gfs/v0.2.0.icechunk"
+
+    def test_one_on_a_host_resolving_to_a_private_address_is_not_adopted(self):
+        self.upstream.addresses[self.ELSEWHERE_HOST] = ["10.0.0.7"]
+        self.publish_store(href=self.ELSEWHERE)
+
+        page = self.look()
+        self.answer({"adopt_store": self.ELSEWHERE})
+
+        self.assertNotContains(page, f'value="{self.ELSEWHERE}"')
+        self.assertNotIn(self.ELSEWHERE, self.upstream.stores_opened)
+        feed = HarvestFeed.objects.get(pk=self.feed.pk)
+        self.assertEqual(feed.store_href, STORE)
+        self.assertNotIn(self.ELSEWHERE_HOST, feed.allowed_asset_hosts)
+
+    def test_one_at_a_plain_http_address_is_not_adopted(self):
+        plain = self.ELSEWHERE.replace("https://", "http://")
+        self.publish_store(href=plain)
+
+        self.answer({"adopt_store": plain})
+
+        self.assertNotIn(plain, self.upstream.stores_opened)
+        self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).store_href, STORE)
+
+    def test_one_whose_host_turns_private_after_it_was_shown_is_not_adopted_and_the_operator_is_told_why(self):
+        self.publish_store(href=self.ELSEWHERE)
+        shown = self.look()
+        self.assertEqual(shown.context["moved_to"], self.ELSEWHERE)
+
+        self.upstream.addresses[self.ELSEWHERE_HOST] = ["10.0.0.7"]
+        saved = self.client.post(shown.redirect_chain[-1][0], {"adopt_store": self.ELSEWHERE}, follow=True)
+
+        feed = HarvestFeed.objects.get(pk=self.feed.pk)
+        self.assertEqual(feed.store_href, STORE)
+        self.assertNotIn(self.ELSEWHERE_HOST, feed.allowed_asset_hosts)
+        self.assertContains(saved, "private")
+
+    def test_a_refused_address_is_shown_with_its_reason(self):
+        self.publish_store(href=self.ELSEWHERE)
+        shown = self.look()  # the survey, while the host still answered a public address
+        self.upstream.addresses[self.ELSEWHERE_HOST] = ["10.0.0.7"]
+
+        page = self.client.get(shown.redirect_chain[-1][0])
+
+        self.assertEqual(page.context["moved_to"], self.ELSEWHERE)
+        self.assertIn("private", page.context["moved_refusal"])
+        self.assertContains(page, page.context["moved_refusal"])
+        self.assertNotContains(page, 'name="adopt_store"')
+
+
 class ChangedVerdictTests(StoreRecheckMixin, TestCase):
     def setUp(self):
         super().setUp()

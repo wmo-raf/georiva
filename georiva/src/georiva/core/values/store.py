@@ -81,13 +81,18 @@ class StoreDataNotPinned(StoreUnreadable):
         self.place = place
 
 
+class StoreAddressRefused(StoreUnreadable):
+    """The store's address is one its reader may not open: plain ``http`` where it was not allowed (ADR 0042 §9)."""
+
+
 @dataclass(frozen=True)
 class StoreSlice:
     """One field of an Upstream store: what a Store asset names.
 
     ``chunk_locations`` are the harvest feed's Pinned locations — each place as
     the store declares it, with its region (empty where it has none) — the only
-    places its data is followed into.
+    places its data is followed into. ``allow_http`` is the feed's word on
+    whether a plain ``http`` store may be opened at all.
     """
 
     store: str
@@ -95,11 +100,12 @@ class StoreSlice:
     time: datetime
     reference_time: datetime | None = None
     chunk_locations: Mapping[str, str] = field(default_factory=dict, hash=False, compare=False)
+    allow_http: bool = False
 
     @property
     def key(self) -> tuple:
-        """What tells two slices apart: the same field read with the same pins."""
-        return (self.store, self.array, self.time, self.reference_time, self.pins)
+        """What tells two slices apart: the same field read with the same pins, opened the same way."""
+        return (self.store, self.array, self.time, self.reference_time, self.pins, self.allow_http)
 
     @property
     def pins(self) -> tuple[tuple[str, str], ...]:
@@ -107,27 +113,35 @@ class StoreSlice:
 
 
 def store_slice(asset) -> StoreSlice:
-    """The field a Store asset row names, with its harvest feed's Pinned locations.
-    A row whose feed is gone pins nothing, so its data is followed nowhere."""
-    from georiva.core.machine_plane.remote_assets import feed_chunk_locations
+    """The field a Store asset row names, with its harvest feed's Pinned locations
+    and its word on plain ``http``. A row whose feed is gone pins nothing, so its
+    data is followed nowhere, and allows no plain ``http``."""
+    from georiva.core.machine_plane.remote_assets import NO_FEED, feed_store_access
 
     item = asset.item
-    pins = feed_chunk_locations([asset.harvested_by_id]).get(asset.harvested_by_id, {})
+    access = feed_store_access([asset.harvested_by_id]).get(asset.harvested_by_id, NO_FEED)
     return StoreSlice(
         store=asset.href,
         array=asset.store_array,
         time=item.time,
         reference_time=item.reference_time,
-        chunk_locations=pins,
+        chunk_locations=access.chunk_locations,
+        allow_http=access.allow_http,
     )
 
 
-def repository_storage(href: str, *, timeout: str = READ_TIMEOUT):
-    """Where the repository at ``href`` is read from: over HTTP, every request bounded by ``timeout``."""
+def repository_storage(href: str, *, allow_http: bool = False, timeout: str = READ_TIMEOUT):
+    """Where the repository at ``href`` is read from: over HTTP, every request bounded by ``timeout``.
+
+    Plain ``http`` only where the caller says it is allowed — a harvest feed's
+    ``allow_http`` (ADR 0042 §9); otherwise :class:`StoreAddressRefused`, and nothing is opened.
+    """
     import icechunk
 
     options = {"timeout": timeout, "connect_timeout": CONNECT_TIMEOUT}
-    if href.startswith("http://"):
+    if href[: len("http://")].lower() == "http://":
+        if not allow_http:
+            raise StoreAddressRefused("This upstream store is at a plain http address, which its feed does not allow.")
         options["allow_http"] = "true"
     return icechunk.http_storage(href, opts=options)
 
@@ -164,10 +178,10 @@ class OpenStores:
             self._field_locks.clear()
 
     def _store(self, wanted: StoreSlice) -> _OpenStore:
-        key = (wanted.store, wanted.pins)
+        key = (wanted.store, wanted.pins, wanted.allow_http)
         with self._lock_for(self._store_locks, key):
             if key not in self._stores:
-                self._stores[key] = _open(wanted.store, dict(wanted.pins))
+                self._stores[key] = _open(wanted.store, dict(wanted.pins), allow_http=wanted.allow_http)
             return self._stores[key]
 
     def _lock_for(self, locks: dict, key) -> threading.Lock:
@@ -175,11 +189,11 @@ class OpenStores:
             return locks.setdefault(key, threading.Lock())
 
 
-def _open(href: str, chunk_locations: dict[str, str]) -> _OpenStore:
+def _open(href: str, chunk_locations: dict[str, str], *, allow_http: bool) -> _OpenStore:
     # Late: harvest is built on core, and its upstream client imports Django models.
     from georiva.harvest import upstream
 
-    repository = upstream.open_repository(repository_storage(href), chunk_locations)
+    repository = upstream.open_repository(repository_storage(href, allow_http=allow_http), chunk_locations)
     return _OpenStore(repository.readonly_session(BRANCH).store)
 
 

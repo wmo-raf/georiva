@@ -249,14 +249,21 @@ class UpstreamCatalogClient(Protocol):
         """The collection's items, with their assets, whose time is in `window`."""
 
     def list_held_steps(
-        self, href: str, fields: list[StoreField], window: Window, *, skip_runs: frozenset = frozenset()
+        self,
+        href: str,
+        fields: list[StoreField],
+        window: Window,
+        *,
+        skip_runs: frozenset = frozenset(),
+        allow_http: bool = False,
     ) -> Iterable[HeldStep]:
         """The steps the Upstream store at `href` holds for any of `fields`,
         each with the fields held there. `window` is on run time for a field
         that has runs — a run inside it gives every step it holds, however far
         ahead — and on valid time for one that has none. The runs in
         `skip_runs` are not asked about: a closed run is not asked again (ADR
-        0044 §6). Nothing is decoded and no data is followed anywhere."""
+        0044 §6). Nothing is decoded and no data is followed anywhere. A plain
+        `http` store is opened only where `allow_http` says the feed allows it."""
 
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
@@ -1056,9 +1063,11 @@ def list_held_steps(
     window: Window,
     *,
     skip_runs: frozenset = frozenset(),
+    allow_http: bool = False,
     timeout: float = STEPS_TIMEOUT,
 ) -> list[HeldStep]:
-    """The Held steps of `fields` in `window`, from the store at `href`.
+    """The Held steps of `fields` in `window`, from the store at `href` — over
+    plain `http` only where `allow_http`, the feed's word (ADR 0042 §9).
 
     Unlike a probe, this is a harvest's question, and a store that cannot
     answer it whole has not answered: whatever goes wrong raises
@@ -1068,7 +1077,7 @@ def list_held_steps(
     from concurrent.futures import TimeoutError as TimedOut
 
     def read():
-        storage = repository_storage(href)
+        storage = repository_storage(href, allow_http=allow_http)
         return read_held_steps(storage, fields, window, skip_runs=skip_runs)
 
     # Its own thread, so a store that stops answering costs the wait and no more.
@@ -1260,9 +1269,15 @@ class StacApiClient:
                     yield parse_item(payload, base_url=page_url)
 
     def list_held_steps(
-        self, href: str, fields: list[StoreField], window: Window, *, skip_runs: frozenset = frozenset()
+        self,
+        href: str,
+        fields: list[StoreField],
+        window: Window,
+        *,
+        skip_runs: frozenset = frozenset(),
+        allow_http: bool = False,
     ) -> list[HeldStep]:
-        return list_held_steps(href, fields, window, skip_runs=skip_runs)
+        return list_held_steps(href, fields, window, skip_runs=skip_runs, allow_http=allow_http)
 
     def resolve_host(self, host: str) -> list[str]:
         try:

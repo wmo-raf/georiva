@@ -53,7 +53,7 @@ from .session import (
     session,
     window,
 )
-from .store import StepNotHeld, StoreDataNotPinned, StoreSlice, StoreUnreadable
+from .store import StepNotHeld, StoreAddressRefused, StoreDataNotPinned, StoreSlice, StoreUnreadable
 from .units import SOURCE_UNIT, Conversion, conversion_for
 
 __all__ = [
@@ -64,6 +64,7 @@ __all__ = [
     "Session",
     "SessionClosed",
     "StepNotHeld",
+    "StoreAddressRefused",
     "StoreDataNotPinned",
     "StoreSlice",
     "StoreUnreadable",

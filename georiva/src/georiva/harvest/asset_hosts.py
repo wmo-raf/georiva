@@ -8,6 +8,13 @@ allowed it), name a host the feed allows, and resolve only to public addresses
 (ADR 0042 §9). This check at harvest time is the guarantee; nothing downstream
 repeats it.
 
+An Upstream store's own address is judged by the same rules before anything
+opens it: by the survey (no feed yet, so never plain `http`), when a re-check
+would adopt a new one, and at the start of every store harvest (#749). Whether
+plain `http` is allowed then travels with the store's location to whatever
+opens it — `repository_storage` in core, Titiler's store opener — which refuse
+`http://` unless told it is allowed.
+
 An Upstream that names a public bucket by `s3://bucket/key` is not naming an
 address we may open: inside our deployment `s3://` is our own object store. Such
 an href is first translated to the public `https` host a person pinned for that

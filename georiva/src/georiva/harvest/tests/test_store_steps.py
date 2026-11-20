@@ -300,6 +300,22 @@ class AStoreThatCannotBeListedTests(StoreFixture, SimpleTestCase):
 
         self.assertEqual(len(self.listed()), 1)
 
+    def test_a_plain_http_store_is_not_opened_unless_its_feed_allows_plain_http(self):
+        self.commit(lambda store: (self.coordinates(store), self.forecast(store).__setitem__((0, 0), 1.0)))
+        plain = STORE.replace("https://", "http://")
+
+        with (
+            mock.patch.object(icechunk, "http_storage", return_value=self.storage) as opened,
+            self.assertLogs(upstream.logger, "WARNING"),
+            self.assertRaises(UpstreamUnreachable),
+        ):
+            list_held_steps(plain, [TEMPERATURE], EVERYTHING)
+        opened.assert_not_called()
+
+        with mock.patch.object(icechunk, "http_storage", return_value=self.storage) as opened:
+            self.assertEqual(len(list_held_steps(plain, [TEMPERATURE], EVERYTHING, allow_http=True)), 1)
+        self.assertEqual(opened.call_args.kwargs["opts"]["allow_http"], "true")
+
     def test_a_store_that_does_not_open_has_not_answered(self):
         with (
             mock.patch.object(icechunk.Repository, "open", side_effect=RuntimeError("connection reset by peer")),
