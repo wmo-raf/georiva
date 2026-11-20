@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from .upstream import (
     STORE_TIMEOUT,
@@ -105,6 +107,8 @@ class FakeUpstream:
         self.garbage: set[str] = set()
         #: The addresses whose bytes were copied, in order: an href, or where it redirected to.
         self.fetched: list[str] = []
+        #: The exact bytes of each file, by href, where a test gives them rather than pixels.
+        self.files: dict[str, bytes] = {}
 
         # What only an Upstream store answers.
         #: The codecs each store's arrays name, by the store's address and the array's path.
@@ -309,10 +313,6 @@ class FakeUpstream:
         return self.addresses.get(host, [PUBLIC_ADDRESS])
 
     def fetch_asset(self, href: str, dest, *, addresses) -> int:
-        import numpy
-        import rasterio
-        from rasterio.transform import from_bounds
-
         url = href
         if not addresses(url):
             raise UpstreamUnreachable(f"upstream file is at an address not allowed: {url}")
@@ -327,6 +327,18 @@ class FakeUpstream:
             with open(dest, "wb") as out:
                 out.write(b"<html>not found</html>")
             return 22
+        return self._write_raster(href, dest)
+
+    def _write_raster(self, href: str, dest) -> int:
+        """Write the file at `href` to `dest`: its exact bytes when a test gave them, else its pixels as a GTiff."""
+
+        import numpy
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        if href in self.files:
+            Path(dest).write_bytes(self.files[href])
+            return len(self.files[href])
         data = self.rasters.get(href)
         if data is None:
             data = numpy.full((8, 8), 7.0, dtype="float32")
@@ -345,9 +357,34 @@ class FakeUpstream:
             transform=from_bounds(33.0, -5.0, 42.0, 5.0, width, height),
         ) as out:
             out.write(bands)
-        from pathlib import Path
-
         return Path(dest).stat().st_size
+
+    @contextmanager
+    def serving(self):
+        """Serve files over HTTP with range requests, as an Upstream's host would.
+
+        Yields a :class:`ServedFiles`: `put` a file's bytes at a path and it
+        answers the file's href. The server runs in its own process: GDAL holds
+        the GIL while it reads, so a server thread in the reader's process would
+        never answer.
+        """
+        import subprocess
+        import sys
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="georiva-upstream-") as root:
+            process = subprocess.Popen(
+                [sys.executable, "-c", _RANGE_SERVER, root],
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                port = int(process.stdout.readline())
+                yield ServedFiles(self, Path(root), f"http://127.0.0.1:{port}")
+            finally:
+                process.terminate()
+                process.wait(timeout=10)
+                process.stdout.close()
 
     def describe_root(self) -> UpstreamRoot:
         self.roots_read += 1
@@ -405,3 +442,81 @@ class FakeUpstream:
                 low, high = self.field_ranges.get(field.path, (0.0, 100.0))
                 samples[field.path] = FieldSample(readable=True, value_min=low, value_max=high)
         return samples
+
+
+class ServedFiles:
+    """The files `FakeUpstream.serving` serves, and the ranges it was asked for."""
+
+    def __init__(self, upstream: FakeUpstream, root: Path, base: str):
+        self.upstream, self.root, self.base = upstream, root, base
+
+    def put(self, path: str, body: bytes) -> str:
+        """Serve `body` at `path`; answers its href, at which the Upstream holds the same bytes."""
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+        href = f"{self.base}/{path}"
+        self.upstream.files[href] = body
+        return href
+
+    def ranges(self, href: str) -> list[tuple[int, int]]:
+        """The byte ranges asked of `href`, in order, each as `(first, last)`."""
+        log = self.root / ".ranges"
+        if not log.exists():
+            return []
+        path = "/" + href.removeprefix(self.base).lstrip("/")
+        found = []
+        for line in log.read_text().splitlines():
+            asked, first, last = line.split(" ")
+            if asked == path:
+                found.append((int(first), int(last)))
+        return found
+
+
+#: A file server answering HEAD and ranged GETs from the folder it is given; it
+#: prints its port, and logs each range asked to `.ranges` in that folder.
+_RANGE_SERVER = """
+import os, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+root = sys.argv[1]
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def answer(self, with_body):
+        path = os.path.join(root, self.path.lstrip("/"))
+        if self.path.startswith("/.") or not os.path.isfile(path):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        with open(path, "rb") as f:
+            body = f.read()
+        first, last, status = 0, len(body) - 1, 200
+        asked = self.headers.get("Range")
+        if asked and asked.startswith("bytes="):
+            a, _, b = asked[len("bytes="):].partition("-")
+            first, last, status = int(a), min(int(b), len(body) - 1) if b else len(body) - 1, 206
+            with open(os.path.join(root, ".ranges"), "a") as log:
+                log.write(f"{self.path} {first} {last}\\n")
+        self.send_response(status)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(last - first + 1))
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {first}-{last}/{len(body)}")
+        self.end_headers()
+        if with_body:
+            self.wfile.write(body[first:last + 1])
+
+    def do_HEAD(self):
+        self.answer(False)
+
+    def do_GET(self):
+        self.answer(True)
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+print(server.server_address[1], flush=True)
+server.serve_forever()
+"""

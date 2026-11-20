@@ -169,8 +169,8 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
     if oa.passthrough is not None:
         path = _asset_output_path(item, oa.variable, oa.format)
         src_bucket_type, src_href = oa.passthrough
-        data = storage.bucket(src_bucket_type).read_bytes(src_href)
-        href = writer.bucket.save(path, data)
+        # Bytes copied as they are, not values read: no read module needed.
+        href = storage.transfer(storage.bucket(src_bucket_type), writer.bucket, src_href, path)
         stats = oa.stats or {}
         asset, _ = Asset.objects.update_or_create(
             item=item,

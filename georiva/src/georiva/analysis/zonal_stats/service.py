@@ -72,22 +72,16 @@ class Band:
 
 
 def read_band(location: AssetLocation) -> Band:
-    """Read band 1 of the asset at ``location``, opening it by range (ADR 0043 §7).
+    """Read band 1 of the asset at ``location`` through the read module (ADR 0046 §10).
 
-    Local or remote, the COG is never pulled into memory as bytes first: GDAL
-    reads its blocks where they are. Read once per asset however many boundary
-    levels are computed from it.
+    Local or remote, the COG is read by range, never pulled into memory as
+    bytes first (ADR 0043 §7). Read once per asset however many boundary levels
+    are computed from it.
     """
-    with location.open_raster() as src:
-        data = src.read(1).astype(np.float32)
-        transform = src.transform
-        crs = src.crs.to_wkt() if src.crs else "EPSG:4326"
+    from georiva.core import values
 
-        if src.nodata is not None:
-            data[data == src.nodata] = np.nan
-
-    data[~np.isfinite(data)] = np.nan
-    return Band(data=data, transform=transform, crs=crs)
+    field = values.field(location)
+    return Band(data=field.data, transform=field.transform, crs=field.crs)
 
 
 def compute_stats_from_band(band: Band, boundaries: list[AdminBoundary]) -> list[dict]:
