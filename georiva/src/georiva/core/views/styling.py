@@ -28,7 +28,7 @@ from wagtail.admin import messages
 from georiva.core.machine_plane import titiler_encoded_preview_url
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Collection, ColorRamp, Item, Variable, VariableStyle
-from georiva.core.models.visualization import _swatch_html, generate_stops
+from georiva.core.models.visualization import _swatch_html, served_ramp_stops
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
 #: The stepped-mode class count preselected for a fresh style (ADR 0022).
@@ -62,8 +62,12 @@ def styling_summary(variable):
     """
     default = variable.default_style
     gradient = default.css_gradient() if default else GRAYSCALE_GRADIENT
+    served_min, served_max = variable.served_range
     return {
         "default_style": default,
+        # Ranges read in the served unit (ADR 0046 §3).
+        "served_min": served_min,
+        "served_max": served_max,
         "swatch": _swatch_html(gradient),
         "styling_url": reverse("variable_styling", args=[variable.collection_id, variable.pk]),
     }
@@ -192,8 +196,8 @@ def _ramp_groups(ramp_queryset, selected_ramp_id):
     ]
 
 
-def _style_spans(styles) -> list[dict]:
-    """The span of every style's saved stops, for the range hint (#562).
+def _style_spans(variable, styles) -> list[dict]:
+    """The span of every style's saved stops, in the served unit, for the range hint (#562).
 
     The range is shared by all of a variable's styles (ADR 0023), so fitting
     it to the stops on screen can clip a sibling; the page needs their spans
@@ -203,7 +207,9 @@ def _style_spans(styles) -> list[dict]:
     for style in styles:
         low, high = style.min_max_from_stops()
         if low is not None:
-            spans.append({"slug": style.slug, "name": style.name, "min": low, "max": high})
+            spans.append(
+                {"slug": style.slug, "name": style.name, "min": variable.served(low), "max": variable.served(high)}
+            )
     return spans
 
 
@@ -293,9 +299,12 @@ def collection_styling(request, collection_pk):
     rows = []
     for variable in variables:
         default = variable.default_style
+        served_min, served_max = variable.served_range
         rows.append(
             {
                 "variable": variable,
+                "served_min": served_min,
+                "served_max": served_max,
                 "default_style": default,
                 "gradient": default.css_gradient() if default else GRAYSCALE_GRADIENT,
                 "style_count": len(variable.styles.all()),
@@ -362,10 +371,11 @@ def variable_styling(request, collection_pk, variable_pk):
         selected = variable.default_style or (styles[0] if styles else None)
         creating = selected is None
 
+    served_min, served_max = variable.served_range
     range_form = VariableRangeForm(
         initial={
-            "value_min": variable.value_min,
-            "value_max": variable.value_max,
+            "value_min": served_min,
+            "value_max": served_max,
             "scale_type": variable.scale_type,
         }
     )
@@ -378,7 +388,8 @@ def variable_styling(request, collection_pk, variable_pk):
             "steps": (selected.steps if selected else None) or DEFAULT_STEPPED_CLASSES,
         },
     )
-    stop_rows = list(selected.stops) if selected else []
+    # The form speaks the served unit; stops are stored in the source unit (ADR 0046 §3).
+    stop_rows = variable.served_stops(selected.stops) if selected else []
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -386,8 +397,7 @@ def variable_styling(request, collection_pk, variable_pk):
         if action == "save-range":
             range_form = VariableRangeForm(request.POST)
             if range_form.is_valid():
-                variable.value_min = range_form.cleaned_data["value_min"]
-                variable.value_max = range_form.cleaned_data["value_max"]
+                variable.set_served_range(range_form.cleaned_data["value_min"], range_form.cleaned_data["value_max"])
                 variable.scale_type = range_form.cleaned_data["scale_type"]
                 # A range edit alone never rewrites any style's stops — the
                 # snapshot is the operator's (ADR 0022); regeneration is only
@@ -415,7 +425,7 @@ def variable_styling(request, collection_pk, variable_pk):
                 style.mode = data["mode"]
                 style.steps = data["steps"]
                 try:
-                    stops = _parse_stops(request.POST)
+                    stops = variable.stored_stops(_parse_stops(request.POST))
                     if creating and not stops and style.ramp:
                         style.apply_ramp()
                     else:
@@ -485,7 +495,7 @@ def variable_styling(request, collection_pk, variable_pk):
         "collection": collection,
         "variable": variable,
         "styles": styles,
-        "style_spans": _style_spans(styles),
+        "style_spans": _style_spans(variable, styles),
         "selected": selected,
         "creating": creating,
         "range_form": range_form,
@@ -513,9 +523,10 @@ def variable_style_stops(request, collection_pk, variable_pk):
     Here the stops come back as JSON, fill the form unsaved, and the map
     repaints — nothing is lost until Save, and a reload undoes it.
 
-    It runs the same :func:`generate_stops` the model's ``apply_ramp()`` does
+    It runs the same :func:`served_ramp_stops` the model's ``apply_ramp()`` does
     over the same saved range, so what the form fills in is exactly what a saved
-    re-apply would have produced. Read-only and side-effect-free, hence GET.
+    re-apply would have produced. The stops come back in the served unit, as the
+    form shows them (ADR 0046 §3). Read-only and side-effect-free, hence GET.
     """
     collection = get_org_object_or_404(request, Collection, pk=collection_pk)
     variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
@@ -547,6 +558,6 @@ def variable_style_stops(request, collection_pk, variable_pk):
 
     return JsonResponse(
         {
-            "stops": generate_stops(ramp, variable.value_min, variable.value_max, mode=mode, steps=steps),
+            "stops": served_ramp_stops(ramp, variable, mode=mode, steps=steps),
         }
     )

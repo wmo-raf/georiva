@@ -237,8 +237,9 @@ def _variable_rows(feed):
             "unit_id": v.unit_id,
             "unit_create": False,
             "can_create": False,
-            "value_min": v.value_min,
-            "value_max": v.value_max,
+            # Ranges read in the output (served) unit (ADR 0046 §3).
+            "value_min": v.served(v.value_min),
+            "value_max": v.served(v.value_max),
             "has_data": v.pk in with_data,
             "collection": v.collection.name,
             "derived": read_derived(v),
@@ -404,12 +405,13 @@ def _apply_variable_edits(feed, posted):
     with transaction.atomic():
         for variable, source, unit, vmin, vmax, long_name in updates:
             variable.source_unit, variable.unit = source, unit
-            variable.value_min, variable.value_max = vmin, vmax
+            # Typed in the output unit, stored in the incoming one (ADR 0046 §3).
+            variable.set_served_range(vmin, vmax)
             if long_name:
                 variable.name = long_name
             variable.save(update_fields=["source_unit", "unit", "value_min", "value_max", "name"])
         for collection, slug, long_name, spec, source, unit, vmin, vmax in creations:
-            Variable.objects.create(
+            variable = Variable(
                 collection=collection,
                 slug=slug,
                 name=long_name,
@@ -417,9 +419,9 @@ def _apply_variable_edits(feed, posted):
                 sources=derived_sources(spec["u_source"].strip(), spec["v_source"].strip()),
                 source_unit=source,
                 unit=unit,
-                value_min=vmin,
-                value_max=vmax,
             )
+            variable.set_served_range(vmin, vmax)
+            variable.save()
     return []
 
 

@@ -310,7 +310,9 @@ class CollectionVariable:
 (ADR 0022): create-only, precedence `palette_stops` > `palette` > grayscale.
 A ramp name is stretched over the declared range into the variable's default
 style; exact stops are materialized verbatim and the range derives from them
-(declaring both warns on disagreement). An unknown ramp or malformed stops
+(declaring both warns on disagreement). Range and stops are declared in the
+exposed unit (`output_units`) and stored converted to `source_units`
+(ADR 0046 §3); a ramp is spaced over the exposed range. An unknown ramp or malformed stops
 degrade one tier with a logged warning — provisioning never fails on styling,
 and a re-provision never touches an existing variable's range or styles.
 
@@ -380,8 +382,8 @@ def get_collection_definitions(cls):
 only to convert — e.g. `"source_units": "K", "output_units": "degC"`. Omit
 `output_units` to expose the source unit unchanged.
 
-Conversion runs through [pint](https://pint.readthedocs.io) at ingestion time
-(`source_unit` → `unit` on the resulting `Variable`), so both units must be
+Data is stored in `source_units` and converted when read (ADR 0046), through
+[pint](https://pint.readthedocs.io) (`source_unit` → `unit` on the resulting `Variable`), so both units must be
 parseable by the registry in `core/unit_utils.py` (it accepts UDUNITS-style
 strings like `"kg kg-1"`, `"m2 s-2"`). Beyond simple scaling, the registry
 enables a **geopotential** context plus a `gpdam` (geopotential decametre) unit,

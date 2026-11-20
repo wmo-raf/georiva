@@ -4,7 +4,7 @@
 {% else %}
     <p>
         <span class="w-help-text">{% trans "Range:" %}</span>
-        {{ variable.value_min }} &ndash; {{ variable.value_max }} {{ variable.unit.symbol }}
+        {{ served_min }} &ndash; {{ served_max }} {{ variable.unit.symbol }}
         {{ swatch }}
         {% if default_style %}
             <span class="w-help-text">{{ default_style.name }}</span>

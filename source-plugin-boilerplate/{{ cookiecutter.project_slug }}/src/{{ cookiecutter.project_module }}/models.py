@@ -54,7 +54,9 @@ COLLECTIONS = {
                 # "output_units": "",        # optional; exposed unit if converting
                 "source_variable": "band_1",
                 # Styling seed (create-only; precedence palette_stops > palette
-                # > grayscale — re-provisioning never touches existing styles):
+                # > grayscale — re-provisioning never touches existing styles).
+                # Range and stops are in the exposed unit (output_units, else
+                # source_units) and stored converted to source_units:
                 # "value_range": (0.0, 100.0),
                 # "palette": "viridis",        # ColorRamp catalog name, stretched over value_range
                 # "palette_stops": [(0.0, "#f7fbff"), (100.0, "#08306b")],  # exact stops; derives the range

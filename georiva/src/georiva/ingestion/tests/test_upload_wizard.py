@@ -868,6 +868,21 @@ class ProvisionTests(TestCase):
         self.assertEqual(var.source_unit.symbol, "K")
         self.assertEqual(var.unit, celsius)
 
+    def test_provision_stores_the_range_typed_in_the_output_unit_in_the_incoming_unit(self):
+        # The range is typed in the unit the variable is served in, and stored
+        # in the unit its files carry (ADR 0046 §3).
+        celsius = Unit.objects.get_or_create(symbol="degC", defaults={"name": "Celsius"})[0]
+        session = _full_session()
+        session["assignments"] = [
+            _assignment(source_symbol="K", unit_id=celsius.pk, unit_create="", value_min=-40.0, value_max=50.0)
+        ]
+        _seed_session(self.client, session)
+        self.client.post(PROVISION_URL)
+
+        var = Variable.objects.get()
+        self.assertEqual(var.value_range, (233.15, 323.15))
+        self.assertEqual(var.served_range, (-40.0, 50.0))
+
     def test_provision_keeps_the_files_own_name_when_the_display_name_is_edited(self):
         session = _full_session()
         session["assignments"] = [_assignment(long_name="Air temp", source_long_name="2 metre temperature")]

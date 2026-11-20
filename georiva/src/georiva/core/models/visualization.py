@@ -112,7 +112,32 @@ def _sample_ramp(colors, positions, t: float):
     return list(colors[-1])
 
 
-def generate_stops(ramp, value_min: float, value_max: float, mode: str = "continuous", steps: int = None) -> list:
+def _scaled_position(value_min: float, value_max: float, t: float, scale_type: str) -> float:
+    """The value at fraction ``t`` (0–1) of the range, spaced by ``scale_type``.
+
+    ``log`` spaces geometrically (a range that does not sit wholly above zero
+    has no logarithm, so it spaces linearly); ``sqrt`` packs stops towards the
+    low end the way a square-root colour scale stretches it; ``linear`` and
+    ``diverging`` space evenly — a diverging range is centred by the operator.
+    Rounded to 12 significant digits: these are numbers people read.
+    """
+    if scale_type == "log" and value_min > 0:
+        value = value_min * (value_max / value_min) ** t
+    elif scale_type == "sqrt":
+        value = value_min + t * t * (value_max - value_min)
+    else:
+        value = value_min + t * (value_max - value_min)
+    return float(f"{value:.12g}")
+
+
+def generate_stops(
+    ramp,
+    value_min: float,
+    value_max: float,
+    mode: str = "continuous",
+    steps: int = None,
+    scale_type: str = "linear",
+) -> list:
     """Apply ``ramp`` over a value range: the snapshot-generation seam of
     ADR 0022. Returns ``[{"value": float, "color": "#rrggbb(aa)"}, ...]``.
 
@@ -123,11 +148,17 @@ def generate_stops(ramp, value_min: float, value_max: float, mode: str = "contin
     colors are categories that must never blend — expressing each class as two
     stops sharing its boundaries so the edges stay hard through any linear
     interpolation downstream.
+
+    ``scale_type`` spaces the stops (or class boundaries) over the range in
+    whatever unit the range is given in — the served unit, when applied for a
+    Variable (:func:`served_ramp_stops`).
     """
     colors, positions = _ramp_colors_and_positions(ramp)
     if not colors:
         return []
-    val_range = value_max - value_min
+
+    def at(t):
+        return _scaled_position(value_min, value_max, t, scale_type)
 
     if mode == VariableStyle.Mode.STEPPED:
         count = max(int(steps or 0), 1)
@@ -140,14 +171,24 @@ def generate_stops(ramp, value_min: float, value_max: float, mode: str = "contin
         stops = []
         for i, color in enumerate(class_colors):
             hex_color = _rgba_to_hex(color)
-            stops.append({"value": value_min + i * val_range / count, "color": hex_color})
-            stops.append({"value": value_min + (i + 1) * val_range / count, "color": hex_color})
+            stops.append({"value": at(i / count), "color": hex_color})
+            stops.append({"value": at((i + 1) / count), "color": hex_color})
         return stops
 
     return [
-        {"value": value_min + position * val_range, "color": _rgba_to_hex(color)}
-        for color, position in zip(colors, positions, strict=True)
+        {"value": at(position), "color": _rgba_to_hex(color)} for color, position in zip(colors, positions, strict=True)
     ]
+
+
+def served_ramp_stops(ramp, variable, mode: str = "continuous", steps: int = None) -> list:
+    """``ramp`` applied over ``variable``'s range in its served unit (ADR 0046 §3).
+
+    ``scale_type`` spaces stops as the operator sees them, so the ramp is laid
+    over the served range; the stops come back in the served unit, for a form.
+    Store them with ``variable.stored_stops(...)``.
+    """
+    low, high = variable.served_range
+    return generate_stops(ramp, low, high, mode=mode, steps=steps, scale_type=variable.scale_type)
 
 
 class ColorRamp(ClusterableModel):
@@ -433,18 +474,14 @@ class VariableStyle(TimeStampedModel):
 
     def apply_ramp(self):
         """Regenerate the stops snapshot from the ramp and the variable's
-        current range. Explicitly destructive: whatever fine-tuning the
+        current range — laid out in the served unit, stored in the source
+        unit (ADR 0046 §3). Explicitly destructive: whatever fine-tuning the
         snapshot held is discarded, which is why only a deliberate "re-apply"
         gesture calls this."""
         if self.ramp is None:
             raise ValueError("This style has no ramp to apply.")
-        self.stops = generate_stops(
-            self.ramp,
-            self.variable.value_min,
-            self.variable.value_max,
-            mode=self.mode,
-            steps=self.steps,
-        )
+        variable = self.variable
+        self.stops = variable.stored_stops(served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps))
 
     # -------- runtime conversion helpers --------
 
