@@ -690,3 +690,149 @@ class WizardSavesAStoreFeedTogetherOrNotAtAllTests(StoreWizardMixin, TestCase):
         page = self.client.get(step(4))
         self.assertNotEqual(page.context["details"], [])
         self.assertEqual(self.client.get(step(5)).status_code, 200)
+
+
+class WizardTakesTheSourceUnitFromTheStoreTests(StoreWizardMixin, TestCase):
+    """A harvested Variable's source unit is the Upstream's (ADR 0046 §9): the
+    wizard asks the operator only which unit to show it in."""
+
+    def setUp(self):
+        super().setUp()
+        self.kelvin = Unit.objects.get(symbol="K")
+
+    def declare(self, path, unit, title="", value_range=(233.4, 310.2)):
+        self.arrays[path] = (RUN_STEP_GRID, WHOLE_FIELD, {"title": title, "unit": unit} if unit else {"title": title})
+        self.upstream.field_ranges[path] = value_range
+        self.store()
+
+    def test_a_unit_the_store_declares_is_the_source_unit_shown_and_not_asked(self):
+        self.declare("temperature_2m", "K", title="2 metre temperature")
+        self.reach_fields()
+
+        page = self.tick(0)
+
+        (row,) = page.context["details"]
+        self.assertEqual(row["source_unit"], self.kelvin)
+        self.assertNotContains(page, 'name="source_unit_0"')
+        self.assertEqual(row["unit_id"], self.kelvin.pk, "shown as the provider gives it unless the operator says")
+
+    def test_the_variable_is_saved_with_the_stores_unit_and_the_served_unit_picked(self):
+        self.declare("temperature_2m", "K", title="2 metre temperature")
+        self.reach_fields()
+
+        # A source unit posted beside one the store declares is not the operator's to give.
+        self.choose_temperature(unit_0=self.celsius.pk, source_unit_0=self.celsius.pk, low_0="-40", high_0="40")
+        self.save_store()
+
+        variable = Variable.objects.get()
+        self.assertEqual((variable.source_unit, variable.unit), (self.kelvin, self.celsius))
+
+    def test_a_store_that_declares_no_unit_has_the_operator_say_what_its_values_are_in(self):
+        self.declare("temperature_2m", "", title="2 metre temperature")
+        self.reach_fields()
+
+        page = self.tick(0)
+
+        (row,) = page.context["details"]
+        self.assertIsNone(row["source_unit"])
+        self.assertContains(page, 'name="source_unit_0"')
+        self.assertContains(page, "does not say what its values are in")
+        refused = self.choose_temperature(unit_0=self.celsius.pk)
+        self.assertIn("Say which unit the provider", self.errors(refused))
+        self.assertRedirects(self.client.get(step(5)), step(4))
+
+        self.choose_temperature(unit_0=self.celsius.pk, source_unit_0=self.kelvin.pk)
+        self.save_store()
+
+        variable = Variable.objects.get()
+        self.assertEqual((variable.source_unit, variable.unit), (self.kelvin, self.celsius))
+
+    def test_the_range_read_is_kept_in_the_stores_unit_and_shown_in_the_served_one(self):
+        self.declare("temperature_2m", "K", title="2 metre temperature", value_range=(233.4, 310.2))
+        self.reach_fields()
+        (row,) = self.tick(0).context["details"]
+        self.assertEqual((row["low"], row["high"], row["range_unit_id"]), (230.0, 320.0, self.kelvin.pk))
+
+        # The operator shows it in °C and leaves the range as read: it was typed in K.
+        as_read = {"low_0": "230", "high_0": "320", "range_unit_0": self.kelvin.pk}
+        self.tick(0, name_0="T", unit_0=self.celsius.pk, about_0="", **as_read)
+        page = self.client.get(step(4))
+        self.save_store()
+
+        (row,) = page.context["details"]
+        self.assertEqual((row["low"], row["high"], row["range_unit_id"]), (-43.15, 46.85, self.celsius.pk))
+        variable = Variable.objects.get()
+        self.assertEqual((variable.value_min, variable.value_max), (230.0, 320.0))
+        self.assertEqual(variable.served_range, (-43.15, 46.85))
+
+    def test_a_range_typed_in_the_served_unit_is_kept_in_the_stores(self):
+        self.declare("temperature_2m", "K", title="2 metre temperature")
+        self.reach_fields()
+
+        self.choose_temperature(unit_0=self.celsius.pk, low_0="-40", high_0="40", range_unit_0=self.celsius.pk)
+        self.save_store()
+
+        variable = Variable.objects.get()
+        self.assertEqual((variable.value_min, variable.value_max), (233.15, 313.15))
+
+    def test_a_unit_the_served_unit_cannot_follow_is_refused_with_why(self):
+        self.declare("temperature_2m", "K", title="2 metre temperature")
+        self.reach_fields()
+
+        refused = self.choose_temperature(unit_0=Unit.objects.get(symbol="m/s").pk)
+
+        self.assertIn("cannot be shown in m/s", self.errors(refused))
+        self.assertRedirects(self.client.get(step(5)), step(4))
+
+
+class WizardProposesTheWaterFlagTests(StoreWizardMixin, TestCase):
+    """kg m-2 is mm only for water (ADR 0046 §6): the wizard proposes the flag
+    from a field's name, and the operator confirms it."""
+
+    def setUp(self):
+        super().setUp()
+        self.mm = Unit.objects.get(symbol="mm")
+        self.arrays = {
+            "total_precipitation_run_total_surface": (
+                RUN_STEP_GRID,
+                WHOLE_FIELD,
+                {"title": "Total precipitation", "unit": "kg m-2"},
+            ),
+            "total_column_ozone": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "Total column ozone", "unit": "kg m-2"}),
+        }
+        self.upstream.field_ranges["total_precipitation_run_total_surface"] = (0.0, 87.2)
+        self.upstream.field_ranges["total_column_ozone"] = (0.004, 0.009)
+        self.store()
+
+    def choose_precipitation(self, **changes):
+        typed = {"name_0": "Rain", "unit_0": self.mm.pk, "low_0": "0", "high_0": "100", "about_0": ""}
+        typed.update(changes)
+        self.tick(0)
+        return self.tick(0, **typed)
+
+    def test_a_field_named_as_precipitation_has_the_flag_proposed_and_others_do_not(self):
+        self.reach_fields()
+
+        rows = self.tick(0, 1).context["details"]
+
+        self.assertEqual([row["water"] for row in rows], [True, False])
+        self.assertEqual(rows[0]["source_unit"].symbol, "kg m-2", "the provider's unit, made known to GeoRiva")
+
+    def test_precipitation_confirmed_as_water_is_served_in_millimetres(self):
+        self.reach_fields()
+
+        self.choose_precipitation(water_0="on")
+        self.save_store()
+
+        variable = Variable.objects.get()
+        self.assertEqual((variable.source_unit.symbol, variable.unit, variable.water), ("kg m-2", self.mm, True))
+        self.assertAlmostEqual(variable.scale, 1.0)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 100.0))
+
+    def test_millimetres_are_refused_unless_the_operator_confirms_it_is_water(self):
+        self.reach_fields()
+
+        refused = self.choose_precipitation()
+
+        self.assertIn("only for water", self.errors(refused))
+        self.assertRedirects(self.client.get(step(5)), step(4))

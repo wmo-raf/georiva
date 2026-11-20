@@ -21,6 +21,7 @@ it reads one page of a listing and stops.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -825,3 +826,17 @@ def _survey_asset(key: str, asset: UpstreamAsset, location: FileLocation, href: 
             else "This file is not laid out for reading over the internet, so maps of it will be slow to draw."
         ),
     )
+
+
+#: What a field's own name says when its values are water (ADR 0046 §6): precipitation,
+#: snowfall or runoff water equivalent, or column water. kg m-2 is also an aerosol's or
+#: ozone's column load, so only a name like these proposes the flag.
+_WATER_WORDS = re.compile(
+    r"\b(precipitation|precip|rain|rainfall|snowfall|runoff|water equivalent|column (integrated )?water)\b"
+)
+
+
+def proposes_water(*names: str) -> bool:
+    """Whether any of a field's names — its key or path, title, standard name —
+    says its values are water: the Water flag to propose, for the operator to confirm."""
+    return any(_WATER_WORDS.search(re.sub(r"[_/.\-]+", " ", name.lower())) for name in names if name)

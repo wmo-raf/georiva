@@ -148,14 +148,7 @@
                                     <input type="text" name="name_{{ row.index }}" class="w-field__input hwiz-name"
                                            value="{{ row.name }}" aria-label="{% trans 'Name' %}">
                                 </td>
-                                <td>
-                                    <select name="unit_{{ row.index }}" class="w-field__input hwiz-unit" aria-label="{% trans 'Unit' %}">
-                                        <option value="">— {% trans "Choose" %} —</option>
-                                        {% for unit in units %}
-                                            <option value="{{ unit.pk }}" {% if unit.pk == row.unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
-                                        {% endfor %}
-                                    </select>
-                                </td>
+                                <td>{% include "georivaharvest/includes/wizard_units.html" %}</td>
                                 <td>
                                     <input type="number" step="any" name="low_{{ row.index }}" class="w-field__input hwiz-number"
                                            value="{{ row.low|default_if_none:''|unlocalize }}" aria-label="{% trans 'Lowest value' %}">
