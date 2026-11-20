@@ -24,15 +24,36 @@ def fill_source_units(apps, schema_editor):
     """A Variable with no source unit is said to hold its served unit — nothing
     is deployed, so no bytes were converted (ADR 0046) — and every Variable's
     scale and offset are computed. A pair that cannot be served keeps 1 and 0
-    until an operator corrects it."""
+    until an operator corrects it.
+
+    Until now a range and a style's stops were written in the served unit; from
+    here on they are held in the source unit (ADR 0046 §3). Where the two differ,
+    they are carried across so each keeps meaning the same physical value."""
     Variable = apps.get_model("georivacore", "Variable")
+    VariableStyle = apps.get_model("georivacore", "VariableStyle")
     Variable.objects.filter(source_unit__isnull=True).update(source_unit=models.F("unit"))
     for variable in Variable.objects.select_related("source_unit", "unit"):
         try:
             conversion = affine_conversion(variable.source_unit.symbol, variable.unit.symbol, water=variable.water)
         except ConversionRefused:
             continue
-        Variable.objects.filter(pk=variable.pk).update(scale=conversion.scale, offset=conversion.offset)
+        changes = {"scale": conversion.scale, "offset": conversion.offset}
+        if (conversion.scale, conversion.offset) != (1.0, 0.0):
+            for bound in ("value_min", "value_max"):
+                value = getattr(variable, bound)
+                if value is not None:
+                    changes[bound] = conversion.inverse(value)
+            for style in VariableStyle.objects.filter(variable_id=variable.pk):
+                style.stops = [
+                    {**stop, "value": conversion.inverse(stop["value"])} if stop.get("value") is not None else stop
+                    for stop in style.stops
+                ]
+                style.save(update_fields=["stops"])
+        Variable.objects.filter(pk=variable.pk).update(**changes)
+    # The updates above leave deferred foreign-key checks pending, and Postgres
+    # refuses to alter a table with pending trigger events in the same transaction.
+    if schema_editor is not None and schema_editor.connection.vendor == "postgresql":
+        schema_editor.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
 
 def create_delta_units(apps, schema_editor):
