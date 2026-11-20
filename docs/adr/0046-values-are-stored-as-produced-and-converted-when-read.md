@@ -2,7 +2,7 @@
 
 ## Status
 
-proposed — see wmo-raf/georiva#737. Supersedes the last sentence of
+accepted — see wmo-raf/georiva#737, implemented in #748. Supersedes the last sentence of
 [ADR-0044](0044-an-upstream-store-is-harvested-step-by-step-and-titiler-reads-the-store.md) §9 ("nothing is
 de-accumulated or converted on the way") for units: still nothing is de-accumulated. Gives
 [ADR-0043](0043-the-read-plane-reads-an-assets-bytes-wherever-its-href-points.md) §1's location seam its value-reading
