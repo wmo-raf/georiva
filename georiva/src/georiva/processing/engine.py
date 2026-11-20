@@ -300,6 +300,23 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, **kwargs) -> UnitResult:
         return _run_unit(recipe, unit, **kwargs)
 
 
+def _transform(recipe: BaseRecipe, unit: ProductionUnit, resolved) -> list:
+    """The recipe's compute, in one reading session for the production unit:
+    each input is read in the unit the recipe declares for it, whatever unit it
+    is served in (ADR 0046 §12, §13)."""
+    from georiva.core import values
+
+    with values.session() as reading:
+        for role, ri in resolved.items():
+            ri.in_unit = recipe.input_units.get(role)
+            ri.session = reading
+        try:
+            return recipe.transform(unit, resolved)
+        finally:
+            for ri in resolved.values():
+                ri.session = None
+
+
 def _run_unit(
     recipe: BaseRecipe,
     unit: ProductionUnit,
@@ -431,7 +448,7 @@ def _run_unit(
 
         logger.info("[unit %s] %s step 4/6 — computing (recipe.transform)…", pos, tag)
         t_tx = time.monotonic()
-        out_assets = recipe.transform(unit, resolved)
+        out_assets = _transform(recipe, unit, resolved)
         logger.info(
             "[unit %s] %s transform produced %d output asset(s) in %.1fs",
             pos,

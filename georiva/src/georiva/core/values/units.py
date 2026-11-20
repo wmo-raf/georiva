@@ -39,6 +39,12 @@ class Conversion:
 #: Raw bytes whose unit no row states, read as they are.
 AS_STORED = Conversion()
 
+#: The ``in_unit`` that reads values as they are held — in their Variable's
+#: source unit, whatever it is (ADR 0046 §1). For a reader whose arithmetic
+#: holds in any unit and that writes its result down in the unit it read in,
+#: as a recipe's identity or climatology does. Not a unit pint knows.
+SOURCE_UNIT = "source unit"
+
 
 class Conversions:
     """One session's conversions, worked out once per Variable."""
@@ -51,6 +57,8 @@ class Conversions:
     def of(self, variable_id: int | None) -> Conversion:
         """The conversion for values of the Variable ``variable_id``; ``None``
         for bytes no Variable describes, which can only be read as they are."""
+        if self.in_unit == SOURCE_UNIT:
+            return AS_STORED
         if variable_id is None:
             if self.in_unit is not None:
                 raise ConversionRefused(

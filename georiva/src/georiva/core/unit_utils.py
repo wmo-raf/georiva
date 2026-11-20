@@ -224,3 +224,18 @@ def _converts_as_water(f) -> bool:
     except pint.errors.PintError:
         return False
     return True
+
+
+def difference_unit(symbol: str) -> str:
+    """The unit a difference of values in ``symbol`` is in (ADR 0046 §7).
+
+    A unit with an offset from its base — °C, °F — has a delta unit of its own
+    (``delta_degC``), which converts by scale alone. Any other unit is its own
+    difference unit: a difference of K is K, of mm is mm. A symbol pint does not
+    know is returned as it is.
+    """
+    try:
+        zero = ureg.Quantity(0, symbol).to_base_units().magnitude
+    except (pint.errors.PintError, AttributeError, TypeError, ValueError):
+        return symbol
+    return symbol if zero == 0 else f"delta_{symbol}"

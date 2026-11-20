@@ -41,8 +41,6 @@ ALLOWED = {
     "harvest/upstream.py": "the Upstream survey's probe: opens an upstream file to describe it",
     "harvest/testing.py": "FakeUpstream: writes the files a test's Upstream serves",
     "virtual_zarr/": "virtual Zarr's layout reader: reads a COG's layout and a store's coverage",
-    # Pending: moves onto a reading session when recipes declare their input units (#745).
-    "processing/recipes/climatology.py": "reads its staging NetCDF series (pending #745)",
 }
 
 #: Methods that open raster bytes whatever they are called on.

@@ -32,8 +32,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
+from georiva.core.unit_utils import difference_unit
 from georiva.geoprocessing import anomaly, climatology, trend
 from georiva.processing.recipe import (
+    SOURCE_UNIT,
     BaseRecipe,
     OutputAsset,
     OutputItem,
@@ -50,6 +52,10 @@ _ANOMALY_QUANTITIES = {"anomaly", "relative_anomaly"}
 class ClimatologyRecipe(BaseRecipe):
     type = "climatology"
     version = "1"
+    # A mean, a difference and a slope hold in any unit, so the series is read as
+    # it is held and the result written down in that unit (or its difference
+    # unit): what an input is served in never reaches an archive (ADR 0046 §13).
+    input_units = {"value": SOURCE_UNIT, "baseline": SOURCE_UNIT}
 
     # ---- candidate generation ----------------------------------------------
 
@@ -137,7 +143,7 @@ class ClimatologyRecipe(BaseRecipe):
         season = unit["season"]
         quantity = unit["quantity"]
 
-        series = self.read_series(resolved["value"].assets)
+        series = self.read_series(resolved["value"])
         value_window = self._slice_years(series, unit["period"])
 
         if quantity == "value":
@@ -145,7 +151,7 @@ class ClimatologyRecipe(BaseRecipe):
         elif quantity == "trend":
             result = trend(value_window, season=season)
         elif quantity in _ANOMALY_QUANTITIES:
-            baseline_series = self.read_series(resolved["baseline"].assets)
+            baseline_series = self.read_series(resolved["baseline"])
             baseline_window = self._slice_years(baseline_series, unit["baseline"])
             value = climatology(value_window, season=season)
             base = climatology(baseline_window, season=season)
@@ -190,49 +196,40 @@ class ClimatologyRecipe(BaseRecipe):
 
     # ---- I/O seam (mocked in tests) ----------------------------------------
 
-    def read_series(self, assets):
+    def read_series(self, source: ResolvedInput):
         """
-        Open the staging asset(s) into an xarray DataArray with a ``time`` dim.
-
-        This is the only real I/O in the recipe and the recipe's single seam:
-        unit tests patch it to return an in-memory array, so the declarative
-        pieces and the transform math stay storage-free. Multiple assets are
+        The input's staged series as an xarray DataArray with a ``time`` dim,
+        read in the input's declared unit through the production unit's
+        reading session (``ResolvedInput.series``). Multiple assets are
         concatenated along time.
 
-        The byte → xarray step is integration-level (format/engine handling is
-        exercised end-to-end, not in unit tests).
+        This is the recipe's only real I/O and its single seam: unit tests patch
+        it to return an in-memory array, so the declarative pieces and the
+        transform math stay storage-free.
         """
-        import tempfile
-
         import xarray as xr
 
-        from georiva.core.storage import BucketType, storage
-
-        if not assets:
+        if not source.assets:
             raise ValueError("ClimatologyRecipe: no source assets to read")
 
-        arrays = []
-        for asset in assets:
-            data = storage.bucket(BucketType.STAGING).read_bytes(asset.href)
-            with tempfile.NamedTemporaryFile(suffix=".nc") as fh:
-                fh.write(data)
-                fh.flush()
-                ds = xr.open_dataset(fh.name)
-            arrays.append(self._pick_variable(ds, asset))
-
+        arrays = [source.series(asset) for asset in source.assets]
         if len(arrays) == 1:
             return arrays[0]
         return xr.concat(arrays, dim="time").sortby("time")
 
-    @staticmethod
-    def _pick_variable(ds, asset):
-        """Select the asset's variable from a Dataset, or the sole data var."""
-        if asset.variable and asset.variable.slug in ds.data_vars:
-            return ds[asset.variable.slug]
-        data_vars = list(ds.data_vars)
-        if len(data_vars) != 1:
-            raise ValueError(f"ClimatologyRecipe: cannot pick a variable from {data_vars} for asset {asset.pk}")
-        return ds[data_vars[0]]
+    def output_unit(self, unit: ProductionUnit, resolved) -> str:
+        """The series' source unit for a ``value``; its difference unit for an
+        ``anomaly`` and a ``trend`` (a change per year), so they are scaled and
+        never offset (ADR 0046 §7); ``dimensionless`` for a ``relative_anomaly``."""
+        quantity = unit["quantity"]
+        if quantity == "relative_anomaly":
+            return "dimensionless"
+        source = self._source_variable(resolved).source_unit.symbol
+        if quantity == "value":
+            return source
+        if quantity in ("anomaly", "trend"):
+            return difference_unit(source)
+        raise ValueError(f"unknown quantity: {quantity!r}")
 
     # ---- helpers ------------------------------------------------------------
 
@@ -284,12 +281,13 @@ class ClimatologyRecipe(BaseRecipe):
         """
         from georiva.core.models import Variable
 
-        src = next((a.variable for a in resolved["value"].assets if a.variable), None)
-        if src is None:
-            raise ValueError("ClimatologyRecipe: source staging asset has no Variable to mirror")
+        src = self._source_variable(resolved)
         si = resolved["value"].items[0]
         collection = self._published_collection(unit, si.collection.catalog)
         spec = self._variable_spec(src, unit["quantity"])
+        # Its values are in the declared output unit, and are served in it too
+        # until an operator chooses another.
+        spec["source_unit"] = spec["unit"] = self.output_source_unit(unit, resolved)
         out_var, _ = Variable.objects.get_or_create(
             collection=collection,
             slug=src.slug,
@@ -297,49 +295,24 @@ class ClimatologyRecipe(BaseRecipe):
         )
         return out_var
 
-    def _variable_spec(self, src, quantity: str) -> dict:
-        """Quantity-specific (name, unit, value_min, value_max) for the output."""
-        span = (src.value_max - src.value_min) / 2.0
-        if quantity == "value":
-            return {
-                "name": src.name,
-                "source_unit": src.source_unit,
-                "unit": src.unit,
-                "value_min": src.value_min,
-                "value_max": src.value_max,
-            }
-        if quantity == "anomaly":
-            return {
-                "name": f"{src.name} anomaly",
-                "source_unit": src.source_unit,
-                "unit": src.unit,
-                "value_min": -span,
-                "value_max": span,
-            }
-        if quantity == "relative_anomaly":
-            return {
-                "name": f"{src.name} relative anomaly",
-                "source_unit": self._dimensionless_unit(),
-                "unit": self._dimensionless_unit(),
-                "value_min": -1.0,
-                "value_max": 1.0,
-            }
-        if quantity == "trend":
-            return {
-                "name": f"{src.name} trend (per year)",
-                "source_unit": src.source_unit,
-                "unit": src.unit,
-                "value_min": -span,
-                "value_max": span,
-            }
-        raise ValueError(f"unknown quantity: {quantity!r}")
+    @staticmethod
+    def _source_variable(resolved):
+        src = next((a.variable for a in resolved["value"].assets if a.variable), None)
+        if src is None:
+            raise ValueError("ClimatologyRecipe: source staging asset has no Variable to mirror")
+        return src
 
     @staticmethod
-    def _dimensionless_unit():
-        from georiva.core.models import Unit
-
-        unit, _ = Unit.objects.get_or_create(
-            symbol="dimensionless",
-            defaults={"name": "Dimensionless"},
-        )
-        return unit
+    def _variable_spec(src, quantity: str) -> dict:
+        """Quantity-specific (name, value_min, value_max) for the output, in the
+        source unit like every stored number (ADR 0046 §3)."""
+        span = (src.value_max - src.value_min) / 2.0
+        if quantity == "value":
+            return {"name": src.name, "value_min": src.value_min, "value_max": src.value_max}
+        if quantity == "anomaly":
+            return {"name": f"{src.name} anomaly", "value_min": -span, "value_max": span}
+        if quantity == "relative_anomaly":
+            return {"name": f"{src.name} relative anomaly", "value_min": -1.0, "value_max": 1.0}
+        if quantity == "trend":
+            return {"name": f"{src.name} trend (per year)", "value_min": -span, "value_max": span}
+        raise ValueError(f"unknown quantity: {quantity!r}")

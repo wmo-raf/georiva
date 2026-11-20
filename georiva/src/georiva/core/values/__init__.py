@@ -35,6 +35,9 @@ in_unit="K")`` — refused with :class:`ConversionRefused` before anything is
 read when the source unit cannot reach it (ADR 0046 §11, ``units.py``). Bytes
 no Variable describes (an :class:`AssetLocation`, a :class:`Stored` key, a bare
 :class:`StoreSlice`) are read as they are, and refuse an ``in_unit``.
+``in_unit=values.SOURCE_UNIT`` reads any of them as they are held, in their
+source unit. A single read can name a unit of its own —
+``s.field(asset, in_unit="K")`` — as a recipe's inputs do (ADR 0046 §13).
 """
 
 from georiva.core.unit_utils import ConversionRefused
@@ -51,9 +54,10 @@ from .session import (
     window,
 )
 from .store import StepNotHeld, StoreDataNotPinned, StoreSlice, StoreUnreadable
-from .units import Conversion, conversion_for
+from .units import SOURCE_UNIT, Conversion, conversion_for
 
 __all__ = [
+    "SOURCE_UNIT",
     "Conversion",
     "ConversionRefused",
     "Field",

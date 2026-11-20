@@ -16,6 +16,9 @@ from georiva.core.storage.asset_location import AssetLocation
 from .store import OpenStores, StoreSlice, store_slice
 from .units import Conversion, Conversions
 
+#: A read in the unit its session reads in.
+_SESSION = object()
+
 #: Upstream reads in flight at once for one series. Each is a few small range
 #: requests; the wait is the upstream's latency, not our CPU.
 SERIES_READ_WORKERS = 8
@@ -84,6 +87,8 @@ class Session:
         #: The unit every value is returned in; ``None`` for each Variable's served unit.
         self.in_unit = in_unit
         self._conversions = Conversions(in_unit)
+        #: Conversions for reads that name a unit of their own, by that unit.
+        self._other_units: dict[str, Conversions] = {}
 
     @property
     def open_stores(self) -> int:
@@ -96,31 +101,32 @@ class Session:
 
     # ---- reads ---------------------------------------------------------------
 
-    def field(self, asset) -> Field:
-        """The asset's whole field."""
-        to = self._conversion(asset)
+    def field(self, asset, *, in_unit=_SESSION) -> Field:
+        """The asset's whole field. ``in_unit``, on this or any read, names a unit
+        for this read alone; by default it is the session's."""
+        to = self._conversion(asset, in_unit)
         with self._raster(asset) as src:
             return _read(src, to=to)
 
-    def window(self, asset, bbox: Sequence[float]) -> Field:
+    def window(self, asset, bbox: Sequence[float], *, in_unit=_SESSION) -> Field:
         """The cells under ``bbox`` — ``(west, south, east, north)`` in WGS84 —
         read by range: only the blocks under it are fetched."""
-        to = self._conversion(asset)
+        to = self._conversion(asset, in_unit)
         with self._raster(asset) as src:
             return _read(src, _window(src, _in_crs_of(src, bbox)), to=to)
 
-    def point(self, asset, lon: float, lat: float) -> float:
+    def point(self, asset, lon: float, lat: float, *, in_unit=_SESSION) -> float:
         """The value of the cell containing ``(lon, lat)``; NaN outside the field or on nodata."""
-        to = self._conversion(asset)
+        to = self._conversion(asset, in_unit)
         with self._raster(asset) as src:
             return _point(src, lon, lat, to)
 
-    def area(self, asset, geometry: dict, aggregation: str) -> float:
+    def area(self, asset, geometry: dict, aggregation: str, *, in_unit=_SESSION) -> float:
         """``aggregation`` over the cells whose centres fall inside a WGS84 GeoJSON
         ``geometry``; NaN where there are none with a value."""
         if aggregation not in AGGREGATIONS:
             raise ValueError(f"Unsupported aggregation {aggregation!r}. Choose from: {sorted(AGGREGATIONS)}")
-        to = self._conversion(asset)
+        to = self._conversion(asset, in_unit)
         with self._raster(asset) as src:
             return _area(src, geometry, aggregation, to)
 
@@ -131,6 +137,28 @@ class Session:
     def area_series(self, assets: Sequence, geometry: dict, aggregation: str) -> list[float]:
         """:meth:`area` of each asset, in the order given. A read that fails raises."""
         return self._each(assets, lambda asset: self.area(asset, geometry, aggregation))
+
+    def series(self, asset, *, in_unit=_SESSION):
+        """A multi-temporal file's values over its own time axis — a staged
+        NetCDF series — as a loaded xarray DataArray. The asset's Variable is the
+        file's data variable named by its slug, or the file's only one."""
+        import tempfile
+
+        import xarray as xr
+
+        to = self._conversion(asset, in_unit)
+        location = _location(asset)
+        if not isinstance(location, Stored):
+            raise TypeError(f"A series is read from a file in one of our buckets, not {asset!r}")
+        data = storage.bucket(location.bucket_type).read_bytes(location.key)
+        with tempfile.NamedTemporaryFile(suffix=".nc") as fh:
+            fh.write(data)
+            fh.flush()
+            with xr.open_dataset(fh.name) as dataset:
+                array = _data_variable(dataset, asset).load()
+        if not to.is_identity:
+            array = array * to.scale + to.offset
+        return array
 
     def virtual_dataset(self, manifest, *, internal: bool = True):
         """A Variable's virtual Zarr store as a lazy xarray Dataset — its local
@@ -159,10 +187,13 @@ class Session:
         with ThreadPoolExecutor(max_workers=min(SERIES_READ_WORKERS, len(assets))) as pool:
             return list(pool.map(read, assets))
 
-    def _conversion(self, asset) -> Conversion:
-        """How ``asset``'s raw values become values in the unit this session reads in."""
+    def _conversion(self, asset, in_unit=_SESSION) -> Conversion:
+        """How ``asset``'s raw values become values in the unit this read is in."""
         self._check_open()
-        return self._conversions.of(getattr(asset, "variable_id", None))
+        conversions = self._conversions
+        if in_unit is not _SESSION and in_unit != self.in_unit:
+            conversions = self._other_units.setdefault(in_unit, Conversions(in_unit))
+        return conversions.of(getattr(asset, "variable_id", None))
 
     def _raster(self, asset):
         self._check_open()
@@ -227,6 +258,17 @@ def _location(asset):
         # A StagingAsset: its href is always a key on the staging bucket.
         return Stored(BucketType.STAGING, href)
     raise TypeError(f"Cannot read values from {asset!r}")
+
+
+def _data_variable(dataset, asset):
+    """The data variable of ``dataset`` that ``asset``'s Variable names, or its only one."""
+    variable = getattr(asset, "variable", None)
+    if variable is not None and variable.slug in dataset.data_vars:
+        return dataset[variable.slug]
+    names = list(dataset.data_vars)
+    if len(names) != 1:
+        raise ValueError(f"Cannot tell which of {names} holds the values of {asset!r}")
+    return dataset[names[0]]
 
 
 def _values(src, raw: np.ndarray, to: Conversion) -> np.ndarray:
