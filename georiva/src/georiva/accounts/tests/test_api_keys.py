@@ -164,6 +164,7 @@ class ApiKeyAuthenticationTests(TestCase):
             collection=collection,
             name="Restricted",
             slug=PRIVATE_SLUG,
+            source_unit=unit,
             unit=unit,
             value_min=0,
             value_max=50,

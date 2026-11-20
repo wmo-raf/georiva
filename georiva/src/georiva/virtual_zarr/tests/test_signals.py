@@ -33,6 +33,7 @@ class AssetSignalTestCase(TestCase):
             collection=self.collection,
             slug="precipitation",
             name="Precipitation",
+            source_unit=unit,
             unit=unit,
             value_min=0,
             value_max=500,

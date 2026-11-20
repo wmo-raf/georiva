@@ -149,3 +149,78 @@ TEMPERATURE_UNITS = [
     "degreeR",
     "°R",
 ]
+
+
+class ConversionRefused(ValueError):
+    """A conversion a Variable may not be served through (ADR 0046 §4, §6).
+
+    ``str()`` of it is an operator-readable reason.
+    """
+
+
+#: How closely ``f(2)`` must match ``offset + 2·scale`` for a conversion to count as affine.
+_AFFINE_TOLERANCE = 1e-9
+
+
+def affine_conversion(source_symbol: str, served_symbol: str, *, water: bool = False) -> tuple[float, float]:
+    """``(scale, offset)`` such that ``served = raw·scale + offset`` (ADR 0046 §4).
+
+    Computed with pint as ``offset = f(0)`` and ``scale = f(1) − f(0)``, and
+    checked with ``f(2) = offset + 2·scale``. Refused — :class:`ConversionRefused`
+    — when the units are of different dimensions, when the conversion is not
+    affine (dBZ), when the scale is not positive, and when it is ``kg m-2 ↔ mm``
+    (or a rate of them) and ``water`` is not set. ``water`` enables the
+    ``precipitation`` context for this computation only.
+    """
+    if source_symbol == served_symbol:
+        return 1.0, 0.0
+    try:
+        source, served = ureg(source_symbol).units, ureg(served_symbol).units
+    except (pint.errors.PintError, AttributeError, TypeError, ValueError) as e:
+        raise ConversionRefused(f"'{source_symbol}' or '{served_symbol}' is not a unit pint knows ({e}).") from None
+
+    def f(x):
+        return float(ureg.Quantity(x, source).to(served).magnitude)
+
+    def at_0_1_2():
+        return f(0), f(1), f(2)
+
+    try:
+        if water:
+            with ureg.context("precipitation"):
+                at = at_0_1_2()
+        else:
+            at = at_0_1_2()
+    except pint.errors.DimensionalityError:
+        if not water and _converts_as_water(f):
+            raise ConversionRefused(
+                f"{source_symbol} → {served_symbol} holds only for water. "
+                "Set the water flag if this Variable's values are water."
+            ) from None
+        raise ConversionRefused(
+            f"Cannot convert from {source_symbol} to {served_symbol}: incompatible dimensions."
+        ) from None
+    except pint.errors.PintError as e:
+        raise ConversionRefused(f"Cannot convert from {source_symbol} to {served_symbol}: {e}.") from None
+
+    offset, scale = at[0], at[1] - at[0]
+    expected = offset + 2 * scale
+    if abs(at[2] - expected) > _AFFINE_TOLERANCE * max(1.0, abs(at[2]), abs(expected)):
+        raise ConversionRefused(
+            f"{source_symbol} → {served_symbol} is not a linear conversion (a scale and an offset), "
+            "so it cannot be served."
+        )
+    if not scale > 0:
+        raise ConversionRefused(
+            f"{source_symbol} → {served_symbol} has a scale of {scale:g}; only a positive scale can be served."
+        )
+    return scale, offset
+
+
+def _converts_as_water(f) -> bool:
+    try:
+        with ureg.context("precipitation"):
+            f(1)
+    except pint.errors.PintError:
+        return False
+    return True

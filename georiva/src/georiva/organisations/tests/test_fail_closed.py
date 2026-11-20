@@ -121,6 +121,7 @@ def build_org_tree(organisation, *, name):
         collection=collection,
         name=name,
         slug=SHARED_SLUG,
+        source_unit=unit,
         unit=unit,
         value_min=0,
         value_max=1,

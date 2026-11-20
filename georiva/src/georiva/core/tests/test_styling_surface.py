@@ -739,6 +739,7 @@ class DemotedCollectionFormTests(StylingSurfaceTestCase):
             collection=self.collection,
             name="Fresh",
             slug="fresh",
+            source_unit=self.variable.unit,
             unit=self.variable.unit,
         )
         self.assertEqual((variable.value_min, variable.value_max), (0.0, 1.0))
@@ -802,6 +803,7 @@ class PreviewItemChoiceTests(TestCase):
             collection=self.collection,
             name="Other",
             slug="other",
+            source_unit=self.variable.unit,
             unit=self.variable.unit,
             value_min=0,
             value_max=1,

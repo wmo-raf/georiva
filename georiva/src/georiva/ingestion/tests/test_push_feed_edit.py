@@ -128,15 +128,6 @@ class PushFeedEditTests(PushFeedEditBase):
         self.variable.refresh_from_db()
         self.assertEqual((self.variable.name, self.variable.source_long_name), ("Air temp", "2 metre temperature"))
 
-    def test_a_variable_with_no_incoming_unit_cannot_be_saved_until_it_has_one(self):
-        Variable.objects.filter(pk=self.variable.pk).update(source_unit=None)
-        self.assertEqual(self._post([self._row()]).status_code, 200)
-
-        response = self._post([self._row(incoming_unit_id=self.kelvin.pk)])
-        self.assertEqual(response.status_code, 302)
-        self.variable.refresh_from_db()
-        self.assertEqual(self.variable.source_unit, self.kelvin)
-
     def test_an_unconvertible_output_unit_is_refused(self):
         response = self._post([self._row(unit_id=self.metre.pk)])
         self.assertEqual(response.status_code, 200)
@@ -169,7 +160,9 @@ class PushFeedEditTests(PushFeedEditBase):
             organisation=self.feed.catalog.organisation, name="Other", slug="other", file_format="grib2"
         )
         coll = Collection.objects.create(catalog=other, name="C", slug="c")
-        foreign = Variable.objects.create(collection=coll, name="x", slug="x", unit=self.kelvin)
+        foreign = Variable.objects.create(
+            collection=coll, name="x", slug="x", source_unit=self.kelvin, unit=self.kelvin
+        )
         response = self._post([self._row(key=str(foreign.pk), value_min=0, value_max=5)])
         self.assertEqual(response.status_code, 200)
         foreign.refresh_from_db()
@@ -246,7 +239,7 @@ class DerivedVariableEditTests(PushFeedEditBase):
         direction = Variable.objects.get(slug="10-m-wind-direction")
         self.assertEqual(direction.transform_type, "vector_direction")
         self.assertEqual(direction.unit.name, "Degree")
-        self.assertIsNone(direction.source_unit)
+        self.assertEqual(direction.source_unit, direction.unit)
 
     def test_components_in_different_units_are_refused(self):
         Variable.objects.filter(slug="v10").update(source_unit=self.kmh)
@@ -257,41 +250,6 @@ class DerivedVariableEditTests(PushFeedEditBase):
         # The page may send nothing for it: both components already say what they carry.
         self._post(self._existing() + [self._new(incoming_symbol="")])
         self.assertEqual(Variable.objects.get(slug="10-m-wind-speed").source_unit, self.ms)
-
-    def test_components_with_no_stored_unit_need_one_given(self):
-        Variable.objects.filter(slug__in=("u10", "v10")).update(source_unit=None)
-        self.assertEqual(self._post(self._existing() + [self._new(incoming_symbol="")]).status_code, 200)
-
-        # Set once on the components themselves, and the derived variable can name its own.
-        rows = self._existing()
-        for row in rows:
-            row["incoming_unit_id"] = self.ms.pk
-        self.assertEqual(self._post(rows + [self._new()]).status_code, 302)
-
-    def test_components_with_no_stored_unit_are_assumed_to_be_in_their_label(self):
-        # Provisioned before conversion existed: nothing was ever converted, so the label is the truth.
-        Variable.objects.filter(slug__in=("u10", "v10")).update(source_unit=None)
-        rows = self._existing()
-        for row in rows:
-            row["incoming_unit_id"] = self.ms.pk
-        self._post(rows + [self._new(incoming_symbol="")])
-        self.assertEqual(Variable.objects.get(slug="10-m-wind-speed").source_unit, self.ms)
-
-    def test_assumed_components_in_different_labels_need_the_unit_given(self):
-        Variable.objects.filter(slug__in=("u10", "v10")).update(source_unit=None)
-        Variable.objects.filter(slug="v10").update(unit=self.kmh)
-        rows = [
-            self._row(key=str(v.pk), long_name=v.name, unit_id=v.unit_id, value_min=0, value_max=10)
-            | {"incoming_unit_id": v.unit_id}
-            for v in self.feed.variables()
-        ]
-        self.assertEqual(self._post(rows + [self._new(incoming_symbol="")]).status_code, 200)
-
-    def test_the_edit_page_offers_the_assumed_unit_of_an_unset_component(self):
-        Variable.objects.filter(slug="u10").update(source_unit=None)
-        options = {o["name"]: o for o in self.client.get(self.url).context["source_options"]}
-        self.assertEqual((options["u10"]["symbol"], options["u10"]["assumed"]), ("m/s", True))
-        self.assertEqual((options["v10"]["symbol"], options["v10"]["assumed"]), ("m/s", False))
 
     def test_the_same_component_twice_is_refused(self):
         row = self._new()

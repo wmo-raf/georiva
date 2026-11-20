@@ -43,6 +43,7 @@ def add_variable(collection, *, slug):
         collection=collection,
         name=slug,
         slug=slug,
+        source_unit=unit,
         unit=unit,
         value_min=0,
         value_max=1,

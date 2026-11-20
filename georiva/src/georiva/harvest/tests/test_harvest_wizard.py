@@ -247,7 +247,13 @@ class WizardSetsUpAFeedTests(WizardMixin, TestCase):
         )
         collection = Collection.objects.create(catalog=catalog, name="Tuned", slug="rainfall_chirps_monthly")
         tuned = Variable.objects.create(
-            collection=collection, slug="rainfall", name="Hand-tuned rain", unit=self.mm, value_min=0, value_max=50
+            collection=collection,
+            slug="rainfall",
+            name="Hand-tuned rain",
+            source_unit=self.mm,
+            unit=self.mm,
+            value_min=0,
+            value_max=50,
         )
         self.reach_step(5)
 

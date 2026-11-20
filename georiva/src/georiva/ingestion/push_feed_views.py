@@ -293,7 +293,8 @@ def _check_units(row, label, variable, direction):
 
     if direction:
         # Direction comes out of the extractor in degrees: one unit, nothing to convert.
-        return None, degree_unit(), None
+        degree = degree_unit()
+        return (variable.source_unit if variable else degree), degree, None
 
     unit = Unit.objects.filter(pk=row.get("unit_id")).first() if row.get("unit_id") else None
     if unit is None:

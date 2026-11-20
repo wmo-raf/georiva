@@ -97,7 +97,13 @@ class _Fixture(TestCase):
 
     def _variable(self, collection, slug):
         return Variable.objects.create(
-            collection=collection, slug=slug, name=slug, unit=self.unit_c, value_min=0, value_max=50
+            collection=collection,
+            slug=slug,
+            name=slug,
+            source_unit=self.unit_c,
+            unit=self.unit_c,
+            value_min=0,
+            value_max=50,
         )
 
     def _staging_item(self, when, checksum):

@@ -2,6 +2,7 @@ from .catalog import Catalog, Topic
 from .collection import Collection, visible_visibilities
 from .item import Asset, Item
 from .product_published import ProductPublished
+from .source_unit_corrected import SourceUnitCorrected
 from .town import Town
 from .units import Unit
 from .variable import Variable
@@ -20,5 +21,6 @@ __all__ = [
     "Item",
     "Asset",
     "ProductPublished",
+    "SourceUnitCorrected",
     "Town",
 ]

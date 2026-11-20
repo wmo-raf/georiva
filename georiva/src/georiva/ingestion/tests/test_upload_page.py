@@ -40,7 +40,9 @@ def _geotiff_setup():
         is_forecast=False,
         valid_time_format="YYYYMMDD",
     )
-    variable = Variable.objects.create(collection=collection, name="NDVI", slug="band_1", unit=_unit())
+    variable = Variable.objects.create(
+        collection=collection, name="NDVI", slug="band_1", source_unit=_unit(), unit=_unit()
+    )
     return catalog, collection, config, variable
 
 
@@ -56,7 +58,9 @@ def _grib_setup():
         is_forecast=True,
         valid_time_format="CONTENT",
     )
-    variable = Variable.objects.create(collection=collection, name="2m temperature", slug="2t", unit=_unit())
+    variable = Variable.objects.create(
+        collection=collection, name="2m temperature", slug="2t", source_unit=_unit(), unit=_unit()
+    )
     return catalog, collection, config, variable
 
 

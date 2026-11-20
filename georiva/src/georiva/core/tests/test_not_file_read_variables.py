@@ -52,7 +52,7 @@ class NotFileReadFixture:
         )
 
     def sourceless(self, collection, slug="tas"):
-        return Variable(collection=collection, name=slug, slug=slug, unit=self.unit)
+        return Variable(collection=collection, name=slug, slug=slug, source_unit=self.unit, unit=self.unit)
 
 
 class ReadsVariablesFromFilesTests(NotFileReadFixture, TestCase):
@@ -140,6 +140,7 @@ class CollectionEditorTests(NotFileReadFixture, TestCase):
             "slug": variable.slug if variable else slug,
             "is_active": "on",
             "description": "",
+            "source_unit": self.unit.pk,
             "unit": self.unit.pk,
         }
 
@@ -150,7 +151,9 @@ class CollectionEditorTests(NotFileReadFixture, TestCase):
         return " ".join([str(form.errors)] + [str(row.errors) for row in form.formsets["variables"].forms])
 
     def test_a_harvested_collection_saves_with_its_sourceless_variable(self):
-        variable = Variable.objects.create(collection=self.harvested, name="tas", slug="tas", unit=self.unit)
+        variable = Variable.objects.create(
+            collection=self.harvested, name="tas", slug="tas", source_unit=self.unit, unit=self.unit
+        )
 
         response = self.client.post(self.edit_url(self.harvested), self.posted(self.harvested, [self.row(variable)]))
 
@@ -165,7 +168,9 @@ class CollectionEditorTests(NotFileReadFixture, TestCase):
         self.assertTrue(self.harvested.variables.filter(slug="pr").exists())
 
     def test_a_file_read_collection_still_refuses_a_sourceless_variable(self):
-        variable = Variable.objects.create(collection=self.file_read, name="tas", slug="tas", unit=self.unit)
+        variable = Variable.objects.create(
+            collection=self.file_read, name="tas", slug="tas", source_unit=self.unit, unit=self.unit
+        )
         row = self.row(variable) | {"transform_type": Variable.TransformType.PASSTHROUGH, "source_unit": ""}
         row["sources"] = {"count": 0}  # an empty stream
 
@@ -176,7 +181,9 @@ class CollectionEditorTests(NotFileReadFixture, TestCase):
 
     def test_the_file_reading_fields_are_not_offered_on_a_harvested_or_derived_collection(self):
         for collection in (self.harvested, self.derived):
-            Variable.objects.create(collection=collection, name="tas", slug="tas", unit=self.unit)
+            Variable.objects.create(
+                collection=collection, name="tas", slug="tas", source_unit=self.unit, unit=self.unit
+            )
             with self.subTest(collection=collection.slug):
                 form = self.client.get(self.edit_url(collection)).context["form"]
                 formset = form.formsets["variables"]
@@ -185,7 +192,9 @@ class CollectionEditorTests(NotFileReadFixture, TestCase):
                         self.assertNotIn(name, child.fields)
 
     def test_they_are_still_offered_on_a_file_read_collection(self):
-        Variable.objects.create(collection=self.file_read, name="tas", slug="tas", unit=self.unit)
+        Variable.objects.create(
+            collection=self.file_read, name="tas", slug="tas", source_unit=self.unit, unit=self.unit
+        )
 
         form = self.client.get(self.edit_url(self.file_read)).context["form"]
 

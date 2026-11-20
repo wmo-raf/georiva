@@ -11,6 +11,7 @@ from wagtail.fields import StreamField
 from wagtail.models import Orderable
 
 from georiva.core.panels import StylingSummaryPanel
+from georiva.core.unit_utils import ConversionRefused, affine_conversion
 
 
 class SourceBlock(StructBlock):
@@ -133,18 +134,32 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     source_unit = models.ForeignKey(
         "georivacore.Unit",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="+",
-        help_text="Units of the raw data as it comes from the source file, e.g. Kelvin, Pa, m/s.",
+        help_text=(
+            "The unit this variable's data is stored in, as the source produces it, e.g. Kelvin, Pa, m/s. "
+            "Locked once the variable has data; a wrong label is fixed with Correct source unit."
+        ),
     )
 
     unit = models.ForeignKey(
         "georivacore.Unit",
         on_delete=models.PROTECT,
         related_name="+",
-        help_text="Units of this variable's output after any conversion.",
+        help_text="The unit this variable is served in. Changing it rewrites no data.",
+    )
+
+    # The positive affine conversion source_unit → unit (ADR 0046 §5): served =
+    # raw·scale + offset. Recomputed on every save, so readers outside Django —
+    # Martin's SQL, tile-config's clients — convert by arithmetic alone.
+    scale = models.FloatField(default=1.0, editable=False)
+    offset = models.FloatField(default=0.0, editable=False)
+    water = models.BooleanField(
+        default=False,
+        help_text=(
+            "This variable's values are water, so kg/m² and mm (and their rates) are the same quantity. "
+            "Leave unset for a column load of anything else, such as dust or ozone."
+        ),
     )
 
     # Visualization. The 0–1 defaults are the seeding fallback (ADR 0022): a
@@ -205,6 +220,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         FieldPanel("description"),
         FieldPanel("source_unit"),
         FieldPanel("unit"),
+        FieldPanel("water"),
         # Range and styling are read-only here (issue #323): the Styling
         # surface is the one place that tunes them (ADR 0022).
         StylingSummaryPanel(heading="Styling"),
@@ -252,12 +268,13 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         except ValidationError as e:
             errors.update(e.error_dict)
 
-        # Unit conversion compatibility
-        if self.source_unit and self.unit and self.source_unit != self.unit:
+        if self.source_unit_id is None:
+            errors["source_unit"] = _("Every variable states the unit its data is stored in.")
+        elif self.unit_id is not None:
             try:
-                self.source_unit.pint_unit.to(self.unit.pint_unit)
-            except Exception:
-                errors["unit"] = f"Cannot convert from {self.source_unit} to {self.unit} — incompatible dimensions."
+                self.conversion()
+            except ConversionRefused as e:
+                errors["unit"] = str(e)
 
         # Sources / transform consistency — only for a Variable read out of
         # ingested files; a harvested or recipe-written one has no bands to name.
@@ -266,6 +283,23 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
         if errors:
             raise ValidationError(errors)
+
+    def conversion(self) -> tuple[float, float]:
+        """``(scale, offset)`` from ``source_unit`` to ``unit``, or :class:`ConversionRefused`."""
+        return affine_conversion(self.source_unit.symbol, self.unit.symbol, water=self.water)
+
+    def save(self, *args, **kwargs):
+        """Recompute ``scale`` and ``offset`` (ADR 0046 §5). A conversion that
+        is refused is never stored: the save raises, as ``clean()`` would."""
+        if self.source_unit_id is not None and self.unit_id is not None:
+            try:
+                self.scale, self.offset = self.conversion()
+            except ConversionRefused as e:
+                raise ValidationError({"unit": str(e)}) from None
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and {"source_unit", "unit", "water"} & set(update_fields):
+            kwargs["update_fields"] = {*update_fields, "scale", "offset"}
+        super().save(*args, **kwargs)
 
     def _reads_from_files(self) -> bool:
         try:

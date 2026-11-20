@@ -39,6 +39,7 @@ class ResolveDeclaredInputsTests(TestCase):
             collection=self.pub_col,
             slug="normals",
             name="Normals",
+            source_unit=self.unit_dim,
             unit=self.unit_dim,
             value_min=0,
             value_max=2000,

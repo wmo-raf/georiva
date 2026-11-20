@@ -124,7 +124,13 @@ class MachinePlaneAddressTests(TestCase):
         tree = self.kenya_tree
         u = tree["variable"]
         v = Variable.objects.create(
-            collection=tree["collection"], name="V wind", slug="v10", unit=u.unit, value_min=-20, value_max=5
+            collection=tree["collection"],
+            name="V wind",
+            slug="v10",
+            source_unit=u.unit,
+            unit=u.unit,
+            value_min=-20,
+            value_max=5,
         )
         return tree["item"], u, v
 

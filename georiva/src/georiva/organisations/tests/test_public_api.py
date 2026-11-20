@@ -57,6 +57,7 @@ def build_uganda_only_tree(organisation):
         collection=collection,
         name="Uganda Only",
         slug=UGANDA_ONLY_SLUG,
+        source_unit=unit,
         unit=unit,
         value_min=0,
         value_max=1,

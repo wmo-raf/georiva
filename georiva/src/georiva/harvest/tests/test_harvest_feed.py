@@ -58,7 +58,7 @@ class HarvestFeedConfigurationTests(HarvestFeedMixin, TestCase):
         elsewhere = Collection.objects.create(catalog=self.feed.catalog, name="Elsewhere", slug="elsewhere")
         unit, _ = Unit.objects.get_or_create(name="Millimetre", symbol="mm")
         stranger = Variable.objects.create(
-            collection=elsewhere, slug="rain", name="Rain", unit=unit, value_min=0, value_max=1
+            collection=elsewhere, slug="rain", name="Rain", source_unit=unit, unit=unit, value_min=0, value_max=1
         )
 
         with self.assertRaises(ValidationError) as raised:

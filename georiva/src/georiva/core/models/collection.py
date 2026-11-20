@@ -34,11 +34,13 @@ class CollectionForm(WagtailAdminModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         variables = self.formsets.get("variables")
-        if variables is not None and not self.instance.reads_variables_from_files:
+        if variables is not None:
             # Swapped before the formset builds its forms (`forms` and
             # `empty_form` are lazy), so every row — and the blank row
             # "Add Variables" clones — is built from it.
-            variables.form = _not_file_read_variable_form(variables.form, self.instance)
+            variables.form = _source_unit_locking_form(variables.form)
+            if not self.instance.reads_variables_from_files:
+                variables.form = _not_file_read_variable_form(variables.form, self.instance)
 
     def clean_boundary_stats_levels(self):
         # Convert list of strings → list of ints for the ArrayField
@@ -46,7 +48,34 @@ class CollectionForm(WagtailAdminModelForm):
 
 
 #: The Variable fields that only say how to read a band out of an ingested file.
-FILE_READ_VARIABLE_FIELDS = ("sources", "transform_type", "source_unit")
+#: ``source_unit`` is not one: every Variable says what its bytes hold (ADR 0046 §8).
+FILE_READ_VARIABLE_FIELDS = ("sources", "transform_type")
+
+
+def _source_unit_locking_form(form_class):
+    """`form_class` with ``source_unit`` read-only on a Variable that has an
+    asset (ADR 0046 §8): it states what bytes that already exist hold, so only
+    the Correct source unit action changes it. A disabled field ignores what is
+    posted for it and keeps the stored value."""
+
+    class SourceUnitLockingForm(form_class):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            field = self.fields.get("source_unit")
+            variable = self.instance
+            if field is None or variable.pk is None or not variable.assets.exists():
+                return
+            from django.urls import reverse
+            from django.utils.html import format_html
+
+            field.disabled = True
+            field.help_text = format_html(
+                "Locked: this variable has data stored in this unit. "
+                'If the label is wrong, use <a href="{}">Correct source unit</a>.',
+                reverse("variable_correct_source_unit", args=[variable.collection_id, variable.pk]),
+            )
+
+    return SourceUnitLockingForm
 
 
 def _not_file_read_variable_form(form_class, collection):

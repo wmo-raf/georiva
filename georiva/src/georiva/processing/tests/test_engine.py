@@ -47,6 +47,7 @@ class _PromotionFixture(TestCase):
             collection=self.pub_col,
             slug="tas",
             name="tas",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=50,
