@@ -123,6 +123,14 @@ the store, and Titiler draws maps by reading the store itself.**
    3). The Mirror is authoritative within that window as before, so rows of a run that has aged out are removed by
    the same rule that removes rows gone upstream. Analysis stores, which have no runs, keep the fixed window.
 
+   Removal is not atomic per run, and that is accepted. The Mirror deletes an aged-out run's assets in batches,
+   each its own transaction, then the Items left empty, then forgets the run; a reader during that harvest sees an
+   old run still recorded as closed, with all its Items but no assets on its earliest steps. Nothing that publishes
+   reads an aged-out run — a run is published when it closes, and the latest complete run is never the one ageing
+   out — so the cost is a few minutes of a half-emptied old run in run listings, STAC and tiles. Removing a run
+   whole (forget it first, then delete its Items run by run, the assets going with them) is the fix if something
+   ever reads old runs while a harvest is under way.
+
 8. **Only plain fields on a latitude/longitude grid can be mapped.** An array is offered when its dimensions are
    exactly run, step, latitude and longitude — or time, latitude and longitude. Arrays with levels, ensemble members
    or statistics, and projected grids, are listed by the wizard as not yet supported, each with its reason. The
