@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,6 +12,8 @@ from affine import Affine
 
 from georiva.core.storage import BucketType, storage
 from georiva.core.storage.asset_location import AssetLocation
+
+from .store import OpenStores, StoreSlice, store_slice
 
 #: Upstream reads in flight at once for one series. Each is a few small range
 #: requests; the wait is the upstream's latency, not our CPU.
@@ -69,13 +71,24 @@ class Field:
 
 
 class Session:
-    """One batch of reads. Use :func:`session`, which ends it."""
+    """One batch of reads. Use :func:`session`, which ends it.
+
+    It holds the stores it opened, each at the snapshot it was opened on, and
+    the fields it decoded from them, until it ends (ADR 0046 §12).
+    """
 
     def __init__(self):
         self._open = True
+        self._stores = OpenStores()
+
+    @property
+    def open_stores(self) -> int:
+        """How many Upstream stores this session holds open."""
+        return len(self._stores)
 
     def close(self) -> None:
         self._open = False
+        self._stores.close()
 
     # ---- reads ---------------------------------------------------------------
 
@@ -130,7 +143,10 @@ class Session:
 
     def _raster(self, asset):
         self._check_open()
-        return _location(asset).open_raster()
+        location = _location(asset)
+        if isinstance(location, StoreSlice):
+            return nullcontext(self._stores.source(location))
+        return location.open_raster()
 
     def _check_open(self) -> None:
         if not self._open:
@@ -171,12 +187,13 @@ def area(asset, geometry: dict, aggregation: str) -> float:
 
 
 def _location(asset):
-    """Where the bytes of whatever was asked for are."""
-    if isinstance(asset, AssetLocation | Stored):
+    """Where the bytes of whatever was asked for are: a raster to open, or a
+    Store asset's field (:class:`StoreSlice`)."""
+    if isinstance(asset, AssetLocation | Stored | StoreSlice):
         return asset
     location = getattr(type(asset), "location", None)
     if location is not None:
-        return asset.location
+        return store_slice(asset) if asset.location.is_store else asset.location
     href = getattr(asset, "href", None)
     if href:
         # A StagingAsset: its href is always a key on the staging bucket.

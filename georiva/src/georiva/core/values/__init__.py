@@ -23,7 +23,10 @@ georeferencing (:class:`Field`).
 What is read: a core ``Asset`` or its :class:`AssetLocation` — a local COG,
 read by range from the assets bucket, or a Remote COG, read by range from its
 href — a ``StagingAsset`` (a key on the staging bucket), or any object in any
-bucket named as :class:`Stored`. A Store asset is not read here yet.
+bucket named as :class:`Stored`. A Store asset — or a :class:`StoreSlice`, the
+field it names — is read from its Upstream store, opened with its harvest feed's
+Pinned locations only, once per session and at one snapshot for the session's
+life (``store.py``).
 """
 
 from .session import (
@@ -37,11 +40,16 @@ from .session import (
     session,
     window,
 )
+from .store import StepNotHeld, StoreDataNotPinned, StoreSlice, StoreUnreadable
 
 __all__ = [
     "Field",
     "Session",
     "SessionClosed",
+    "StepNotHeld",
+    "StoreDataNotPinned",
+    "StoreSlice",
+    "StoreUnreadable",
     "Stored",
     "area",
     "field",

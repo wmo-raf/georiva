@@ -40,7 +40,9 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   remote_assets.py (where Titiler finds a Remote asset, ADR 0043, or a Store
 │   │                         #   asset's store, array and pins, ADR 0044 §9)
 │   ├── values/               # What values an asset holds (ADR 0046 §10): `values.session()` reads a field,
-│   │                         #   window, point or series of a local or Remote COG, north-up float32 / NaN.
+│   │                         #   window, point or series of a local or Remote COG, north-up float32 / NaN;
+│   │                         #   store.py reads a Store asset: its store opened once per session at one
+│   │                         #   snapshot, with its feed's Pinned locations only (ADR 0044 §11, ADR 0046 §12).
 │   │                         #   Every value reader goes through it; core/tests/test_values_guard.py fails
 │   │                         #   any other rasterio.open / xarray.open_* / read_bytes outside its allow-list
 │   ├── derived_products/     # The derived-product contract (ADR 0008/0009)
