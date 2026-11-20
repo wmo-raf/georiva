@@ -39,6 +39,10 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   addresses.py, auth_view.py, config_view.py, palette_cache.py,
 │   │                         #   remote_assets.py (where Titiler finds a Remote asset, ADR 0043, or a Store
 │   │                         #   asset's store, array and pins, ADR 0044 §9)
+│   ├── values/               # What values an asset holds (ADR 0046 §10): `values.session()` reads a field,
+│   │                         #   window, point or series of a local or Remote COG, north-up float32 / NaN.
+│   │                         #   Every value reader goes through it; core/tests/test_values_guard.py fails
+│   │                         #   any other rasterio.open / xarray.open_* / read_bytes outside its allow-list
 │   ├── derived_products/     # The derived-product contract (ADR 0008/0009)
 │   │                         #   definitions.py, chain.py
 │   ├── views/                # Wagtail admin surface: admin.py, viewsets.py,
@@ -93,7 +97,7 @@ georiva/src/georiva/          # Main Django application
 │   ├── registry.py           # RecipeRegistry (decorator-based registration)
 │   └── recipes/              # climatology.py, promotion.py
 ├── geoprocessing/            # Pure compute library — no Django, no storage, no request layer
-│                             #   algebra.py, calendar.py, regrid.py, sampling.py, temporal.py, zonal.py
+│                             #   algebra.py, calendar.py, regrid.py, temporal.py, zonal.py
 ├── organisations/            # Multi-tenancy (ADR 0011–0018)
 │   ├── ownership.py          # scope_rows / belongs_to_active_org — the tenancy choke point
 │   ├── access.py             # may_see_private, require_active_org

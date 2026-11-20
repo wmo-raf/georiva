@@ -31,11 +31,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-#: Upstream reads in flight at once for one request. Each is a few small range
-#: requests; the wait is the upstream's latency, not our CPU.
-REMOTE_READ_WORKERS = 8
-
-
 class ManifestNotReady(Exception):
     """Raised when the VirtualZarrManifest for a variable is not READY."""
 
@@ -108,12 +103,10 @@ class TimeseriesService:
         ManifestNotReady
             If the variable has no READY manifest.
         """
-        from georiva.geoprocessing.sampling import point_value
-
         logger.debug("Point query: %s @ (%.4f, %.4f)", variable.slug, lat, lon)
 
-        def from_store():
-            da = self._open_dataset(variable)[variable.slug]
+        def from_store(session):
+            da = self._open_dataset(variable, session)[variable.slug]
             da = self._filter_time(da, time_start, time_end)
             return da.sel(lat=lat, lon=lon, method="nearest").load()
 
@@ -123,7 +116,7 @@ class TimeseriesService:
             time_end,
             name=variable.slug,
             from_store=from_store,
-            from_raster=lambda src: point_value(src, lon, lat),
+            from_remote=lambda session, locations: session.point_series(locations, lon, lat),
         )
 
     def area(
@@ -172,10 +165,8 @@ class TimeseriesService:
         if aggregation not in supported:
             raise ValueError(f"Unsupported aggregation {aggregation!r}. Choose from: {sorted(supported)}")
 
-        from georiva.geoprocessing.sampling import area_value
-
-        def from_store():
-            da = self._open_dataset(variable)[variable.slug]
+        def from_store(session):
+            da = self._open_dataset(variable, session)[variable.slug]
             da = self._filter_time(da, time_start, time_end)
 
             # Bbox subset, then load: only the COG tiles intersecting the
@@ -198,24 +189,26 @@ class TimeseriesService:
             time_end,
             name=f"{variable.slug}_{aggregation}",
             from_store=from_store,
-            from_raster=lambda src: area_value(src, geometry, aggregation),
+            from_remote=lambda session, locations: session.area_series(locations, geometry, aggregation),
         )
 
     # -------------------------------------------------------------------------
     # Private helpers
     # -------------------------------------------------------------------------
 
-    def _series(self, variable, time_start, time_end, *, name, from_store, from_raster) -> pd.Series:
+    def _series(self, variable, time_start, time_end, *, name, from_store, from_remote) -> pd.Series:
         """One series over the range: the virtual store's timesteps and the
-        Remote assets', joined in time order.
+        Remote assets', joined in time order, all read in one reading session
+        (ADR 0046 §12).
 
         ``from_store`` answers a 1-D time DataArray from the Variable's virtual
-        store; ``from_raster`` answers one value from one open raster. The store
+        store; ``from_remote`` answers one value per Remote asset. The store
         is opened whenever there is something local in the range to read from
         it — and always for a Variable with no Remote asset at all, which keeps a
         missing manifest the error it has always been. A Variable that does have
         Remote assets and nothing of either kind in the range answers empty.
         """
+        from georiva.core import values
         from georiva.core.models import Asset
         from georiva.core.storage.asset_location import remote_q, store_q
 
@@ -233,10 +226,11 @@ class TimeseriesService:
         remote = self._remote_assets(variable, time_start, time_end)
         has_remote = bool(remote) or self._assets(variable, None, None).filter(remote_q()).exists()
         parts = []
-        if not has_remote or self._local_assets(variable, time_start, time_end).exists():
-            parts.append(self._to_series(from_store(), name))
-        if remote:
-            parts.append(self._remote_series(remote, from_raster, name))
+        with values.session() as session:
+            if not has_remote or self._local_assets(variable, time_start, time_end).exists():
+                parts.append(self._to_series(from_store(session), name))
+            if remote:
+                parts.append(self._remote_series(remote, from_remote(session, [loc for _, loc in remote]), name))
         if not parts:
             return pd.Series([], index=pd.DatetimeIndex([]), name=name, dtype="float64")
         if len(parts) == 1:
@@ -285,25 +279,16 @@ class TimeseriesService:
         return list({time: (time, AssetLocation(href)) for time, href in rows}.values())
 
     @staticmethod
-    def _remote_series(remote: list, from_raster, name: str) -> pd.Series:
-        """Read each Remote asset by range and gather the values into a series.
+    def _remote_series(remote: list, read: list[float], name: str) -> pd.Series:
+        """The values read from each Remote asset, by range, as a series.
 
         A read that fails raises, and fails the request: nothing is marked,
         retried or repaired here (ADR 0043 §5).
         """
-        from concurrent.futures import ThreadPoolExecutor
-
-        def read(location):
-            with location.open_raster() as src:
-                return from_raster(src)
-
-        with ThreadPoolExecutor(max_workers=min(REMOTE_READ_WORKERS, len(remote))) as pool:
-            values = list(pool.map(read, [location for _, location in remote]))
-
         index = pd.DatetimeIndex([pd.Timestamp(time).tz_convert("UTC").tz_localize(None) for time, _ in remote])
-        return pd.Series(values, index=index, name=name, dtype="float64").dropna()
+        return pd.Series(read, index=index, name=name, dtype="float64").dropna()
 
-    def _open_dataset(self, variable: Variable):
+    def _open_dataset(self, variable: Variable, session):
         """
         Open the variable's virtual Zarr (Icechunk) repo as a lazy xarray Dataset.
 
@@ -323,7 +308,7 @@ class TimeseriesService:
                 f"--variable {variable.slug}"
             ) from None
 
-        return manifest.open_dataset(internal=self._internal, chunks={})
+        return session.virtual_dataset(manifest, internal=self._internal)
 
     def _filter_time(self, da, time_start, time_end):
         """Apply an optional time range slice to a DataArray."""

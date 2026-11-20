@@ -1,0 +1,27 @@
+# Run with `uvx ruff@0.15.20 check .` (the version GeoRiva core pins).
+line-length = 120
+target-version = "py312"
+extend-exclude = ["**/migrations/**"]
+
+[lint]
+select = ["E", "W", "F", "I", "UP", "B", "TID251"]
+
+# Values are read through GeoRiva core's read module, never by opening raster
+# bytes here (ADR 0046 §19-20): `from georiva.core import values`, then
+# `with values.session() as s:` and `s.field(asset)`, `s.window(asset, bbox)`,
+# `s.point(asset, lon, lat)` and their series. A plugin that publishes to an
+# outside contract passes `in_unit` on every read once core offers it.
+#
+# A module of this plugin that handles bytes and not values — a fetcher that
+# writes source files, a format decoder — may be exempted below under
+# [lint.per-file-ignores] with `"src/<module>/fetch.py" = ["TID251"]`, and a
+# comment saying why. Ruff cannot see a call on an object, so reading a GeoRiva
+# bucket's `read_bytes(key)` is banned by review rather than by this rule.
+[lint.flake8-tidy-imports.banned-api]
+"rasterio.open".msg = "Read values through georiva.core.values (ADR 0046), not rasterio.open."
+"xarray.open_dataset".msg = "Read values through georiva.core.values (ADR 0046), not xarray.open_dataset."
+"xarray.open_dataarray".msg = "Read values through georiva.core.values (ADR 0046), not xarray.open_dataarray."
+"xarray.open_mfdataset".msg = "Read values through georiva.core.values (ADR 0046), not xarray.open_mfdataset."
+"xarray.open_zarr".msg = "Read values through georiva.core.values (ADR 0046), not xarray.open_zarr."
+"xarray.open_datatree".msg = "Read values through georiva.core.values (ADR 0046), not xarray.open_datatree."
+"rioxarray.open_rasterio".msg = "Read values through georiva.core.values (ADR 0046), not rioxarray.open_rasterio."
