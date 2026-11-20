@@ -286,7 +286,9 @@ def affine_conversion(source_symbol: str, served_symbol: str, *, water: bool = F
         raise ConversionRefused(
             f"{source_symbol} → {served_symbol} has a scale of {scale:g}; only a positive scale can be served."
         )
-    return Conversion(scale, offset, served_symbol)
+    # Rounded where it is made, so every reader — the read module, Titiler,
+    # Martin's SQL, STAC and CF — gets 1.8 and 32 rather than 1.7999999999999972.
+    return Conversion(significant(scale), significant(offset), served_symbol)
 
 
 def _converts_as_water(f) -> bool:

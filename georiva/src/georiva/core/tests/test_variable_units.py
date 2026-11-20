@@ -65,6 +65,13 @@ class ScaleAndOffsetTests(VariableUnitsFixture, TestCase):
         self.assertAlmostEqual(variable.scale, 1.0)
         self.assertAlmostEqual(variable.offset, -273.15)
 
+    def test_scale_and_offset_carry_no_float_dust(self):
+        # pint gives 1.7999999999999972 and 31.999999999999936 for °C → °F; every
+        # reader applies these numbers, so they are stored as the conversion is.
+        variable = self.saved("degC", "degF")
+
+        self.assertEqual((variable.scale, variable.offset), (1.8, 32.0))
+
     def test_pascal_served_in_hectopascal(self):
         variable = self.saved("Pa", "hPa")
 
