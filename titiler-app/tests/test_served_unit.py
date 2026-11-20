@@ -93,3 +93,50 @@ class TestNumbersAreServed:
 
         assert response.status_code == 200, response.text
         assert 250.0 <= response.json()["values"][0] <= 300.0
+
+
+class TestStatisticsAreServed:
+    """Statistics are numbers that leave as numbers (ADR 0046 §15): of the
+    values, not of the colours they are drawn with, in the served unit."""
+
+    def statistics(self, client, variable):
+        response = client.get(f"{route(variable)}/statistics", params={"time": TIME})
+        assert response.status_code == 200, response.text
+        [band] = response.json().values()
+        return band
+
+    def test_statistics_are_of_the_values_in_the_served_unit_and_name_it(self, client, both_units):
+        kelvin = self.statistics(client, "kelvin")
+        celsius = self.statistics(client, "celsius")
+
+        assert kelvin["min"] == pytest.approx(250.0, abs=0.1)
+        assert kelvin["max"] == pytest.approx(300.0, abs=0.1)
+        for key in ("min", "max", "mean", "median"):
+            assert celsius[key] == pytest.approx(kelvin[key] - 273.15, abs=1e-3), key
+        # A spread is scaled, never offset; a sum gains the offset once per value.
+        assert celsius["std"] == pytest.approx(kelvin["std"], abs=1e-6)
+        assert celsius["sum"] == pytest.approx(kelvin["sum"] - 273.15 * kelvin["count"], rel=1e-6)
+        assert celsius["count"] == kelvin["count"]
+        assert celsius["histogram"][1][0] == pytest.approx(kelvin["histogram"][1][0] - 273.15, abs=1e-3)
+        assert celsius["unit"] == "degC"
+
+    def test_statistics_of_a_feature_are_in_the_served_unit(self, client, both_units):
+        feature = {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5], [0, 0]]]},
+        }
+        answers = {}
+        for variable in SERVED_IN:
+            response = client.post(f"{route(variable)}/statistics", params={"time": TIME}, json=feature)
+            assert response.status_code == 200, response.text
+            [answers[variable]] = response.json()["properties"]["statistics"].values()
+
+        assert answers["celsius"]["mean"] == pytest.approx(answers["kelvin"]["mean"] - 273.15, abs=1e-3)
+        assert answers["celsius"]["unit"] == "degC"
+
+    def test_info_names_the_served_unit(self, client, both_units):
+        response = client.get(f"{route('celsius')}/info", params={"time": TIME})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["unit"] == "degC"

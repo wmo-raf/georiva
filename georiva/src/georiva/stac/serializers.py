@@ -134,9 +134,7 @@ class STACAssetSerializer(serializers.Serializer):
                     "minimum": variable.served(instance.stats_min),
                     "maximum": variable.served(instance.stats_max),
                     "mean": variable.served(instance.stats_mean),
-                    "stddev": None
-                    if instance.stats_std is None
-                    else float(f"{instance.stats_std * abs(variable.scale):.12g}"),
+                    "stddev": None if instance.stats_std is None else variable.served_spread(instance.stats_std),
                 }
             data["raster:bands"] = [band]
 
@@ -529,7 +527,8 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         summaries = {
             "georiva:variable": obj.slug,
             "georiva:units": obj.unit.symbol if obj.unit else "",
-            "georiva:value_range": [obj.value_min, obj.value_max],
+            # Stored in the source unit, served beside georiva:units (ADR 0046 §15).
+            "georiva:value_range": list(obj.served_range),
             "georiva:transform": obj.transform_type,
         }
 

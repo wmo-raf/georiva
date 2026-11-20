@@ -17,7 +17,7 @@ def item_preview(request, item_id):
         {"url": None, "label": f"{item.collection.name} · {item.time:%Y-%m-%d %H:%M}"},
     ]
 
-    assets = item.assets.all()
+    assets = item.assets.select_related("variable__unit")
 
     # The map texture is derived on demand by Titiler at the variable's
     # current render range (ADR 0021) — no stored visual asset — from the COG,
@@ -25,6 +25,15 @@ def item_preview(request, item_id):
     for asset in assets:
         asset.texture_url = titiler_encoded_preview_url(item, asset.variable) if asset.is_drawable else ""
         asset.render_contract = render_contract(asset.variable)
+        # Statistics are stored in the source unit and shown served (ADR 0046 §15).
+        variable = asset.variable
+        asset.served_unit = variable.unit.symbol
+        asset.served_stats = {
+            "min": variable.served(asset.stats_min),
+            "max": variable.served(asset.stats_max),
+            "mean": variable.served(asset.stats_mean),
+            "std": variable.served_spread(asset.stats_std),
+        }
 
     context = {
         "breadcrumbs_items": breadcrumbs_items,

@@ -344,6 +344,13 @@ class STACRawBytesDescribedTests(TestCase):
         # A spread has no offset: 4 kelvins apart are 4 degrees Celsius apart.
         self.assertAlmostEqual(statistics["stddev"], 4.0)
 
+    def test_the_collections_value_range_is_in_the_unit_it_names(self):
+        """A number beside a served label is served (ADR 0046 §15)."""
+        response = self.client.get(reverse("stac:collection-detail", args=["era5", "t2m", "t2m"]))
+        summaries = response.json()["summaries"]
+        self.assertEqual(summaries["georiva:units"], "°C")
+        self.assertEqual(summaries["georiva:value_range"], [-43.15, 56.85])
+
     def test_an_unconverted_variable_says_its_bytes_need_no_conversion(self):
         self.variable.unit = self.variable.source_unit
         self.variable.save()
