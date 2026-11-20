@@ -14,6 +14,7 @@ from django_celery_beat.models import IntervalSchedule
 from georiva.config.celery import app
 from georiva.core.models import Asset, Item
 from georiva.core.storage.asset_location import local_q
+from georiva.core.values import conversion_for
 from georiva.events.tasks import EntryTask, ReadSideTask
 from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 from georiva.virtual_zarr.classify import BuildMode, SourceRow, classify
@@ -313,7 +314,10 @@ def _run_build(
     else:
         repo = open_repo(repo_path, create=True)
 
-    plan = classify(committed, rows)
+    # The raw bytes, described in the served unit (ADR 0046 §18). A change to
+    # it rebuilds the manifest; the COGs are not touched.
+    cf = conversion_for(variable).cf_attributes
+    plan = classify(committed, rows, cf=cf)
     report.mode = plan.mode.value
 
     time_start = min(r.time for r in rows)
@@ -347,11 +351,12 @@ def _run_build(
             time_start=time_start,
             time_end=time_end,
             left_out=left_out,
+            cf=cf,
         )
 
     written = None
     if plan.mode == BuildMode.APPEND:
-        written = _run_append(repo, builder, plan, committed, variable.slug, build_start, metadata)
+        written = _run_append(repo, builder, plan, committed, variable.slug, cf, build_start, metadata)
         if written is None:
             # A new signature, or a multi-band asset: what the repo holds is
             # chosen again over every asset (#732).
@@ -363,7 +368,7 @@ def _run_build(
             report.mode = BuildMode.REBUILD.value
     if written is None:
         ordered = sorted(rows, key=lambda row: row.time)
-        written = _run_rebuild(repo, builder, ordered, variable.slug, build_start, metadata)
+        written = _run_rebuild(repo, builder, ordered, variable.slug, cf, build_start, metadata)
         if written.left_out:
             logger.warning(
                 "build_virtual_zarr_manifest: %s/%s left %d asset(s) out: %s",
@@ -416,7 +421,7 @@ class _Written:
     left_out: tuple[LeftOut, ...]
 
 
-def _run_rebuild(repo, builder, rows, variable_name, build_start, metadata) -> _Written:
+def _run_rebuild(repo, builder, rows, variable_name, cf, build_start, metadata) -> _Written:
     """
     Rebuild path: hold the newest single-band asset's signature and leave
     every other asset out, by reason (#732), as a new commit in place.
@@ -429,7 +434,7 @@ def _run_rebuild(repo, builder, rows, variable_name, build_start, metadata) -> _
         return _Written(snapshot_id=None, items_written=0, left_out=selection.left_out)
 
     kept = [opened[position] for position in selection.kept]
-    vds = builder.assemble(kept, variable_name)
+    vds = builder.assemble(kept, variable_name, cf)
     snapshot_id = write_rebuild(
         repo,
         vds,
@@ -440,7 +445,7 @@ def _run_rebuild(repo, builder, rows, variable_name, build_start, metadata) -> _
     return _Written(snapshot_id=snapshot_id, items_written=len(kept), left_out=selection.left_out)
 
 
-def _run_append(repo, builder, plan, committed, variable_name, build_start, metadata) -> _Written | None:
+def _run_append(repo, builder, plan, committed, variable_name, cf, build_start, metadata) -> _Written | None:
     """
     Append path: the new tail as a single append commit, carrying the
     committed record of assets left out. None when any new asset differs
@@ -458,7 +463,7 @@ def _run_append(repo, builder, plan, committed, variable_name, build_start, meta
     opened = builder.open(_to_url_df(plan.rows))
     if not appends_cleanly(committed_spec, [spec_from_virtual_variable(cog.vds) for cog in opened]):
         return None
-    vds = builder.assemble(opened, variable_name)
+    vds = builder.assemble(opened, variable_name, cf)
 
     # Belt-and-braces (decision 5): appended timesteps must be strictly
     # after the last committed time coordinate, read from the snapshot

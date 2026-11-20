@@ -1,9 +1,9 @@
 import logging
 
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from georiva.core.models import Asset
+from georiva.core.models import Asset, Variable
 
 from .models import VirtualZarrManifest
 
@@ -85,3 +85,32 @@ def mark_manifest_stale_on_cog_delete(sender, instance: Asset, **kwargs):
             instance.pk,
             exc,
         )
+
+
+#: What a manifest's CF attributes are made of (ADR 0046 §18).
+_DESCRIPTION = ("unit_id", "scale", "offset")
+
+
+@receiver(pre_save, sender=Variable)
+def note_served_unit_before_save(sender, instance: Variable, **kwargs):
+    """Remember how the Variable described its raw bytes before this save."""
+    if instance.pk is None:
+        return
+    instance._described_before = Variable.objects.filter(pk=instance.pk).values_list(*_DESCRIPTION).first()
+
+
+@receiver(post_save, sender=Variable)
+def mark_manifest_stale_on_served_unit_change(sender, instance: Variable, created: bool, **kwargs):
+    """
+    A manifest describes its COGs' raw bytes in the served unit with CF
+    attributes (ADR 0046 §18). When the served unit changes, mark it STALE so
+    the next sweep regenerates the manifest — the bytes are not touched.
+    """
+    before = getattr(instance, "_described_before", None)
+    instance._described_before = None
+    if created or before is None or before == tuple(getattr(instance, field) for field in _DESCRIPTION):
+        return
+    VirtualZarrManifest.objects.filter(
+        variable_id=instance.pk,
+        status=VirtualZarrManifest.Status.READY,
+    ).update(status=VirtualZarrManifest.Status.STALE)

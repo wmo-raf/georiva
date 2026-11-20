@@ -30,6 +30,18 @@ class Conversion:
     def is_identity(self) -> bool:
         return self.scale == 1.0 and self.offset == 0.0
 
+    @property
+    def cf_attributes(self) -> dict:
+        """The conversion as CF attributes on an array of raw values (ADR 0046
+        §18): a CF reader decodes ``raw · scale_factor + add_offset`` into ``units``."""
+        return {"scale_factor": self.scale, "add_offset": self.offset, "units": self.unit}
+
+    def after(self, scale_factor: float, add_offset: float) -> Conversion:
+        """This conversion, for values already decoded by ``raw · scale_factor +
+        add_offset``: undo that decoding, then convert the raw values."""
+        scale = self.scale / scale_factor
+        return Conversion(scale, self.offset - add_offset * scale, self.unit)
+
     def array(self, data: np.ndarray) -> np.ndarray:
         if self.is_identity:
             return data
