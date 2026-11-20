@@ -109,9 +109,9 @@ for — the Variable's served unit unless the reader names another.**
     binding's (`InputRef`): the unit is what the recipe's arithmetic assumes, whichever product is bound to it, and
     the registry can check a recipe but cannot see the product definitions that bind it. The engine opens one session
     per production unit and reads each input in its declared unit; a role with no declared unit is refused, never
-    read in the served unit. A recipe declaring none is refused at registration — for now logged and left
-    unregistered rather than raised, so a plugin not yet declaring its units does not stop the app starting; it
-    raises once those plugins declare theirs. Its output Variable's `source_unit` is the recipe's declared output
+    read in the served unit. A recipe declaring none is refused at registration: registering it raises, so a
+    plugin that has not declared its units stops the app starting rather than leaving its products silently
+    unproduced. Its output Variable's `source_unit` is the recipe's declared output
     unit. A recipe's output is stored bytes under a fixed label, so the unit it read in is written down, never
     inferred from a setting someone may change.
 

@@ -20,7 +20,7 @@ from georiva.processing.engine import run_unit
 from georiva.processing.recipe import SOURCE_UNIT, BaseRecipe, OutputAsset, OutputItem, ResolvedInput
 from georiva.processing.recipes.climatology import ClimatologyRecipe
 from georiva.processing.recipes.promotion import PromotionRecipe
-from georiva.processing.registry import RecipeRegistry
+from georiva.processing.registry import RecipeRegistry, UndeclaredRecipeUnits
 
 
 def _writer():
@@ -52,17 +52,15 @@ class _Declared(BaseRecipe):
 
 
 class RegistrationTests(SimpleTestCase):
-    """A recipe that does not declare its units is refused, and the reason logged:
-    a plugin's recipe is registered as the app loads, and one refused recipe must
-    not stop every other from loading."""
+    """A recipe that does not declare its units is refused as it registers — at
+    app start for a plugin's recipe — with the reason (ADR 0046 §13)."""
 
     def tearDown(self):
         RecipeRegistry._recipes.pop("units-test", None)
 
     def assertRefused(self, recipe_cls, reason):
-        with self.assertLogs("georiva.processing.registry", "ERROR") as logged:
+        with self.assertRaisesMessage(UndeclaredRecipeUnits, reason):
             RecipeRegistry.register(recipe_cls)
-        self.assertIn(reason, "\n".join(logged.output))
 
     def test_a_recipe_that_declares_no_input_units_is_refused(self):
         class Undeclared(_Declared):
