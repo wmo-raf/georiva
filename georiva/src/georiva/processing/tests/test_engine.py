@@ -15,6 +15,7 @@ from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run, run_unit
 from georiva.processing.models import DerivationRun
 from georiva.processing.recipe import (
+    SOURCE_UNIT,
     BaseRecipe,
     OutputAsset,
     OutputItem,
@@ -227,6 +228,7 @@ class _FakeRecipe(BaseRecipe):
     """A trivial non-Promotion recipe — proves the engine is recipe-agnostic."""
 
     type = "fake"
+    input_units = {"src": SOURCE_UNIT}
     version = "1"
 
     def __init__(self, collection, variable, staging_item, staging_asset):

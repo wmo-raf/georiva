@@ -194,6 +194,19 @@ class ProductionUnitReadsInDeclaredUnitTests(IngestedInSourceUnit):
         with self.assertRaises(values.ConversionRefused):
             self._run("m")
 
+    def test_an_input_whose_unit_is_not_declared_fails_the_unit_before_anything_is_read(self):
+        """Never the served unit as a fallback: a role the recipe names no unit
+        for refuses the production unit, and the recipe computes nothing."""
+        recipe = _Copy("K", self.asset, self.out_variable)
+        recipe.resolve_inputs = lambda unit: {
+            "value": ResolvedInput("value", True, [self.asset.item], [self.asset]),
+            "baseline": ResolvedInput("baseline", True, [self.asset.item], [self.asset]),
+        }
+
+        with self.assertRaisesRegex(values.ConversionRefused, "baseline"):
+            run_unit(recipe, {"n": 1}, writer=_writer())
+        self.assertEqual(recipe.sessions, [])
+
 
 class _ClimatologyOverKelvin(IngestedInSourceUnit):
     """A climatology over the Kelvin input, read in its source unit."""

@@ -16,7 +16,7 @@ from django.utils import timezone as dj_timezone
 from georiva.events.testing import event_context
 from georiva.organisations.testing import make_organisation
 from georiva.processing.models import DerivationRun
-from georiva.processing.recipe import BaseRecipe, OutputItem, ResolvedInput, unit_hash
+from georiva.processing.recipe import SOURCE_UNIT, BaseRecipe, OutputItem, ResolvedInput, unit_hash
 from georiva.processing.registry import RecipeRegistry
 
 
@@ -34,6 +34,7 @@ class _CompletingRecipe(BaseRecipe):
     reason. Its single input is optional so readiness passes with no items."""
 
     type = "retry_fake"
+    input_units = {"src": SOURCE_UNIT}
     version = "1"
 
     def enumerate_units(self, selector):

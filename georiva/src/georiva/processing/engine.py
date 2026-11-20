@@ -306,9 +306,17 @@ def _transform(recipe: BaseRecipe, unit: ProductionUnit, resolved) -> list:
     is served in (ADR 0046 §12, §13)."""
     from georiva.core import values
 
+    undeclared = sorted(role for role in resolved if not recipe.input_units.get(role))
+    if undeclared:
+        # Never the served unit as a fallback: it is a display choice anybody
+        # may change, and this output is written down for good.
+        raise values.ConversionRefused(
+            f"Recipe {recipe.type} declares no unit to read input(s) "
+            f"{', '.join(repr(role) for role in undeclared)} in; name each in its input_units (ADR 0046 §13)."
+        )
     with values.session() as reading:
         for role, ri in resolved.items():
-            ri.in_unit = recipe.input_units.get(role)
+            ri.in_unit = recipe.input_units[role]
             ri.session = reading
         try:
             return recipe.transform(unit, resolved)

@@ -24,7 +24,7 @@ from georiva.events.testing import event_context
 from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run_unit
 from georiva.processing.models import DerivationAttemptFinished, DerivationRun
-from georiva.processing.recipe import BaseRecipe, OutputAsset, OutputItem, ResolvedInput
+from georiva.processing.recipe import SOURCE_UNIT, BaseRecipe, OutputAsset, OutputItem, ResolvedInput
 from georiva.processing.recipes.promotion import PromotionRecipe
 from georiva.processing.registry import RecipeRegistry
 from georiva.staging.models import DerivationLink, StagingAsset, StagingCollection, StagingItem
@@ -44,6 +44,7 @@ class _SumRecipe(BaseRecipe):
     item — a many-input unit that tolerates losing one of its inputs."""
 
     type = "sum_fake"
+    input_units = {"days": SOURCE_UNIT}
     version = "1"
 
     def __init__(self, *, staging_collection=None, output_collection=None, output_variable=None):
