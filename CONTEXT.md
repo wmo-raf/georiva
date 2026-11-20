@@ -196,7 +196,8 @@ layer — it is engine bookkeeping and is removed with the engine, while `Deriva
 _Avoid_: DerivationLog, RecipeRun, ProcessingRun
 
 **Promotion**:
-The degenerate identity Derivation — a ready Staging item normalized (clip/unit-convert/COG/register) into a
+The degenerate identity Derivation — a ready Staging item normalized (clip/COG/register; units stay as produced,
+ADR 0046) into a
 Published item with no real transform. The base case proving the engine handles the 1:1 path.
 _Avoid_: copy, publish (as a verb for this), passthrough
 
@@ -817,6 +818,37 @@ ExceptionReport body on the WMTS KVP endpoint alone, whose clients parse nothing
 everywhere else. Cached ~60s per collection-and-credential, so revocation lags on tiles and nowhere else.
 See ADR 0015.
 _Avoid_: tile auth middleware, tile permission check, signed tile URL
+
+### Values and units
+
+**Source unit** (`Variable.source_unit`):
+The unit a Variable's bytes hold, for every kind of asset — ingested, Remote, Store, materialized, derived. Every
+number stored about its values (asset and zonal statistics, value range, style stops) is in it too. Required, and
+locked once the Variable has an asset; changed only by **Correct source unit**, which converts nothing. See ADR 0046.
+_Avoid_: stored unit, raw unit, native unit
+
+**Served unit** (`Variable.unit`):
+The unit every reader returns by default and every surface shows. A display choice: changing it rewrites nothing.
+See ADR 0046.
+_Avoid_: output unit, target unit, display unit
+
+**Scale and offset** (`Variable.scale`, `Variable.offset`):
+The positive affine conversion from source unit to served unit, computed with pint when the Variable is saved, so
+readers outside Django convert by arithmetic. A conversion that is not positive and affine is refused. See ADR 0046.
+
+**Water flag**:
+A Variable's statement that its `kg m-2` is water, which allows `kg m-2 ↔ mm`. Proposed by a wizard, confirmed by an
+operator. See ADR 0046.
+_Avoid_: precipitation flag
+
+**In-unit** (`in_unit`):
+The unit a reader names when it has a contract of its own, in place of the served unit. Required of every recipe input.
+See ADR 0046.
+
+**Reading session** (`values.session`):
+One batch of value reads — a publish, a production unit, a request — that opens each store once and reads one
+snapshot of it throughout. See ADR 0046.
+_Avoid_: reader cache, store pool
 
 ### Styling
 

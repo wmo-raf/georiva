@@ -7,6 +7,10 @@ accepted — see wmo-raf/georiva#605. Read-side counterpart of
 [ADR-0013](0013-org-in-the-path-on-the-machine-plane.md) and
 [ADR-0015](0015-nginx-auth-request-gateway-for-tiles.md) untouched.
 
+[ADR-0046](0046-values-are-stored-as-produced-and-converted-when-read.md) gives §1's seam, which says *where* an
+asset's bytes are, its counterpart for *what values* they hold: one read module, by asset, converting to the unit asked
+for.
+
 ## Context
 
 ADR 0042 puts upstream URLs in `Asset.href`. The field admits them, but every reader treats `href` as a key in the

@@ -6,6 +6,11 @@
 > database write. Both are amendments to how the surface behaves, not to the
 > two-layer model, which is untouched. See the amendments under **Decision**.
 
+> **Amended by [ADR-0046](0046-values-are-stored-as-produced-and-converted-when-read.md) — stops are in the source unit.**
+> A stop's "absolute physical value", and `value_min`/`value_max`, are stored in the Variable's source unit and
+> shown in its served unit; the styling surface converts at its boundary, and a ramp is applied in the served unit.
+> The two-layer model is untouched.
+
 ## Status
 
 accepted
