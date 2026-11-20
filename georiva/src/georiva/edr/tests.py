@@ -99,6 +99,32 @@ class EDRStyledParameterTests(TestCase):
         # "categorical" — the key speaks their vocabulary.
         self.assertEqual(x_georiva["palette_type"], "categorical")
 
+    def test_a_parameter_names_the_served_unit_not_the_source_unit(self):
+        """Values are stored as produced and served converted (ADR 0046): the
+        parameter's unit is what a reader of the API is given."""
+        from georiva.core.models import Unit
+
+        self.variable.unit, _ = Unit.objects.get_or_create(symbol="°C", defaults={"name": "test °C"})
+        self.variable.correct_source_unit(Unit.objects.get_or_create(symbol="K", defaults={"name": "test K"})[0])
+        self.variable.save()
+
+        response = self.client.get(reverse("edr:collection-detail", args=[edr_collection_id(self.variable.collection)]))
+        parameter = response.json()["parameter_names"][self.variable.slug]
+        self.assertEqual(parameter["unit"]["symbol"], "°C")
+
+    def test_a_parameters_value_range_is_in_the_unit_it_names(self):
+        """A number that leaves as a number is served (ADR 0046 §15): the range
+        beside a °C label is in °C, though it is stored in K."""
+        from georiva.core.models import Unit
+
+        self.variable.unit, _ = Unit.objects.get_or_create(symbol="°C", defaults={"name": "test °C"})
+        self.variable.correct_source_unit(Unit.objects.get_or_create(symbol="K", defaults={"name": "test K"})[0])
+        self.variable.value_min, self.variable.value_max = 233.15, 323.15
+        self.variable.save()
+
+        x_georiva = self._x_georiva()
+        self.assertEqual((x_georiva["value_min"], x_georiva["value_max"]), (-40.0, 50.0))
+
     def test_a_styleless_variable_still_serves_the_grayscale_fallback(self):
         x_georiva = self._x_georiva()
         self.assertEqual(len(x_georiva["palette"]), 11)

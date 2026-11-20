@@ -34,7 +34,14 @@ def _tree(organisation, visibility=Collection.Visibility.PUBLIC, collection_slug
     )
     unit, _ = Unit.objects.get_or_create(name="Millimetre", symbol="mm")
     Variable.objects.create(
-        collection=collection, name="Rain", slug="rain", unit=unit, value_min=0, value_max=1, is_active=True
+        collection=collection,
+        name="Rain",
+        slug="rain",
+        source_unit=unit,
+        unit=unit,
+        value_min=0,
+        value_max=1,
+        is_active=True,
     )
     return catalog, collection
 

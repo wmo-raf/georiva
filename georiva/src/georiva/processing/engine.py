@@ -169,8 +169,8 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
     if oa.passthrough is not None:
         path = _asset_output_path(item, oa.variable, oa.format)
         src_bucket_type, src_href = oa.passthrough
-        data = storage.bucket(src_bucket_type).read_bytes(src_href)
-        href = writer.bucket.save(path, data)
+        # Bytes copied as they are, not values read: no read module needed.
+        href = storage.transfer(storage.bucket(src_bucket_type), writer.bucket, src_href, path)
         stats = oa.stats or {}
         asset, _ = Asset.objects.update_or_create(
             item=item,
@@ -298,6 +298,31 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, **kwargs) -> UnitResult:
     """Run one unit under the active event context, or a fresh one when called bare (a shell, a test)."""
     with ensure_context(actor="system:engine"):
         return _run_unit(recipe, unit, **kwargs)
+
+
+def _transform(recipe: BaseRecipe, unit: ProductionUnit, resolved) -> list:
+    """The recipe's compute, in one reading session for the production unit:
+    each input is read in the unit the recipe declares for it, whatever unit it
+    is served in (ADR 0046 §12, §13)."""
+    from georiva.core import values
+
+    undeclared = sorted(role for role in resolved if not recipe.input_units.get(role))
+    if undeclared:
+        # Never the served unit as a fallback: it is a display choice anybody
+        # may change, and this output is written down for good.
+        raise values.ConversionRefused(
+            f"Recipe {recipe.type} declares no unit to read input(s) "
+            f"{', '.join(repr(role) for role in undeclared)} in; name each in its input_units (ADR 0046 §13)."
+        )
+    with values.session() as reading:
+        for role, ri in resolved.items():
+            ri.in_unit = recipe.input_units[role]
+            ri.session = reading
+        try:
+            return recipe.transform(unit, resolved)
+        finally:
+            for ri in resolved.values():
+                ri.session = None
 
 
 def _run_unit(
@@ -431,7 +456,7 @@ def _run_unit(
 
         logger.info("[unit %s] %s step 4/6 — computing (recipe.transform)…", pos, tag)
         t_tx = time.monotonic()
-        out_assets = recipe.transform(unit, resolved)
+        out_assets = _transform(recipe, unit, resolved)
         logger.info(
             "[unit %s] %s transform produced %d output asset(s) in %.1fs",
             pos,

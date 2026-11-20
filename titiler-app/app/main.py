@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse
 from rasterio.errors import RasterioIOError
 from rio_tiler.models import ImageData
 from starlette.middleware.cors import CORSMiddleware
-from titiler.core.factory import TilerFactory
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app import warm
@@ -28,6 +27,7 @@ from app.dependencies import (
 )
 from app.middleware import PreviewCacheMiddleware, RequestLoggingMiddleware
 from app.reader import ResilientReader, is_not_found
+from app.served import ServedTilerFactory, conversion, served
 from app.store import StoreError
 from app.wmts import rest_router as wmts_rest_router
 from app.wmts import router as wmts_router
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 #: unchanged. No tenancy decision is taken here.
 TILE_ROUTE_PREFIX = "/{org_slug}/{catalog_slug}/{collection_slug}/{variable_slug}"
 
-cog = TilerFactory(
+cog = ServedTilerFactory(
     reader=ResilientReader,
     path_dependency=SemanticPathParams,
     colormap_dependency=SemanticColorMap,
@@ -180,14 +180,18 @@ def encoded_preview(
     # the same way: masked pixels render with alpha 0, which is how a layer
     # already says "no data here" and what keeps hover readouts blank outside it.
     crop(img, tile_config.get("boundary"))
+    # Encoded over the raw range (ADR 0046 §14): the pixels are the same whatever
+    # unit the variable is served in. The header names the served range, which
+    # unscales them straight into served values (§15).
     img.rescale(in_range=((tile_config["vmin"], tile_config["vmax"]),))
+    unscale = f"{served(tile_config['vmin'], tile_config)},{served(tile_config['vmax'], tile_config)}"
 
     return Response(
         img.render(img_format="PNG"),
         media_type="image/png",
         headers={
             "Cache-Control": "public, max-age=31536000, immutable",
-            "X-Image-Unscale": f"{tile_config['vmin']},{tile_config['vmax']}",
+            "X-Image-Unscale": unscale,
             "X-Image-Bounds": ",".join(str(b) for b in img.bounds) if img.bounds else "",
         },
     )
@@ -261,12 +265,18 @@ def vector_preview(
     # Same crop as every other output (ADR 0038); the catalog is one, so u's config speaks for both.
     crop(out, configs[0].get("boundary"))
 
+    # The shared range is raw; it is named served only when both components
+    # are served by one conversion, as a vector's two components always are.
+    if conversion(configs[0]) == conversion(configs[1]):
+        unscale = f"{served(lo, configs[0])},{served(hi, configs[0])}"
+    else:
+        unscale = f"{lo},{hi}"
     return Response(
         out.render(img_format="PNG"),
         media_type="image/png",
         headers={
             "Cache-Control": "public, max-age=31536000, immutable",
-            "X-Image-Unscale": f"{lo},{hi}",
+            "X-Image-Unscale": unscale,
             "X-Image-Bounds": ",".join(str(b) for b in out.bounds) if out.bounds else "",
         },
     )

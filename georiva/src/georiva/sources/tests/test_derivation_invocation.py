@@ -230,6 +230,7 @@ class EndToEndPromotionTests(TestCase):
             collection=self.pub_col,
             slug="precip",
             name="Precipitation",
+            source_unit=self.unit_dim,
             unit=self.unit_dim,
             value_min=0,
             value_max=2000,

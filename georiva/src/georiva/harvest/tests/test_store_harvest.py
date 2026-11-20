@@ -93,6 +93,7 @@ class StoreFeedMixin:
             collection=self.feed.ensure_collection(),
             slug=slug,
             name=slug.title(),
+            source_unit=unit,
             unit=unit,
             value_min=-40,
             value_max=45,

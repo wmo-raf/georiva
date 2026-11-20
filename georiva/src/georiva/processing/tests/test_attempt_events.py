@@ -20,7 +20,7 @@ from georiva.organisations.testing import make_organisation
 from georiva.organisations.tests.factories import PASSWORD, add_member, make_user
 from georiva.processing.engine import run_unit
 from georiva.processing.models import DerivationAttemptFinished, DerivationRun
-from georiva.processing.recipe import BaseRecipe, OutputItem, ResolvedInput, unit_hash
+from georiva.processing.recipe import SOURCE_UNIT, BaseRecipe, OutputItem, ResolvedInput, unit_hash
 from georiva.processing.registry import RecipeRegistry
 from georiva.processing.signals import unit_completed
 
@@ -32,6 +32,7 @@ class _Asset:
 
 class _Recipe(BaseRecipe):
     type = "attempt_fake"
+    input_units = {"src": SOURCE_UNIT}
     version = "3"
     checksum = "v1"
     fail = False

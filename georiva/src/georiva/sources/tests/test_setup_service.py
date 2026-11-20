@@ -96,6 +96,102 @@ class UpsertVariableUnitsTests(TestCase):
         self.assertEqual(variable.unit_id, variable.source_unit_id)
         self.assertEqual(variable.unit.symbol, "m/s")
 
+    def test_a_reprovision_never_changes_the_source_unit_of_a_variable_with_data(self):
+        """The bytes already held say what they hold (ADR 0046 §8): a plugin
+        that now declares another source unit does not relabel them."""
+        from datetime import UTC, datetime
+
+        from georiva.core.models import Asset, Item
+
+        declared = self._kelvin_served_in_celsius()
+        variable = self.service._upsert_variable(self.collection, declared)
+        item = Item.objects.create(collection=self.collection, time=datetime(2026, 3, 1, tzinfo=UTC))
+        Asset.objects.create(item=item, variable=variable, href="x/1.tif")
+
+        redeclared = CollectionVariable(
+            key="2t",
+            name="2m Temperature",
+            source_units="degC",
+            output_units="degF",
+            source_variable=SourceKey(name="2t"),
+        )
+        with self.assertLogs("georiva.sources.setup_service", "WARNING") as logged:
+            self.service._upsert_variable(self.collection, redeclared)
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.source_unit.symbol, "K")
+        self.assertEqual(variable.unit.symbol, "degF")
+        self.assertIn("Correct source unit", "\n".join(logged.output))
+
+    def test_a_plugin_declares_a_variable_of_water(self):
+        """kg m-2 is mm only of water (ADR 0046 §6); the plugin's declaration is the confirmation."""
+        variable = self.service._upsert_variable(
+            self.collection,
+            CollectionVariable(
+                key="tp",
+                name="Total precipitation",
+                source_units="kg m-2",
+                output_units="mm",
+                water=True,
+                source_variable=SourceKey(name="tp"),
+                value_range=(0.0, 100.0),
+            ),
+        )
+
+        self.assertTrue(variable.water)
+        self.assertEqual(variable.value_range, (0.0, 100.0))
+
+    def test_a_reprovision_updates_the_source_unit_of_a_variable_without_data(self):
+        variable = self.service._upsert_variable(self.collection, self._kelvin_served_in_celsius())
+
+        self.service._upsert_variable(
+            self.collection,
+            CollectionVariable(
+                key="2t", name="2m Temperature", source_units="degC", source_variable=SourceKey(name="2t")
+            ),
+        )
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.source_unit.symbol, "degC")
+
+    # -------- seeds are served-unit values, stored converted (ADR 0046 §3) --------
+
+    def _kelvin_served_in_celsius(self, **fields):
+        return CollectionVariable(
+            key="2t",
+            name="2m Temperature",
+            source_units="K",
+            output_units="degC",
+            source_variable=SourceKey(name="2t"),
+            **fields,
+        )
+
+    def test_a_seeded_range_is_read_in_the_output_unit_and_stored_in_the_source_unit(self):
+        variable = self.service._upsert_variable(
+            self.collection, self._kelvin_served_in_celsius(value_range=(-40.0, 50.0))
+        )
+
+        self.assertEqual(variable.value_range, (233.15, 323.15))
+        self.assertEqual(variable.served_range, (-40.0, 50.0))
+
+    def test_seeded_stops_are_read_in_the_output_unit_and_stored_in_the_source_unit(self):
+        variable = self.service._upsert_variable(
+            self.collection,
+            self._kelvin_served_in_celsius(palette_stops=((0.0, "#0000ff"), (30.0, "#ff0000"))),
+        )
+
+        style = variable.styles.get()
+        self.assertEqual(style.stops, [{"value": 273.15, "color": "#0000ff"}, {"value": 303.15, "color": "#ff0000"}])
+        self.assertEqual(variable.value_range, (273.15, 303.15))
+
+    def test_a_seeded_ramp_is_laid_over_the_output_unit_range_and_stored_converted(self):
+        variable = self.service._upsert_variable(
+            self.collection, self._kelvin_served_in_celsius(value_range=(-40.0, 50.0), palette="viridis")
+        )
+
+        stops = variable.styles.get().stops
+        self.assertEqual((stops[0]["value"], stops[-1]["value"]), (233.15, 323.15))
+
     def test_geopotential_context_converts_specific_energy_to_decametres(self):
         # m2/s2 -> gpdam rides the global geopotential context (divide by g)
         # plus the gpdam definition (divide by 10), in a single pint conversion.

@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from django.contrib import messages
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.text import slugify
@@ -42,6 +42,7 @@ from django.utils.translation import gettext as _
 
 # The Push Feed Wizard's Sample File needs the same two things of a scanned
 # variable — a Unit for its unit string, and bounds rounded outward — and has them.
+from georiva.core.unit_utils import Conversion, ConversionRefused, proposes_water
 from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
 from georiva.organisations.access import require_active_org, scoped_queryset
 
@@ -407,20 +408,18 @@ def _image_rows(survey: dict, chosen, posted) -> list[dict]:
             "index": index,
             "use": asset["readable"] and (not earlier or asset["key"] in earlier),
             "name": asset["title"] or asset["key"],
-            "unit_id": _resolve_unit(asset["unit"])["unit_id"],
+            **_unit_row(asset["unit"], asset["key"], asset["title"]),
             "low": low,
             "high": high,
         }
         if asset["key"] in earlier:
             image = earlier[asset["key"]]
-            row.update(name=image["name"], unit_id=image["unit_id"], low=image["value_min"], high=image["value_max"])
+            row.update(name=image["name"], **_units_chosen_earlier(image))
         if posted is not None:
             row.update(
                 use=asset["readable"] and bool(posted.get(f"use_{index}")),
                 name=posted.get(f"name_{index}", row["name"]),
-                unit_id=_whole(posted.get(f"unit_{index}")),
-                low=posted.get(f"low_{index}", ""),
-                high=posted.get(f"high_{index}", ""),
+                **_units_posted(row, index, posted),
             )
         rows.append(row)
     return rows
@@ -441,36 +440,151 @@ def _number(value) -> float | None:
     return number if number == number and abs(number) != float("inf") else None
 
 
+# ── Units: what the Upstream's values are in, and what they are shown in ────
+#
+# A harvested Variable's source unit is the Upstream's own (ADR 0046 §9): lifted
+# from what it declares, shown and not asked. The operator chooses the served
+# unit, and confirms the Water flag the field's name proposes (§6). The value
+# range is typed and read in the unit it is shown in and kept in the source unit.
+
+
+def _declared_unit(declared: str):
+    """The Unit an Upstream's own unit string names — made, when pint knows it
+    and no Unit is it yet — or `None` when it declares none GeoRiva can read."""
+    from georiva.core.models import Unit
+
+    declared = (declared or "").strip()
+    resolved = _resolve_unit(declared)
+    if resolved["unit_id"] is not None:
+        return Unit.objects.get(pk=resolved["unit_id"])
+    if not resolved["can_create"]:
+        return None
+    try:
+        with transaction.atomic():
+            unit, _created = Unit.objects.get_or_create(symbol=declared, defaults={"name": declared})
+    except IntegrityError:
+        return None
+    return unit
+
+
+def _shown_range(source_id, unit_id, water: bool, low, high) -> tuple:
+    """A range kept in the source unit, as it is shown in the served unit; as kept when the two cannot be converted."""
+    from georiva.core.models import Unit
+
+    units = Unit.objects.in_bulk([pk for pk in (source_id, unit_id) if pk is not None])
+    if low is None or high is None or source_id not in units or unit_id not in units:
+        return low, high
+    try:
+        served = Conversion.between(units[source_id].symbol, units[unit_id].symbol, water=water)
+    except ConversionRefused:
+        return low, high
+    return served.forward(low), served.forward(high)
+
+
+def _unit_row(declared: str, *names: str) -> dict:
+    """What a row first says of units: the source unit lifted from the Upstream
+    (`None` when it declares none, and the operator is asked), the served unit
+    as the provider gives it, and the Water flag its names propose."""
+    source = _declared_unit(declared)
+    water = proposes_water(*names)
+    return {
+        "source_unit": source,
+        "declared_unit": declared,
+        "source_unit_id": source.pk if source else None,
+        "unit_id": source.pk if source else None,
+        "range_unit_id": source.pk if source else None,
+        "water": water,
+        "water_proposed": water,
+    }
+
+
+def _units_chosen_earlier(earlier: dict) -> dict:
+    """A row as it was chosen on an earlier visit, its range shown in the served unit."""
+    low, high = _shown_range(
+        earlier["source_unit_id"], earlier["unit_id"], earlier["water"], earlier["value_min"], earlier["value_max"]
+    )
+    return {
+        "source_unit_id": earlier["source_unit_id"],
+        "unit_id": earlier["unit_id"],
+        "range_unit_id": earlier["unit_id"],
+        "water": earlier["water"],
+        "low": low,
+        "high": high,
+    }
+
+
+def _units_posted(row: dict, index: int, posted) -> dict:
+    """A row as it was posted."""
+    unit_id = _whole(posted.get(f"unit_{index}"))
+    return {
+        "source_unit_id": row["source_unit"].pk if row["source_unit"] else _whole(posted.get(f"source_unit_{index}")),
+        "unit_id": unit_id,
+        "range_unit_id": _whole(posted.get(f"range_unit_{index}")) or unit_id,
+        "water": bool(posted.get(f"water_{index}")),
+        "low": posted.get(f"low_{index}", ""),
+        "high": posted.get(f"high_{index}", ""),
+    }
+
+
+def _settled_units(index: int, declared: str, name: str, posted) -> tuple[dict, list[str]]:
+    """The source unit, served unit, Water flag and value range — in the source
+    unit — an operator settled on for one row, and what is wrong with them.
+
+    The range was typed in the unit it was shown in, which the form says
+    (`range_unit_<index>`); a form that does not say was typed in the served unit.
+    """
+    from georiva.core.models import Unit
+
+    source = _declared_unit(declared)
+    source_id = source.pk if source else _whole(posted.get(f"source_unit_{index}"))
+    unit_id = _whole(posted.get(f"unit_{index}"))
+    shown_id = _whole(posted.get(f"range_unit_{index}")) or unit_id
+    water = bool(posted.get(f"water_{index}"))
+    low, high = _number(posted.get(f"low_{index}")), _number(posted.get(f"high_{index}"))
+    units = Unit.objects.in_bulk([pk for pk in (source_id, unit_id, shown_id) if pk is not None])
+
+    errors = []
+    if source_id not in units:
+        errors.append(_("Say which unit the provider’s values of “%(name)s” are in.") % {"name": name})
+    if unit_id not in units:
+        errors.append(_("Choose a unit for “%(name)s”.") % {"name": name})
+    if low is None or high is None or low >= high:
+        errors.append(
+            _("Give “%(name)s” a lowest and a highest value to colour by, the lowest first.") % {"name": name}
+        )
+    if not errors:
+        source_symbol = units[source_id].symbol
+        try:
+            typed_in = Conversion.between(source_symbol, units[unit_id].symbol, water=water)
+        except ConversionRefused as refused:
+            errors.append(
+                _("“%(name)s” cannot be shown in %(unit)s: %(why)s")
+                % {"name": name, "unit": units[unit_id].symbol, "why": refused}
+            )
+        else:
+            if shown_id != unit_id and shown_id in units:
+                try:
+                    typed_in = Conversion.between(source_symbol, units[shown_id].symbol, water=water)
+                except ConversionRefused:
+                    pass  # Not a unit these values can be in: the range was typed in the served unit.
+            low, high = typed_in.inverse(low), typed_in.inverse(high)
+    settled = {"source_unit_id": source_id, "unit_id": unit_id, "water": water, "value_min": low, "value_max": high}
+    return settled, errors
+
+
 def _chosen_images(survey: dict, posted) -> tuple[list[dict], list[str]]:
     """The images an operator ticked, each with the name, unit and range they
     settled on, and what is wrong with any of them."""
-    from georiva.core.models import Unit
-
     chosen, errors = [], []
     for index, asset in enumerate(survey["assets"]):
         if not asset["readable"] or not posted.get(f"use_{index}"):
             continue
         name = posted.get(f"name_{index}", "").strip() or asset["title"] or asset["key"]
-        unit_id = _whole(posted.get(f"unit_{index}"))
-        low, high = _number(posted.get(f"low_{index}")), _number(posted.get(f"high_{index}"))
-        if unit_id is None or not Unit.objects.filter(pk=unit_id).exists():
-            errors.append(_("Choose a unit for “%(name)s”.") % {"name": name})
-        if low is None or high is None or low >= high:
-            errors.append(
-                _("Give “%(name)s” a lowest and a highest value to colour by, the lowest first.") % {"name": name}
-            )
+        units, wrong = _settled_units(index, asset["unit"], name, posted)
+        errors += wrong
         host, bucket = _place(asset)
         chosen.append(
-            {
-                "key": asset["key"],
-                "title": asset["title"],
-                "name": name,
-                "unit_id": unit_id,
-                "value_min": low,
-                "value_max": high,
-                "host": host,
-                "bucket": bucket,
-            }
+            {"key": asset["key"], "title": asset["title"], "name": name, **units, "host": host, "bucket": bucket}
         )
     return chosen, errors
 
@@ -715,27 +829,19 @@ def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> li
             row.update(
                 detailed=True,
                 name=row["label"],
-                unit_id=_resolve_unit(array["unit"])["unit_id"],
+                **_unit_row(array["unit"], array["path"], array["title"]),
                 low=low,
                 high=high,
                 about=array["description"],
             )
             if array["path"] in earlier:
                 field = earlier[array["path"]]
-                row.update(
-                    name=field["name"],
-                    unit_id=field["unit_id"],
-                    low=field["value_min"],
-                    high=field["value_max"],
-                    about=field["description"],
-                )
+                row.update(name=field["name"], about=field["description"], **_units_chosen_earlier(field))
             if posted is not None and f"name_{index}" in posted:
                 row.update(
                     name=posted.get(f"name_{index}", ""),
-                    unit_id=_whole(posted.get(f"unit_{index}")),
-                    low=posted.get(f"low_{index}", ""),
-                    high=posted.get(f"high_{index}", ""),
                     about=posted.get(f"about_{index}", ""),
+                    **_units_posted(row, index, posted),
                 )
         rows.append(row)
     return rows
@@ -764,30 +870,20 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
     """`(the fields chosen, what is wrong with any of them, whether one has
     not been put to the operator yet)`. A field ticked for the first time comes
     back with nothing typed for it: its values are shown before they are taken."""
-    from georiva.core.models import Unit
-
     if any(f"name_{array['index']}" not in posted for array in ticked):
         return [], [], True
     chosen, errors = [], []
     for array in ticked:
         index = array["index"]
         name = posted.get(f"name_{index}", "").strip() or array["label"]
-        unit_id = _whole(posted.get(f"unit_{index}"))
-        low, high = _number(posted.get(f"low_{index}")), _number(posted.get(f"high_{index}"))
-        if unit_id is None or not Unit.objects.filter(pk=unit_id).exists():
-            errors.append(_("Choose a unit for “%(name)s”.") % {"name": name})
-        if low is None or high is None or low >= high:
-            errors.append(
-                _("Give “%(name)s” a lowest and a highest value to colour by, the lowest first.") % {"name": name}
-            )
+        units, wrong = _settled_units(index, array["unit"], name, posted)
+        errors += wrong
         chosen.append(
             {
                 "key": array["path"],
                 "title": array["title"],
                 "name": name,
-                "unit_id": unit_id,
-                "value_min": low,
-                "value_max": high,
+                **units,
                 "description": posted.get(f"about_{index}", "").strip(),
             }
         )
@@ -937,6 +1033,8 @@ def _plan(form: dict, session: dict) -> tuple[FeedPlan | None, list[str]]:
                     asset_key=image["key"],
                     name=image["name"],
                     unit_id=image["unit_id"],
+                    source_unit_id=image["source_unit_id"],
+                    water=image["water"],
                     value_min=image["value_min"],
                     value_max=image["value_max"],
                 )
@@ -977,6 +1075,8 @@ def _store_plan(form: dict, session: dict, interval, catalog_id, start, end, day
                 asset_key=field["key"],
                 name=field["name"],
                 unit_id=field["unit_id"],
+                source_unit_id=field["source_unit_id"],
+                water=field["water"],
                 value_min=field["value_min"],
                 value_max=field["value_max"],
                 description=field["description"],

@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from georiva.processing.recipe import (
+    SOURCE_UNIT,
     BaseRecipe,
     OutputAsset,
     OutputItem,
@@ -56,6 +57,9 @@ class PromotionRecipe(BaseRecipe):
     # Promotion writes into the published collection a feed's Loader provisioned,
     # whose Variables are read from files and keep their sources.
     creates_output_variables = False
+    # The identity: a staged slice is published as it is held, in its
+    # Variable's source unit, whatever that Variable is served in (ADR 0046 §1).
+    input_units = {"source": SOURCE_UNIT}
 
     # ---- declarative surface ------------------------------------------------
 
@@ -120,8 +124,6 @@ class PromotionRecipe(BaseRecipe):
         )
 
     def transform(self, unit: ProductionUnit, resolved) -> list[OutputAsset]:
-        from georiva.core.storage import BucketType
-
         ri = resolved["source"]
         si = ri.items[0]
         collection = self._published_collection(si)
@@ -134,7 +136,7 @@ class PromotionRecipe(BaseRecipe):
                     f"Promotion: no Variable for staging asset {asset.pk}; "
                     f"set one on the asset or on collection '{collection.slug}'"
                 )
-            data, bounds, crs, width, height = self.read_raster(BucketType.STAGING, asset.href)
+            data, bounds, crs, width, height = self.read_raster(ri, asset)
             stats = _array_stats(data)
             # One data OutputAsset per staging asset; the engine's shared
             # materializer writes the served COG from it, same as ingestion.
@@ -156,14 +158,12 @@ class PromotionRecipe(BaseRecipe):
 
     # ---- I/O seam (mocked in tests) -----------------------------------------
 
-    def read_raster(self, bucket_type, href):
-        """Read a stored single-band raster into
-        ``(data, bounds, crs, width, height)`` — the recipe's only real I/O,
-        patched in unit tests. Delegates to the shared derivation reader
-        (north-up, nodata→NaN)."""
-        from georiva.processing.raster_io import read_north_up
-
-        return read_north_up(bucket_type, href)
+    def read_raster(self, source: ResolvedInput, asset):
+        """Read one staged asset of the ``source`` input, in its declared unit,
+        into ``(data, bounds, crs, width, height)`` — north-up, NaN for nodata
+        (``core.values``). The recipe's only real I/O, patched in unit tests."""
+        field = source.field(asset)
+        return field.data, list(field.bounds), field.crs, field.width, field.height
 
     # ---- helpers ------------------------------------------------------------
 

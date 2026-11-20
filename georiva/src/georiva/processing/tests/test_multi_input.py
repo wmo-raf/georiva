@@ -25,6 +25,7 @@ from georiva.geoprocessing import regrid_array
 from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run, run_unit
 from georiva.processing.recipe import (
+    SOURCE_UNIT,
     BaseRecipe,
     OutputAsset,
     OutputItem,
@@ -59,6 +60,7 @@ class _MultiInputFixtureRecipe(BaseRecipe):
     """
 
     type = "fixture_multi"
+    input_units = {role: SOURCE_UNIT for role in ("precip", "soil", "veg", "pet")}
     version = "1"
 
     # The recipe's declared target grid of production.
@@ -180,6 +182,7 @@ class _MultiInputFixture(TestCase):
             collection=self.out_col,
             slug="cdi",
             name="CDI",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=-3,
             value_max=3,

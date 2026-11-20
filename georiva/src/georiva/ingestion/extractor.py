@@ -8,7 +8,6 @@ import numpy as np
 
 from georiva.core.models import Variable
 from georiva.formats.base import BaseFormatPlugin
-from georiva.ingestion.utils import apply_unit_conversion
 
 if TYPE_CHECKING:
     from wagtail.blocks import StructValue
@@ -35,7 +34,8 @@ class VariableExtractor:
     Each Variable has one or more sources that define what to read.
     The transform_type determines how sources are combined into a single output.
 
-    Unit conversion is driven by variable.source_unit → variable.unit via pint
+    Values stay in the Variable's source unit: nothing is converted on the way
+    in (ADR 0046 §1). Readers convert to the served unit when values leave.
 
     Transform types:
         PASSTHROUGH:      reads primary source directly
@@ -55,7 +55,7 @@ class VariableExtractor:
         window: tuple[int, int, int, int] = None,
     ) -> np.ndarray:
         """
-        Extract data for a Variable, applying its transform and unit conversion.
+        Extract data for a Variable, applying its transform. No unit is converted.
 
         Args:
             variable:  Variable instance with sources StreamField populated
@@ -64,7 +64,7 @@ class VariableExtractor:
             window:    Optional (x, y, w, h) for chunked/windowed reading
 
         Returns:
-            2D numpy array (height, width) of float32 values in variable.unit
+            2D numpy array (height, width) of float32 values in variable.source_unit
         """
         sources = list(variable.sources)
 
@@ -85,7 +85,7 @@ class VariableExtractor:
         else:
             raise ValueError(f"Unknown transform type: {transform}")
 
-        return apply_unit_conversion(data, variable.source_unit, variable.unit)
+        return data
 
     def get_metadata(
         self,
@@ -175,8 +175,7 @@ class VariableExtractor:
         """
         Extract raw data for a single source StructValue using the format plugin.
 
-        No unit conversion here — conversion is applied once on the final
-        output in extract(), after any transform has been applied.
+        No unit conversion here or anywhere on the way in (ADR 0046 §1).
 
         Args:
             source:    StructValue with source_name, vertical_dimension, vertical_value
@@ -213,7 +212,7 @@ class VariableExtractor:
         Compute wind speed as √(u² + v²) from U and V components.
 
         Both components are assumed to be in the same units (typically m/s).
-        Unit conversion is applied to the magnitude after computation.
+        The magnitude is in the components' (source) unit.
         """
         u_source = self._get_source_by_role(sources, "u_component")
         v_source = self._get_source_by_role(sources, "v_component")
@@ -230,8 +229,7 @@ class VariableExtractor:
         Compute meteorological wind direction from U and V components.
 
         Convention: direction wind comes FROM, 0 = North, clockwise.
-        Output is always in degrees (0–360) — unit conversion on direction
-        is a no-op and should not be configured on VECTOR_DIRECTION variables.
+        Output is always in degrees (0–360).
         """
         u_source = self._get_source_by_role(sources, "u_component")
         v_source = self._get_source_by_role(sources, "v_component")
@@ -256,7 +254,7 @@ class VariableExtractor:
         window: dict = None,
     ) -> dict:
         """
-        Compute global statistics for a Variable in its output units.
+        Compute global statistics for a Variable in its source unit.
 
         For PASSTHROUGH without a clip window, uses lazy/dask-backed loading
         to avoid materialising the full array in memory. Falls back to full
@@ -293,7 +291,6 @@ class VariableExtractor:
 
             # Full extraction path
             data = self.extract(variable, file_path, timestamp, window=window_tuple)
-            # unit conversion already applied inside extract()
 
             return {
                 "min": float(np.nanmin(data)),
@@ -316,8 +313,8 @@ class VariableExtractor:
         """
         Compute stats using open_variable() for lazy/dask-backed access.
 
-        Applies unit conversion via pint on the lazy array before computing
-        stats — no full array materialisation, dask streams in chunks.
+        Statistics are of the raw values, in the source unit (ADR 0046 §3) —
+        no full array materialisation, dask streams in chunks.
         Returns None if the plugin does not support lazy loading.
         """
         primary = self._get_primary_source(sources)
@@ -330,16 +327,6 @@ class VariableExtractor:
             **kwargs,
         ) as var_info:
             lazy_data = var_info.data
-
-            # Apply unit conversion on the lazy array using pint
-            if variable.source_unit and variable.unit and variable.source_unit != variable.unit:
-                try:
-                    factor = variable.source_unit.pint_unit.to(variable.unit.pint_unit).magnitude
-                    # pint offset units (e.g. K→°C) can't use a simple factor —
-                    # fall back to full extraction for those
-                    lazy_data = lazy_data * factor
-                except Exception:
-                    return None  # triggers fallback to full extraction
 
             return {
                 "min": float(lazy_data.min().values),

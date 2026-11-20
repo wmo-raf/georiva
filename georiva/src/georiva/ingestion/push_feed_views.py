@@ -237,8 +237,10 @@ def _variable_rows(feed):
             "unit_id": v.unit_id,
             "unit_create": False,
             "can_create": False,
-            "value_min": v.value_min,
-            "value_max": v.value_max,
+            "water": v.water,
+            # Ranges read in the output (served) unit (ADR 0046 §3).
+            "value_min": v.served(v.value_min),
+            "value_max": v.served(v.value_max),
             "has_data": v.pk in with_data,
             "collection": v.collection.name,
             "derived": read_derived(v),
@@ -287,13 +289,18 @@ def _incoming_unit(row, current=None):
 
 
 def _check_units(row, label, variable, direction):
-    """(source, unit, problem): the units a posted row resolves to, or why it cannot be saved."""
-    from georiva.core.models import Asset, Unit
-    from georiva.ingestion.unit_range import units_convertible
+    """(source, unit, problem): the units a posted row resolves to, or why it cannot be saved.
+
+    The served unit may change whatever data there is: it rewrites nothing
+    (ADR 0046 §2). It must be one the incoming unit converts to — kg m-2 to mm
+    only for a row marked water (§6) — so a save never fails past this check."""
+    from georiva.core.models import Unit
+    from georiva.core.unit_utils import Conversion, ConversionRefused
 
     if direction:
         # Direction comes out of the extractor in degrees: one unit, nothing to convert.
-        return None, degree_unit(), None
+        degree = degree_unit()
+        return (variable.source_unit if variable else degree), degree, None
 
     unit = Unit.objects.filter(pk=row.get("unit_id")).first() if row.get("unit_id") else None
     if unit is None:
@@ -302,24 +309,14 @@ def _check_units(row, label, variable, direction):
     source = _incoming_unit(row, variable.source_unit if variable else None)
     if source is None:
         return None, None, _("Variable '%s' needs its incoming unit: set the unit the files carry.") % label
-    if not units_convertible(source.symbol, unit.symbol):
+    try:
+        Conversion.between(source.symbol, unit.symbol, water=bool(row.get("water")))
+    except ConversionRefused as refused:
         return (
             None,
             None,
-            _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
-            % {"var": label, "a": source.symbol, "b": unit.symbol},
-        )
-
-    if (
-        variable is not None
-        and unit.pk != variable.unit_id
-        and not row.get("confirm_unit_change")
-        and Asset.objects.filter(variable=variable).exists()
-    ):
-        return (
-            None,
-            None,
-            _("Variable '%s' already has data: confirm the unit change, existing data is not reprocessed.") % label,
+            _("Variable '%(var)s' cannot be served in %(b)s: %(why)s")
+            % {"var": label, "b": unit.symbol, "why": refused},
         )
     return source, unit, None
 
@@ -383,7 +380,7 @@ def _apply_variable_edits(feed, posted):
                 errors.append(problem)
                 continue
             new_slugs.add((collection.pk, slug))
-            creations.append((collection, slug, long_name, spec, source, unit, vmin, vmax))
+            creations.append((collection, slug, long_name, spec, source, unit, bool(row.get("water")), vmin, vmax))
             continue
 
         variable = by_id.get(str(row.get("key")))
@@ -395,20 +392,21 @@ def _apply_variable_edits(feed, posted):
         if problem:
             errors.append(problem)
             continue
-        updates.append((variable, source, unit, vmin, vmax, long_name))
+        updates.append((variable, source, unit, bool(row.get("water")), vmin, vmax, long_name))
 
     if errors:
         return errors
 
     with transaction.atomic():
-        for variable, source, unit, vmin, vmax, long_name in updates:
-            variable.source_unit, variable.unit = source, unit
-            variable.value_min, variable.value_max = vmin, vmax
+        for variable, source, unit, water, vmin, vmax, long_name in updates:
+            variable.source_unit, variable.unit, variable.water = source, unit, water
+            # Typed in the output unit, stored in the incoming one (ADR 0046 §3).
+            variable.set_served_range(vmin, vmax)
             if long_name:
                 variable.name = long_name
-            variable.save(update_fields=["source_unit", "unit", "value_min", "value_max", "name"])
-        for collection, slug, long_name, spec, source, unit, vmin, vmax in creations:
-            Variable.objects.create(
+            variable.save(update_fields=["source_unit", "unit", "water", "value_min", "value_max", "name"])
+        for collection, slug, long_name, spec, source, unit, water, vmin, vmax in creations:
+            variable = Variable(
                 collection=collection,
                 slug=slug,
                 name=long_name,
@@ -416,9 +414,10 @@ def _apply_variable_edits(feed, posted):
                 sources=derived_sources(spec["u_source"].strip(), spec["v_source"].strip()),
                 source_unit=source,
                 unit=unit,
-                value_min=vmin,
-                value_max=vmax,
+                water=water,
             )
+            variable.set_served_range(vmin, vmax)
+            variable.save()
     return []
 
 

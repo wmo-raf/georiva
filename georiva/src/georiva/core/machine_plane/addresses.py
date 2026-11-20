@@ -287,6 +287,11 @@ def _render_range_basis(variable) -> str:
     One spelling for the two token schemes, so a change to what "the render
     range" means cannot move one token and not the other."""
     basis = f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
+    # The served unit changes no pixel, but it changes the numbers a client
+    # unscales a texture into and labels it with (ADR 0046 §16). Only when it
+    # differs from the source unit, so an unconverted variable keeps its URLs.
+    if variable.unit_id != variable.source_unit_id:
+        basis += f":unit={variable.unit.symbol}:{variable.scale}:{variable.offset}"
     # A catalog that crops its maps to a boundary (ADR 0038) bakes that crop into
     # every texture and preview, so moving to or from it must be a different URL.
     # Only when it applies, so every other catalog keeps the URLs it already has.

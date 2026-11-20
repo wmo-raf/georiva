@@ -117,7 +117,7 @@ def _store_value(href: str, array: str, chunk_locations: dict) -> str:
     return json.dumps(store_entry(href, array, chunk_locations))
 
 
-def _chunk_locations(feed_pks) -> dict[int, dict]:
+def feed_chunk_locations(feed_pks) -> dict[int, dict]:
     """Each harvest feed's Pinned locations for a store's data, by feed.
 
     Looked up by model label: the feed is a harvest model, and core is not
@@ -139,7 +139,7 @@ def _values(rows) -> dict[tuple, str]:
     """``(variable, field) → the hash value`` for rows of
     ``(variable_id, time, reference_time, format, href, store_array, harvested_by_id)``."""
     rows = [(*row, AssetLocation(row[4], row[3]).is_store) for row in rows]
-    pins = _chunk_locations(row[6] for row in rows if row[7])
+    pins = feed_chunk_locations(row[6] for row in rows if row[7])
     values = {}
     for variable_pk, time, reference_time, _, href, store_array, harvested_by, is_store in rows:
         if is_store:
@@ -281,7 +281,7 @@ def publish_asset(asset) -> None:
 
     location = asset.location
     if location.is_store:
-        pins = _chunk_locations([asset.harvested_by_id]).get(asset.harvested_by_id, {})
+        pins = feed_chunk_locations([asset.harvested_by_id]).get(asset.harvested_by_id, {})
         _write_timestep(asset, _store_value(asset.href, asset.store_array, pins))
     elif asset.format != Asset.Format.COG:
         return

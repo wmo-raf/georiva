@@ -58,14 +58,20 @@ ordinarily Titiler reads either from the Redis hash ``remote_assets`` publishes,
 for collections of every tier. The row is read and nothing is written; no
 statistics are computed (ADR 0043 §5).
 
+Every number Titiler draws with is in the variable's source unit (ADR 0046
+§14); a client is given the served ones under ``served`` — the range a texture
+is unscaled into, the resolved style's stops for a legend, and the unit symbol
+(§15). Titiler reads neither ``served`` nor ``styles``.
+
 Returns the Redis palette cache's payload structure plus a ``styles`` index —
 discovery rides this endpoint rather than a new one (ADR 0023), so a client
 holding a tile-config response can build a style picker from it. The index
 lists every style whichever one was resolved; the Redis values themselves stay
 index-free, being Titiler's rendering config and nothing more:
-  With a style: {"vmin", "vmax", "scale_type", "colormap": {0-255 entries},
-                 "styles": [{"slug", "title", "is_default"}, ...]}
-  Without one:  {"vmin", "vmax", "scale_type", "styles": []}
+  With a style: {"vmin", "vmax", "scale_type", "scale", "offset", "unit", "colormap": {0-255 entries},
+                 "styles": [{"slug", "title", "is_default"}, ...],
+                 "served": {"vmin", "vmax", "unit", "stops": [[value, [r, g, b(, a)]], ...]}}
+  Without one:  the same without ``colormap``, and ``served.stops`` empty.
   At a Remote timestep, also: {"remote_href": "https://…"}
   At a Store asset's, also: {"remote_store": {"store", "array", "chunk_locations"}}
 """
@@ -98,7 +104,7 @@ class TileConfigView(APIView):
 
         try:
             variable = (
-                Variable.objects.select_related("collection__catalog__organisation")
+                Variable.objects.select_related("collection__catalog__organisation", "unit")
                 .prefetch_related("styles")
                 .get(
                     collection__catalog__organisation__slug=org_slug,
@@ -143,7 +149,15 @@ class TileConfigView(APIView):
         payload["styles"] = [
             {"slug": s.slug, "title": s.name, "is_default": s.is_default} for s in variable.styles.all()
         ]
+        payload["served"] = _served(variable, style if style is not None else variable.default_style)
         return Response(payload)
+
+
+def _served(variable, style) -> dict:
+    """The numbers a client reads, in the served unit (ADR 0046 §15)."""
+    vmin, vmax = variable.served_range
+    stops = variable.served_palette(style.as_weatherlayers_palette()) if style is not None else []
+    return {"vmin": vmin, "vmax": vmax, "unit": variable.unit.symbol, "stops": stops}
 
 
 def _timestamp(value):

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from django.test import TestCase
 from django.urls import reverse
 
-from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.testing import dial_org, make_organisation
 
@@ -33,6 +33,7 @@ class STACVisibilityTests(TestCase):
             collection=self.public,
             slug="tas",
             name="tas",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=50,
@@ -48,6 +49,7 @@ class STACVisibilityTests(TestCase):
             collection=self.internal,
             slug="tas",
             name="tas anomaly",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=-25,
             value_max=25,
@@ -103,6 +105,7 @@ class STACRenderExtensionTests(TestCase):
             collection=collection,
             slug="tas",
             name="tas",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=50,
@@ -158,6 +161,7 @@ class STACRenderExtensionTests(TestCase):
             collection=other,
             slug="pr",
             name="pr",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=10,
@@ -200,6 +204,7 @@ class STACRenderExtensionTests(TestCase):
             collection=other,
             slug="pr",
             name="pr",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=10,
@@ -229,7 +234,7 @@ class STACSearchCollectionIdTests(TestCase):
             visibility=Collection.Visibility.PUBLIC,
         )
         Variable.objects.create(
-            collection=collection, slug="precip", name="precip", unit=unit, value_min=0, value_max=500
+            collection=collection, slug="precip", name="precip", source_unit=unit, unit=unit, value_min=0, value_max=500
         )
         Item.objects.create(collection=collection, time=datetime(2026, 6, 1, tzinfo=UTC))
 
@@ -256,3 +261,100 @@ class STACSearchCollectionIdTests(TestCase):
 
     def test_an_unknown_two_part_id_matches_nothing(self):
         self.assertEqual(self._matched("nope/precip"), 0)
+
+
+class STACRawBytesDescribedTests(TestCase):
+    """Whoever opens a data asset's href reads the source unit; ``raster:bands``
+    says how to turn it into the served unit (ADR 0046 §18). The description is
+    generated when read, so it follows the served unit without a rewrite."""
+
+    def setUp(self):
+        dial_org(self.client)
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="ERA5", slug="era5", file_format="geotiff"
+        )
+        self.collection = Collection.objects.create(
+            catalog=self.catalog, name="T2m", slug="t2m", visibility=Collection.Visibility.PUBLIC
+        )
+        kelvin, _ = Unit.objects.get_or_create(symbol="K", defaults={"name": "test K"})
+        celsius, _ = Unit.objects.get_or_create(symbol="°C", defaults={"name": "test °C"})
+        self.variable = Variable.objects.create(
+            collection=self.collection,
+            slug="t2m",
+            name="t2m",
+            source_unit=kelvin,
+            unit=celsius,
+            value_min=230,
+            value_max=330,
+        )
+        self.item = Item.objects.create(collection=self.collection, time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
+
+    def _asset(self, **fields):
+        return Asset.objects.create(item=self.item, variable=self.variable, **fields)
+
+    def _band(self, asset_key):
+        response = self.client.get(reverse("stac:item-detail", args=["era5", "t2m", "t2m", "20260301T120000Z"]))
+        self.assertEqual(response.status_code, 200)
+        [band] = response.json()["assets"][asset_key]["raster:bands"]
+        return band
+
+    def _assert_describes_kelvin_as_celsius(self, band):
+        self.assertEqual(band["scale"], 1)
+        self.assertAlmostEqual(band["offset"], -273.15)
+        self.assertEqual(band["unit"], "°C")
+
+    def test_a_local_cog_is_described_in_the_served_unit(self):
+        self._asset(format=Asset.Format.COG, href="era5/t2m/t2m/2026/03/01/t2m.tif")
+        self._assert_describes_kelvin_as_celsius(self._band("t2m_cog"))
+
+    def test_a_remote_cog_is_described_in_the_served_unit(self):
+        self._asset(format=Asset.Format.COG, href="https://upstream.example/t2m.tif")
+        self._assert_describes_kelvin_as_celsius(self._band("t2m_cog"))
+
+    def test_a_store_asset_is_described_in_the_served_unit(self):
+        self._asset(format=Asset.Format.ZARR, href="https://upstream.example/era5.icechunk", store_array="t2m")
+        self._assert_describes_kelvin_as_celsius(self._band("t2m_zarr"))
+
+    def test_changing_the_served_unit_changes_the_description_without_touching_the_asset(self):
+        asset = self._asset(format=Asset.Format.COG, href="era5/t2m/t2m/2026/03/01/t2m.tif")
+        before = Asset.objects.values().get(pk=asset.pk)
+        fahrenheit, _ = Unit.objects.get_or_create(symbol="°F", defaults={"name": "test °F"})
+        self.variable.unit = fahrenheit
+        self.variable.save()
+
+        band = self._band("t2m_cog")
+        self.assertAlmostEqual(band["scale"], 1.8)
+        self.assertAlmostEqual(band["offset"], -459.67)
+        self.assertEqual(band["unit"], "°F")
+        self.assertEqual(Asset.objects.values().get(pk=asset.pk), before)
+
+    def test_statistics_are_served_converted(self):
+        self._asset(
+            format=Asset.Format.COG,
+            href="era5/t2m/t2m/2026/03/01/t2m.tif",
+            stats_min=273.15,
+            stats_max=303.15,
+            stats_mean=283.15,
+            stats_std=4.0,
+        )
+        statistics = self._band("t2m_cog")["statistics"]
+        self.assertAlmostEqual(statistics["minimum"], 0.0)
+        self.assertAlmostEqual(statistics["maximum"], 30.0)
+        self.assertAlmostEqual(statistics["mean"], 10.0)
+        # A spread has no offset: 4 kelvins apart are 4 degrees Celsius apart.
+        self.assertAlmostEqual(statistics["stddev"], 4.0)
+
+    def test_the_collections_value_range_is_in_the_unit_it_names(self):
+        """A number beside a served label is served (ADR 0046 §15)."""
+        response = self.client.get(reverse("stac:collection-detail", args=["era5", "t2m", "t2m"]))
+        summaries = response.json()["summaries"]
+        self.assertEqual(summaries["georiva:units"], "°C")
+        self.assertEqual(summaries["georiva:value_range"], [-43.15, 56.85])
+
+    def test_an_unconverted_variable_says_its_bytes_need_no_conversion(self):
+        self.variable.unit = self.variable.source_unit
+        self.variable.save()
+        self._asset(format=Asset.Format.COG, href="era5/t2m/t2m/2026/03/01/t2m.tif", stats_min=280.0, stats_max=290.0)
+        band = self._band("t2m_cog")
+        self.assertEqual((band["scale"], band["offset"], band["unit"]), (1, 0, "K"))
+        self.assertEqual(band["statistics"]["minimum"], 280.0)

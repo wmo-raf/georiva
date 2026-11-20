@@ -97,9 +97,11 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
         if variable.description:
             data["description"] = variable.description
 
+        # Stored in the source unit, served beside the unit above (ADR 0046 §15).
+        value_min, value_max = variable.served_range
         x_georiva = {
-            "value_min": variable.value_min,
-            "value_max": variable.value_max,
+            "value_min": value_min,
+            "value_max": value_max,
             "scale_type": variable.scale_type,
             "transform_type": variable.transform_type,
         }

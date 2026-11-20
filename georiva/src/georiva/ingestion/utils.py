@@ -5,15 +5,6 @@ import numpy as np
 import pandas as pd
 import pytz
 
-from georiva.core.unit_utils import ureg
-
-
-def apply_unit_conversion(data: np.ndarray, source_unit=None, output_unit=None) -> np.ndarray:
-    if not source_unit or not output_unit or source_unit == output_unit:
-        return data
-    quantity = ureg.Quantity(data, source_unit.pint_unit)
-    return np.asarray(quantity.to(output_unit.pint_unit).magnitude, dtype=np.float32)
-
 
 def iter_windows(width: int, height: int, block_size: int = 2048) -> Generator[tuple[int, int, int, int], None, None]:
     """

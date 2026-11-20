@@ -20,8 +20,14 @@ at that moment — if the alias ever diverges from the default's own key, that
 is a bug in the default-flip signal, not a feature.
 
 Value format (JSON):
-  With a style:    {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear", "colormap": {"0": [r,g,b,a], ...}}
-  Without one:     {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear"}
+  With a style:    {"vmin": 263.15, "vmax": 313.15, "scale_type": "linear", "colormap": {"0": [r,g,b,a], ...},
+                    "scale": 1.0, "offset": -273.15, "unit": "degC"}
+  Without one:     the same without ``colormap``.
+  ``vmin``/``vmax`` and the colormap are in the variable's source unit — what a
+  tile is drawn with, so no pixel is converted (ADR 0046 §14). ``scale``,
+  ``offset`` and ``unit`` are for the numbers Titiler answers with — a point
+  read, GetFeatureInfo — which it serves as ``value·scale + offset`` in ``unit``
+  (§15).
   A catalog in ``display`` clip mode adds ``"boundary"``: a GeoJSON geometry the
   tile server crops tiles to (ADR 0038).
 """
@@ -103,6 +109,9 @@ def build_variable_payload(variable, style=None) -> dict:
         "vmin": variable.value_min,
         "vmax": variable.value_max,
         "scale_type": variable.scale_type or "linear",
+        "scale": variable.scale,
+        "offset": variable.offset,
+        "unit": variable.unit.symbol,
     }
 
     style = style if style is not None else variable.default_style
@@ -273,7 +282,7 @@ def warm_all() -> None:
 
     qs = (
         Variable.objects.filter(is_active=True)
-        .select_related("collection__catalog__organisation")
+        .select_related("collection__catalog__organisation", "unit", "source_unit")
         .prefetch_related("styles")
     )
 

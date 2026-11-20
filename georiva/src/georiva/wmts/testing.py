@@ -177,6 +177,7 @@ def make_tiered_catalog(organisation, slug="forecast"):
             collection=collection,
             slug="t2m",
             name=variable_name,
+            source_unit=unit,
             unit=unit,
             value_min=0,
             value_max=50,

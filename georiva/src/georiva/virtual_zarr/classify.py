@@ -10,6 +10,10 @@ never the Django row).  At build time:
       same-key COG overwrite, deletion)                     → REBUILD
     * nothing new and nothing changed                       → UP_TO_DATE
 
+The served unit is not part of what is built: the CF attributes describing
+the raw bytes are supplied when the repo is opened (ADR 0046 §18), so a change
+to it rebuilds nothing.
+
 Pure functions only — no ORM, no I/O — so the decision table is unit-testable.
 """
 

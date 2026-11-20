@@ -18,7 +18,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from rasterio.transform import from_bounds
 
-from georiva.core.models import Asset, Item
+from georiva.core.models import Asset, Item, Unit
 from georiva.core.storage.asset_location import AssetLocation
 from georiva.virtual_zarr.models import VirtualZarrManifest
 
@@ -220,6 +220,23 @@ class TimeseriesOverAMixedCollectionTests(RemoteTimeseriesMixin, TestCase):
         self.assertEqual(
             self.values(self.area()),
             [("2026-03-01", 11.5), ("2026-03-02", 21.5), ("2026-03-03", 31.5)],
+        )
+
+    def test_the_series_is_in_the_served_unit_and_names_it(self):
+        # Stored in mm, served in cm (ADR 0046 §11): both halves of the series convert.
+        self.variable.unit, _ = Unit.objects.get_or_create(symbol="cm", defaults={"name": "Centimetre"})
+        self.variable.save()
+
+        for response in (self.point(), self.area()):
+            with self.subTest(response.request["PATH_INFO"]):
+                self.assertEqual(response.json()["units"], "cm")
+        self.assertEqual(
+            [(day, round(value, 4)) for day, value in self.values(self.point())],
+            [("2026-03-01", 1.3), ("2026-03-02", 2.3), ("2026-03-03", 3.3)],
+        )
+        self.assertEqual(
+            [(day, round(value, 4)) for day, value in self.values(self.area())],
+            [("2026-03-01", 1.15), ("2026-03-02", 2.15), ("2026-03-03", 3.15)],
         )
 
     def test_a_range_inside_the_local_window_reads_nothing_upstream(self):

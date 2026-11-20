@@ -743,9 +743,9 @@
                                  data-asset-texture-url="{{ asset.texture_url|default:'' }}"
                                  data-asset-format="{{ asset.format }}"
                                  data-asset-bounds="{{ asset.item.bounds|join:',' }}"
-                                 data-asset-min="{{ asset.stats_min|default:'' }}"
-                                 data-asset-max="{{ asset.stats_max|default:'' }}"
-                                 data-asset-units="{{ asset.units|default:'' }}"
+                                 data-asset-min="{{ asset.served_stats.min|default_if_none:'' }}"
+                                 data-asset-max="{{ asset.served_stats.max|default_if_none:'' }}"
+                                 data-asset-units="{{ asset.served_unit|default:'' }}"
                                  data-asset-name="{{ asset.variable.name }}"
                                  data-asset-palette='{{ asset.render_contract.palette|to_json }}'
                                  data-asset-image-unscale='{{ asset.render_contract.image_unscale|to_json }}'
@@ -779,23 +779,23 @@
                                             <span class="geo-badge geo-badge--size">{{ asset.file_size|filesizeformat }}</span>
                                         {% endif %}
                                     </div>
-                                    {% if asset.stats_min is not None %}
+                                    {% if asset.served_stats.min is not None %}
                                         <div class="geo-asset-stats">
                                             <div class="geo-stat-item">
                                                 <span class="geo-stat-label">Min</span>
-                                                <span class="geo-stat-value">{{ asset.stats_min|floatformat:2 }}</span>
+                                                <span class="geo-stat-value">{{ asset.served_stats.min|floatformat:2 }}</span>
                                             </div>
                                             <div class="geo-stat-item">
                                                 <span class="geo-stat-label">Max</span>
-                                                <span class="geo-stat-value">{{ asset.stats_max|floatformat:2 }}</span>
+                                                <span class="geo-stat-value">{{ asset.served_stats.max|floatformat:2 }}</span>
                                             </div>
                                             <div class="geo-stat-item">
                                                 <span class="geo-stat-label">Mean</span>
-                                                <span class="geo-stat-value">{{ asset.stats_mean|floatformat:2 }}</span>
+                                                <span class="geo-stat-value">{{ asset.served_stats.mean|floatformat:2 }}</span>
                                             </div>
                                             <div class="geo-stat-item">
                                                 <span class="geo-stat-label">Std</span>
-                                                <span class="geo-stat-value">{{ asset.stats_std|floatformat:2 }}</span>
+                                                <span class="geo-stat-value">{{ asset.served_stats.std|floatformat:2 }}</span>
                                             </div>
                                         </div>
                                     {% endif %}

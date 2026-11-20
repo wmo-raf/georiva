@@ -225,9 +225,8 @@ class IcechunkStorageChecks(SimpleTestCase):
         self.assertEqual(ds_pinned.sizes["time"], 2)
 
 
-@unittest.skipUnless(S3_READY, "requires the dev MinIO (s3 storage backend)")
-class BuildTaskEndToEndTests(TestCase):
-    """The classifier-driven build against real Items/Assets and MinIO."""
+class BuiltVariableFixture(TestCase):
+    """One Variable's COGs in MinIO, and its manifest, for a build test."""
 
     def setUp(self):
         from georiva.core.models import Catalog, Collection, Unit, Variable
@@ -251,6 +250,7 @@ class BuildTaskEndToEndTests(TestCase):
             collection=self.collection,
             slug="precip",
             name="Precip",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=500,
@@ -295,6 +295,11 @@ class BuildTaskEndToEndTests(TestCase):
 
         repo = open_repo(manifest.get_repo_path())
         return sum(1 for _ in repo.ancestry(branch="main"))
+
+
+@unittest.skipUnless(S3_READY, "requires the dev MinIO (s3 storage backend)")
+class BuildTaskEndToEndTests(BuiltVariableFixture):
+    """The classifier-driven build against real Items/Assets and MinIO."""
 
     def test_full_cycle_rebuild_append_and_overwrite_fallback(self):
         from georiva.virtual_zarr.models import VirtualZarrManifest
@@ -481,3 +486,92 @@ class BuildTaskEndToEndTests(TestCase):
 
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.NO_DATA)
         self.assertIn("2 bands", manifest.left_out[0]["reason"])
+
+
+@unittest.skipUnless(S3_READY, "requires the dev MinIO (s3 storage backend)")
+class ManifestDescribesRawBytesTests(BuiltVariableFixture):
+    """A manifest's chunks are the COGs' raw bytes, in the source unit; CF's
+    ``scale_factor``, ``add_offset`` and ``units`` say how to read them in the
+    served unit (ADR 0046 §18), so xarray decodes to what the map shows."""
+
+    #: Kelvin, as a model writes 2 m temperature.
+    KELVIN = (270.0 + np.arange(64 * 64, dtype="float32") / 100).reshape(64, 64)
+
+    def setUp(self):
+        from georiva.core.models import Unit
+
+        super().setUp()
+        self.variable.source_unit, _ = Unit.objects.get_or_create(symbol="K", defaults={"name": "test K"})
+        self.variable.unit, _ = Unit.objects.get_or_create(symbol="°C", defaults={"name": "test °C"})
+        self.variable.save()
+
+    def _built(self):
+        from georiva.virtual_zarr.tasks import _run_build
+
+        manifest = self._manifest()
+        _run_build(manifest)
+        manifest.refresh_from_db()
+        return manifest
+
+    def test_opening_the_manifest_decodes_to_the_served_unit(self):
+        self._add_item(1, data=self.KELVIN)
+        manifest = self._built()
+
+        array = manifest.open_dataset(chunks=None)["precip"]
+        self.assertEqual(array.attrs["units"], "°C")
+        self.assertEqual(array.encoding["scale_factor"], 1)
+        self.assertAlmostEqual(array.encoding["add_offset"], -273.15)
+        np.testing.assert_allclose(array.isel(time=0).values, self.KELVIN - 273.15, atol=1e-3)
+
+    def test_a_served_unit_change_rewrites_nothing_and_the_manifest_follows_it(self):
+        """The CF attributes are generated when the manifest is read (ADR 0046
+        §2, §18): a served-unit change leaves the manifest READY, rebuilds
+        nothing, and the next open describes the bytes in the new unit."""
+        from georiva.core.models import Asset, Unit
+        from georiva.virtual_zarr.models import VirtualZarrManifest
+
+        _, asset = self._add_item(1, data=self.KELVIN)
+        manifest = self._built()
+        before = Asset.objects.values().get(pk=asset.pk)
+        snapshot = manifest.snapshot_id
+
+        self.variable.unit, _ = Unit.objects.get_or_create(symbol="°F", defaults={"name": "test °F"})
+        self.variable.save()
+
+        manifest = self._manifest()
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
+        self.assertEqual(manifest.snapshot_id, snapshot)
+        array = manifest.open_dataset(chunks=None)["precip"]
+        self.assertEqual(array.attrs["units"], "°F")
+        np.testing.assert_allclose(array.isel(time=0).values, self.KELVIN * 1.8 - 459.67, atol=1e-3)
+        self.assertEqual(Asset.objects.values().get(pk=asset.pk), before)
+        np.testing.assert_array_equal(
+            _read_source(manifest_config_url(asset.href)),
+            self.KELVIN,
+        )
+
+    def test_the_read_module_converts_a_manifest_once(self):
+        from georiva.core import values
+
+        self._add_item(1, data=self.KELVIN)
+        manifest = self._built()
+
+        with values.session() as session:
+            served = session.virtual_dataset(manifest)["precip"].isel(time=0).values
+        np.testing.assert_allclose(served, self.KELVIN - 273.15, atol=1e-3)
+
+    def test_the_read_module_reads_a_manifest_in_the_unit_asked_for(self):
+        from georiva.core import values
+
+        self._add_item(1, data=self.KELVIN)
+        manifest = self._built()
+
+        with values.session(in_unit="°F") as session:
+            read = session.virtual_dataset(manifest)["precip"].isel(time=0).values
+        np.testing.assert_allclose(read, self.KELVIN * 1.8 - 459.67, atol=1e-3)
+
+
+def manifest_config_url(key: str) -> str:
+    from georiva.virtual_zarr.virtual_zarr import MinioStoreConfig
+
+    return MinioStoreConfig.from_django_settings().url_for(key)

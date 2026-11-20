@@ -118,8 +118,10 @@ Key per-variable fields:
   GeoTIFF, a short name for GRIB). Accepts a string shorthand or a dict with
   `name` and `level`.
 - `source_units` vs `output_units` — the raw unit as it leaves the file vs the
-  unit you expose. If they differ, the ingestion pipeline converts via pint.
-- `value_range` — seeds the variable's min/max at creation. Defaults to
+  unit you expose. Data is stored as the file carries it and converted when
+  read (ADR 0046).
+- `value_range` — seeds the variable's min/max at creation, **in the exposed
+  unit** (`output_units`); it is stored converted to `source_units`. Defaults to
   `(0.0, 1.0)` when omitted.
 - `palette` — a color ramp name from the instance catalog (matplotlib-compatible
   names such as `"viridis"`, `"RdBu"`; your organisation's own ramps also
@@ -127,7 +129,8 @@ Key per-variable fields:
   into the variable's default style. An unknown name falls back to grayscale
   with a logged warning.
 - `palette_stops` — exact `(value, "#RRGGBB")` pairs for canonical palettes
-  whose colors pin physical thresholds. Materialized verbatim as the default
+  whose colors pin physical thresholds, in the exposed unit like `value_range`
+  (a `0.0` stop with `output_units="degC"` pins 0 °C). Materialized as the default
   style, and the variable's range is **derived from the stops** — declaring
   both `value_range` and `palette_stops` merely warns if they disagree.
   Malformed stops fall back to `palette` (or grayscale) with a warning;

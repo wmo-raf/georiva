@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+# Re-exported: what a recipe declares to read an input as it is held.
+from georiva.core.values.units import SOURCE_UNIT  # noqa: F401
+
 # A ProductionUnit is any JSON-serialisable mapping of coordinates. The engine
 # never interprets it; it only serialises + hashes it for the lock/idempotency.
 ProductionUnit = dict
@@ -44,16 +47,50 @@ def compute_input_hash(resolved: dict[str, ResolvedInput], recipe_version: str) 
 
 @dataclass
 class ResolvedInput:
-    """The catalog items + their data assets resolved for one named selector."""
+    """The catalog items + their data assets resolved for one named selector.
+
+    Its values are read with :meth:`field` / :meth:`series`, in the unit the
+    recipe declares for the input (``BaseRecipe.input_units``, ADR 0046 §13), in
+    the reading session the engine opens for the production unit.
+    """
 
     name: str
     required: bool
     items: list = field(default_factory=list)  # StagingItem | core.Item
     assets: list = field(default_factory=list)  # their data/source assets
+    #: The unit this input's values are read in; set by the engine.
+    in_unit: str | None = None
+    #: The production unit's reading session; set by the engine.
+    session: Any = field(default=None, repr=False, compare=False)
 
     @property
     def present(self) -> bool:
         return len(self.items) > 0
+
+    def field(self, asset):
+        """One of this input's assets as a whole field (``values.Field``), in its declared unit."""
+        return self._read(lambda s: s.field(asset, in_unit=self._unit()))
+
+    def series(self, asset):
+        """One of this input's multi-temporal files over time (an xarray
+        DataArray), in its declared unit."""
+        return self._read(lambda s: s.series(asset, in_unit=self._unit()))
+
+    def _unit(self) -> str:
+        if not self.in_unit:
+            raise ValueError(
+                f"Input '{self.name}' has no declared unit to be read in; "
+                "its recipe declares one in input_units (ADR 0046 §13)."
+            )
+        return self.in_unit
+
+    def _read(self, read):
+        if self.session is not None:
+            return read(self.session)
+        from georiva.core import values
+
+        with values.session() as s:
+            return read(s)
 
     @property
     def checksums(self) -> list[str]:
@@ -178,6 +215,12 @@ class BaseRecipe(ABC):
     #: needing sources; a recipe that copies into a collection of file-read
     #: Variables (promotion) says False.
     creates_output_variables: bool = True
+    #: The unit each input is read in, by role (ADR 0046 §13): a unit symbol, or
+    #: :data:`SOURCE_UNIT` to read it as it is held, for arithmetic that holds in
+    #: any unit and an output written down in the unit it read in. Never the
+    #: served unit, which anybody may change. Declaring none — or an input
+    #: without one — refuses the recipe at registration.
+    input_units: dict[str, str] = {}
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -217,6 +260,22 @@ class BaseRecipe(ABC):
     @abstractmethod
     def transform(self, unit: ProductionUnit, resolved: dict[str, ResolvedInput]) -> list[OutputAsset]:
         """Pure compute: resolved inputs → output assets for this unit."""
+
+    def output_unit(self, unit: ProductionUnit, resolved: dict[str, ResolvedInput]) -> str:
+        """The unit symbol this unit's output values are in: the source unit (and
+        the initial served unit) of the output Variables the recipe creates
+        (ADR 0046 §13). A difference is declared in a difference unit
+        (``core.unit_utils.difference_unit``). A recipe with
+        ``creates_output_variables`` must declare it."""
+        raise NotImplementedError(f"{type(self).__name__} declares no output unit")
+
+    def output_source_unit(self, unit: ProductionUnit, resolved: dict[str, ResolvedInput]):
+        """The ``Unit`` row of :meth:`output_unit`, created if it is new."""
+        from georiva.core.models import Unit
+
+        symbol = self.output_unit(unit, resolved)
+        found, _ = Unit.objects.get_or_create(symbol=symbol, defaults={"name": symbol})
+        return found
 
     # ---- candidate generation (event-driven; overridable) -------------------
 

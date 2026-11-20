@@ -53,6 +53,7 @@ class SweepDispatchTests(TestCase):
             collection=self.collection,
             slug=slug,
             name=slug,
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=500,

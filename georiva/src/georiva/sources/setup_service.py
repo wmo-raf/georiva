@@ -277,7 +277,24 @@ class SourceSetupService:
             "description": var_def.description,
             "unit": output_unit,
             "source_unit": source_unit,
+            "water": var_def.water,
         }
+        existing = Variable.objects.filter(collection=collection, slug=slug).select_related("source_unit").first()
+        if existing is not None and existing.source_unit_locked():
+            # The bytes already held say what they hold (ADR 0046 §8): a
+            # declaration that changed is not a relabelling of them.
+            base_defaults.pop("source_unit")
+            if existing.source_unit_id != source_unit.pk:
+                logger.warning(
+                    "Variable %s/%s: the plugin now declares source unit %s, but its data is held as %s. "
+                    "Kept %s; if the data is in fact %s, use Correct source unit.",
+                    collection.slug,
+                    slug,
+                    source_unit.symbol,
+                    existing.source_unit.symbol,
+                    existing.source_unit.symbol,
+                    source_unit.symbol,
+                )
         # Seed-vs-tune (ADR 0022): the plugin's declared range and styling
         # only seed a new Variable — an operator-tuned range or style must
         # survive re-provisioning. Canonical stops outrank the declared range:
@@ -305,7 +322,14 @@ class SourceSetupService:
             seed_min, seed_max = var_def.value_range
         else:
             seed_min, seed_max = 0.0, 1.0
-        seed_defaults = {"value_min": seed_min, "value_max": seed_max}
+        # A plugin declares its range and stops as numbers people read — in the
+        # unit the variable is served in — and they are stored in the source
+        # unit (ADR 0046 §3). Saving refuses a conversion that cannot be made.
+        seeding = Variable(source_unit=source_unit, unit=output_unit, water=var_def.water)
+        seeding.set_served_range(seed_min, seed_max)
+        seed_defaults = {"value_min": seeding.value_min, "value_max": seeding.value_max}
+        if seed_stops:
+            seed_stops = seeding.stored_stops(seed_stops)
 
         if var_def.transform == "passthrough":
             transform = Variable.TransformType.PASSTHROUGH
@@ -351,7 +375,6 @@ class SourceSetupService:
         serving already falls back to grayscale for a style-less variable.
         """
         from georiva.core.models import ColorRamp, VariableStyle
-        from georiva.core.models.visualization import generate_stops
 
         if seed_stops:
             VariableStyle.objects.create(
@@ -381,14 +404,16 @@ class SourceSetupService:
                 var_def.palette,
             )
             return
-        VariableStyle.objects.create(
+        style = VariableStyle(
             variable=variable,
             name=ramp.name,
             slug=slugify(ramp.name) or "default",
             is_default=True,
             ramp=ramp,
-            stops=generate_stops(ramp, variable.value_min, variable.value_max),
         )
+        # Laid over the served range, stored converted (ADR 0046 §3).
+        style.apply_ramp()
+        style.save()
 
     @staticmethod
     def _upsert_link(*, data_feed, collection, definition: CollectionDefinition, config_values: dict):

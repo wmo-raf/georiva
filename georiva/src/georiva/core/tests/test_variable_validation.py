@@ -26,6 +26,7 @@ class VariableRangeCleanTests(TestCase):
             collection=self.collection,
             slug="tas",
             name="tas",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=value_min,
             value_max=value_max,

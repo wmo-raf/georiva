@@ -51,7 +51,7 @@
     {# ── Variable assignment ── #}
     <div class="uwiz-section-title">{% trans "Variable assignments" %}</div>
     <p class="w-field__help-text uwiz-section-help">
-        {% trans "Edit the display name, output unit and expected value range for each variable, and assign it to a collection. Values are converted from the incoming unit (read from the sample file) to the output unit you choose, and the value range is in the output unit. It drives color mapping and tile encoding, and was pre-filled from the sample file where possible." %}
+        {% trans "Edit the display name, output unit and expected value range for each variable, and assign it to a collection. Data is stored in the incoming unit (read from the sample file) and converted to the output unit you choose when read, and the value range is in the output unit. It drives color mapping and tile encoding, and was pre-filled from the sample file where possible." %}
     </p>
     <div class="gr-vc-list" id="variables-tbody"></div>
     <button type="button" class="button button-secondary button-small gr-vc-add" id="add-derived-btn">
@@ -209,6 +209,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 value_min: a ? a.value_min : (v.value_min != null ? v.value_min : null),
                 value_max: a ? a.value_max : (v.value_max != null ? v.value_max : null),
                 has_data: false,
+                // Proposed from the file's own names; the person confirms it (ADR 0046 §6).
+                water: a ? !!a.water : !!v.water,
             }, sel);
         });
 
@@ -235,6 +237,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     incoming_symbol: a.source_symbol || '',
                     value_min: a.value_min,
                     value_max: a.value_max,
+                    water: !!a.water,
                 });
                 const c = collections[a.collection_idx];
                 if (c) card.querySelector('.gr-vc-collection select').value = String(c.id);
@@ -300,6 +303,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     unit_display:   r.unit_display,
                     value_min:      r.value_min,
                     value_max:      r.value_max,
+                    water:          r.water,
                     collection_idx: derivedIdx >= 0 ? derivedIdx : 0,
                 };
             }
@@ -319,6 +323,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 unit_display:   r.unit_display,
                 value_min:      r.value_min,
                 value_max:      r.value_max,
+                water:          r.water,
                 collection_idx: collIdx >= 0 ? collIdx : 0,
             };
         });

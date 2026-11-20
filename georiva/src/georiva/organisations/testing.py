@@ -113,6 +113,7 @@ def make_org_tree(organisation, *, name=None, slug=SHARED_TREE_SLUG):
         collection=collection,
         name=name,
         slug=slug,
+        source_unit=unit,
         unit=unit,
         value_min=0,
         value_max=50,

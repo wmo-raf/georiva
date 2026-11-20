@@ -36,6 +36,7 @@ class VirtualZarrManifestTests(TestCase):
             collection=self.collection,
             slug="precipitation",
             name="Precipitation",
+            source_unit=self.unit,
             unit=self.unit,
             value_min=0,
             value_max=500,

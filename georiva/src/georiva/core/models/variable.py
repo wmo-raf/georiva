@@ -11,6 +11,7 @@ from wagtail.fields import StreamField
 from wagtail.models import Orderable
 
 from georiva.core.panels import StylingSummaryPanel
+from georiva.core.unit_utils import Conversion, ConversionRefused
 
 
 class SourceBlock(StructBlock):
@@ -133,18 +134,32 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     source_unit = models.ForeignKey(
         "georivacore.Unit",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="+",
-        help_text="Units of the raw data as it comes from the source file, e.g. Kelvin, Pa, m/s.",
+        help_text=(
+            "The unit this variable's data is stored in, as the source produces it, e.g. Kelvin, Pa, m/s. "
+            "Locked once the variable has data; a wrong label is fixed with Correct source unit."
+        ),
     )
 
     unit = models.ForeignKey(
         "georivacore.Unit",
         on_delete=models.PROTECT,
         related_name="+",
-        help_text="Units of this variable's output after any conversion.",
+        help_text="The unit this variable is served in. Changing it rewrites no data.",
+    )
+
+    # The positive affine conversion source_unit → unit (ADR 0046 §5): served =
+    # raw·scale + offset. Recomputed on every save, so readers outside Django —
+    # Martin's SQL, tile-config's clients — convert by arithmetic alone.
+    scale = models.FloatField(default=1.0, editable=False)
+    offset = models.FloatField(default=0.0, editable=False)
+    water = models.BooleanField(
+        default=False,
+        help_text=(
+            "This variable's values are water, so kg/m² and mm (and their rates) are the same quantity. "
+            "Leave unset for a column load of anything else, such as dust or ozone."
+        ),
     )
 
     # Visualization. The 0–1 defaults are the seeding fallback (ADR 0022): a
@@ -205,6 +220,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         FieldPanel("description"),
         FieldPanel("source_unit"),
         FieldPanel("unit"),
+        FieldPanel("water"),
         # Range and styling are read-only here (issue #323): the Styling
         # surface is the one place that tunes them (ADR 0022).
         StylingSummaryPanel(heading="Styling"),
@@ -252,12 +268,13 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         except ValidationError as e:
             errors.update(e.error_dict)
 
-        # Unit conversion compatibility
-        if self.source_unit and self.unit and self.source_unit != self.unit:
+        if self.source_unit_id is None:
+            errors["source_unit"] = _("Every variable states the unit its data is stored in.")
+        elif self.unit_id is not None:
             try:
-                self.source_unit.pint_unit.to(self.unit.pint_unit)
-            except Exception:
-                errors["unit"] = f"Cannot convert from {self.source_unit} to {self.unit} — incompatible dimensions."
+                self.conversion()
+            except ConversionRefused as e:
+                errors["unit"] = str(e)
 
         # Sources / transform consistency — only for a Variable read out of
         # ingested files; a harvested or recipe-written one has no bands to name.
@@ -266,6 +283,68 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
         if errors:
             raise ValidationError(errors)
+
+    def conversion(self) -> Conversion:
+        """The conversion ``source_unit → unit`` worked out from the units now
+        set, or :class:`ConversionRefused` (ADR 0046 §4)."""
+        return Conversion.between(self.source_unit.symbol, self.unit.symbol, water=self.water)
+
+    @property
+    def served_conversion(self) -> Conversion:
+        """The conversion into the served unit as stored (``scale``, ``offset``)."""
+        return Conversion(self.scale, self.offset, self.unit.symbol if self.unit_id else "")
+
+    def save(self, *args, **kwargs):
+        """Recompute ``scale`` and ``offset`` (ADR 0046 §5). A conversion that
+        is refused is never stored: the save raises, as ``clean()`` would.
+
+        A source unit is locked once the Variable has an asset (ADR 0046 §8):
+        whatever saves it, a change raises. :meth:`correct_source_unit` is the
+        one way past the lock."""
+        update_fields = kwargs.get("update_fields")
+        if not getattr(self, "_correcting_source_unit", False) and (
+            update_fields is None or "source_unit" in update_fields
+        ):
+            self._refuse_relabelling_held_bytes()
+        if self.source_unit_id is not None and self.unit_id is not None:
+            try:
+                self._take(self.conversion())
+            except ConversionRefused as e:
+                raise ValidationError({"unit": str(e)}) from None
+        if update_fields is not None and {"source_unit", "unit", "water"} & set(update_fields):
+            kwargs["update_fields"] = {*update_fields, "scale", "offset"}
+        super().save(*args, **kwargs)
+
+    def source_unit_locked(self) -> bool:
+        """Whether bytes this Variable describes exist, so its source unit says
+        what they hold and only :meth:`correct_source_unit` may change it."""
+        return self.pk is not None and self.assets.exists()
+
+    def _refuse_relabelling_held_bytes(self):
+        if self.pk is None or self.source_unit_id is None:
+            return
+        stored = type(self).objects.filter(pk=self.pk).values_list("source_unit_id", flat=True).first()
+        if stored is None or stored == self.source_unit_id or not self.source_unit_locked():
+            return
+        raise ValidationError(
+            {
+                "source_unit": _(
+                    "This variable already has data, which its source unit describes. "
+                    "Use Correct source unit to change it."
+                )
+            }
+        )
+
+    def correct_source_unit(self, source_unit):
+        """Say that the bytes this Variable holds are in ``source_unit`` — the
+        Correct source unit action (ADR 0046 §8). Nothing is converted: every
+        stored value, range, stop and statistic is reinterpreted."""
+        self.source_unit = source_unit
+        self._correcting_source_unit = True
+        try:
+            self.save(update_fields=["source_unit"])
+        finally:
+            self._correcting_source_unit = False
 
     def _reads_from_files(self) -> bool:
         try:
@@ -353,5 +432,68 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     @property
     def value_range(self):
         """The canonical (value_min, value_max) accessor — encoding, legend
-        display, and previews all read this one (ADR 0022)."""
+        display, and previews all read this one (ADR 0022). In the source unit,
+        like every number stored about values (ADR 0046 §3)."""
         return self.value_min, self.value_max
+
+    # -------- served numbers (ADR 0046 §2, §15) --------
+
+    def served(self, value):
+        """A stored (source-unit) number in the served unit; ``None`` stays ``None``.
+
+        Rounded to 12 significant digits, so 300 K reads 26.85 °C rather than
+        26.850000000000023: these are numbers people read.
+        """
+        return self.served_conversion.forward(value)
+
+    def served_spread(self, value):
+        """A stored spread (a standard deviation) in the served unit: by the scale
+        alone, never the offset (ADR 0046 §7); ``None`` stays ``None``."""
+        return self.served_conversion.spread(value)
+
+    @property
+    def served_range(self) -> tuple:
+        """:attr:`value_range` in the served unit."""
+        return self.served(self.value_min), self.served(self.value_max)
+
+    def served_palette(self, palette: list) -> list:
+        """``[[value, color], ...]`` stops with each value in the served unit."""
+        return [[self.served(value), color] for value, color in palette]
+
+    # -------- the form boundary (ADR 0046 §3) --------
+    #
+    # Operators type and read ranges and stops in the served unit; they are
+    # stored in the source unit. Forms convert both ways through these.
+
+    def stored(self, value):
+        """A served-unit number as stored (in the source unit); ``None`` stays ``None``.
+
+        The inverse of :meth:`served`, rounded the same way, so 0 °C stores
+        273.15 K rather than 273.15000000000003.
+        """
+        return self.served_conversion.inverse(value)
+
+    def served_stops(self, stops: list) -> list:
+        """``[{"value", "color"}, ...]`` stops with each value in the served unit."""
+        return [{**stop, "value": self.served(stop["value"])} for stop in stops]
+
+    def stored_stops(self, stops: list) -> list:
+        """Served-unit ``[{"value", "color"}, ...]`` stops as stored."""
+        return [{**stop, "value": self.stored(stop["value"])} for stop in stops]
+
+    def refresh_conversion(self):
+        """Recompute ``scale`` and ``offset`` from the units now set, before
+        :meth:`stored` is asked of a Variable not yet saved with them. A refused
+        conversion raises as :meth:`save` would."""
+        try:
+            self._take(self.conversion())
+        except ConversionRefused as e:
+            raise ValidationError({"unit": str(e)}) from None
+
+    def _take(self, conversion: Conversion):
+        self.scale, self.offset = conversion.scale, conversion.offset
+
+    def set_served_range(self, value_min, value_max):
+        """Set the range from served-unit numbers, stored in the source unit."""
+        self.refresh_conversion()
+        self.value_min, self.value_max = self.stored(value_min), self.stored(value_max)

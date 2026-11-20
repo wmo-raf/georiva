@@ -16,6 +16,7 @@ from django.urls import reverse
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
+from georiva.core.unit_utils import Conversion, ConversionRefused, proposes_water
 from georiva.formats.registry import format_registry
 from georiva.ingestion.derived_variables import (
     degree_unit,
@@ -24,7 +25,7 @@ from georiva.ingestion.derived_variables import (
     is_direction,
     validate_derived,
 )
-from georiva.ingestion.unit_range import same_unit, units_convertible
+from georiva.ingestion.unit_range import same_unit
 from georiva.organisations.access import scoped_queryset
 
 logger = logging.getLogger(__name__)
@@ -575,7 +576,12 @@ def upload_wizard_step4(request):
 
     all_variables = session.get("variables", [])
     selected_names = session.get("selected_variable_names", [])
-    selected_variables = [v for v in all_variables if v["name"] in selected_names]
+    # The Water flag is proposed from the file's own names, for the operator to confirm (ADR 0046 §6).
+    selected_variables = [
+        {**v, "water": proposes_water(v["name"], v.get("long_name") or "", v.get("standard_name") or "")}
+        for v in all_variables
+        if v["name"] in selected_names
+    ]
 
     catalog_name = _catalog_name_from_session(request, session)
     collection_base_name = f"{catalog_name} Collection" if catalog_name else "Collection"
@@ -684,17 +690,22 @@ def upload_wizard_step4(request):
                 output = Unit.objects.filter(pk=unit_id).first()
                 output_symbol = output.symbol if output else ""
 
-            # The extractor converts incoming → output, so the pair must be convertible.
+            # Values are served converted from the incoming unit (ADR 0046 §4), so
+            # the pair must convert — of water only when the operator says so (§6).
+            a["water"] = bool(a.get("water"))
             incoming_symbol = _incoming_symbol(a)
             if derived and is_direction(derived.get("transform")):
                 pass
             elif not incoming_symbol:
                 errors.append(_("Variable '%s' needs its incoming unit: set the unit the file carries.") % var_label)
-            elif output_symbol and not units_convertible(incoming_symbol, output_symbol):
-                errors.append(
-                    _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
-                    % {"var": var_label, "a": incoming_symbol, "b": output_symbol}
-                )
+            elif output_symbol:
+                try:
+                    Conversion.between(incoming_symbol, output_symbol, water=a["water"])
+                except ConversionRefused as refused:
+                    errors.append(
+                        _("Variable '%(var)s' cannot be served in %(b)s: %(why)s")
+                        % {"var": var_label, "b": output_symbol, "why": refused}
+                    )
 
         # Duplicate source_name check: each variable_name must map to exactly
         # one collection per catalog (unambiguous collection resolution for
@@ -937,6 +948,13 @@ def upload_wizard_provision(request):
                     transform = Variable.TransformType.PASSTHROUGH
                     sources = passthrough_sources(variable_name)
 
+                # The range was typed in the output unit; it is stored in the
+                # unit the files carry (ADR 0046 §3).
+                source_unit = _source_unit_for_assignment(assignment) or unit
+                water = bool(assignment.get("water"))
+                seeding = Variable(source_unit=source_unit, unit=unit, water=water)
+                seeding.set_served_range(assignment["value_min"], assignment["value_max"])
+
                 # get_or_create: re-provisioning into an existing collection must
                 # not clobber hand-tuned Variables (styling, transform, ranges).
                 Variable.objects.get_or_create(
@@ -946,10 +964,12 @@ def upload_wizard_provision(request):
                         "name": assignment.get("long_name") or variable_name,
                         "source_long_name": (assignment.get("source_long_name") or "").strip(),
                         "transform_type": transform,
-                        "source_unit": _source_unit_for_assignment(assignment),
+                        # A file that names no unit is taken to hold the one chosen for it.
+                        "source_unit": source_unit,
                         "unit": unit,
-                        "value_min": assignment["value_min"],
-                        "value_max": assignment["value_max"],
+                        "water": water,
+                        "value_min": seeding.value_min,
+                        "value_max": seeding.value_max,
                         "sources": sources,
                     },
                 )

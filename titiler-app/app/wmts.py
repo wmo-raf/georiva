@@ -502,9 +502,8 @@ async def _tile_config_for(address: tuple[str, str, str, str], style: str | None
     unknown layer or an unknown style say so on this operation exactly as it
     does on GetTile (ADR 0023) — a point read alone would find no COG and
     blame the TIME. And it is the only per-request metadata this service
-    holds, so a ``units`` or ``label`` Django one day puts in that payload
-    reaches an identify answer without a second channel being built for it
-    (#363); until it does, the answer carries the value alone.
+    holds: the served unit Django puts in that payload (ADR 0046 §15) is how
+    an identify answer names the unit its value is in.
 
     Run off the event loop because the underlying resolution is the tile
     routes' synchronous dependency, Redis call and all — the same function, so
@@ -532,13 +531,14 @@ async def _read_point(
     query: dict[str, str],
     style: str | None,
 ) -> float | None:
-    """The raw physical value under ``(lon, lat)``, or ``None`` where there is none.
+    """The physical value under ``(lon, lat)``, in the served unit, or ``None`` where there is none.
 
     Read through the point route, so the COG address comes from the same
     semantic path translation the tile did and an identify reads the very file
     the pixel under the cursor was drawn from. That route applies neither
     colormap nor rescale, which is what makes the number returned here the
-    physical one rather than the 0–255 a pixel was painted with.
+    physical one rather than the 0–255 a pixel was painted with — served,
+    because the point route converts it (``app.served``).
 
     ``None`` is the answer to a click that found no data — a nodata pixel,
     which arrives already masked, or a point outside the COG's own footprint,
@@ -549,6 +549,10 @@ async def _read_point(
     not hold rather than a place the grid does not cover.
     """
     path = f"/{'/'.join(address)}/point/{lon},{lat}"
+    # The point route reads the render config for the served unit, so it is
+    # asked under the style that was resolved, whose key is the one that exists.
+    if style:
+        query = {**query, "style": style}
     try:
         resp = await _reenter(request, path, query)
     except PointOutsideBounds:
@@ -621,9 +625,10 @@ async def _identify(
     }
     # Only what the payload already holds (#363): this service invents no
     # metadata, and an identify answer is not worth a channel of its own.
-    for name in ("units", "label"):
-        if config.get(name):
-            payload[name] = config[name]
+    if config.get("unit"):
+        payload["units"] = config["unit"]
+    if config.get("label"):
+        payload["label"] = config["label"]
     return payload
 
 

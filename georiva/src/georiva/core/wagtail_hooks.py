@@ -21,6 +21,7 @@ from .views import (
     variable_style_stops,
     variable_styling,
 )
+from .views.source_unit import correct_source_unit
 from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
 from .views.trace import item_trace
 from .views.viewsets import AssetViewSet, BoundaryChooserViewSet, ItemViewSet, admin_viewsets
@@ -47,6 +48,11 @@ def urlconf_georivacore():
             "collection/<int:collection_pk>/styling/<int:variable_pk>/preview-step/",
             variable_preview_step,
             name="variable_preview_step",
+        ),
+        path(
+            "collection/<int:collection_pk>/variables/<int:variable_pk>/correct-source-unit/",
+            correct_source_unit,
+            name="variable_correct_source_unit",
         ),
         path("plugins/", plugin_list, name="plugin_list"),
     ]
