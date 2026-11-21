@@ -9,9 +9,10 @@ from dataclasses import dataclass
 
 import numpy as np
 from affine import Affine
+from django.db.models import Q, QuerySet
 
 from georiva.core.storage import BucketType, storage
-from georiva.core.storage.asset_location import AssetLocation
+from georiva.core.storage.asset_location import AssetLocation, store_q
 
 from .store import OpenStores, StoreSlice, store_slice
 from .units import Conversion, Conversions
@@ -241,6 +242,19 @@ def point(asset, lon: float, lat: float, *, in_unit: str | None = None) -> float
 def area(asset, geometry: dict, aggregation: str, *, in_unit: str | None = None) -> float:
     with session(in_unit=in_unit) as s:
         return s.area(asset, geometry, aggregation)
+
+
+def readable(assets: QuerySet) -> QuerySet:
+    """The assets of ``assets`` this module gives values for: COGs, local or
+    Remote, and Store assets. Not a texture (PNG, WebP, JPEG), nor any format
+    a session cannot read.
+
+    Callers narrow to readable assets through this, not by filtering on
+    ``format`` themselves, so what a session can read is said in one place.
+    """
+    from georiva.core.models import Asset  # late: the models import the storage seam
+
+    return assets.filter(Q(format=Asset.Format.COG) | store_q())
 
 
 # ---- reading one open raster ------------------------------------------------------

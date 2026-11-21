@@ -41,6 +41,8 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   asset's store, array and pins, ADR 0044 §9)
 │   ├── values/               # What values an asset holds (ADR 0046 §10): `values.session()` reads a field,
 │   │                         #   window, point or series of a local or Remote COG, north-up float32 / NaN;
+│   │                         #   `values.readable(assets)` narrows a queryset to the assets it can read (COG
+│   │                         #   or Store asset) — callers ask it, never filter on `format` themselves;
 │   │                         #   store.py reads a Store asset: its store opened once per session at one
 │   │                         #   snapshot, with its feed's Pinned locations only (ADR 0044 §11, ADR 0046 §12).
 │   │                         #   Every value reader goes through it; core/tests/test_values_guard.py fails
