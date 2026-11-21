@@ -21,9 +21,12 @@ its own copy, across the process boundary (``titiler-app/app/store.py``).
 
 **A session holds what it opened** (:class:`OpenStores`): each store opened
 once, read-only at the snapshot it was opened on, for the session's life — a
-batch reads one moment of a store that commits every few seconds — and each
-field decoded once. Closing the session lets go of all of it. Nothing is kept
-between sessions.
+batch reads one moment of a store that commits every few seconds — and its most
+recently decoded fields (:data:`HELD_FIELDS`), as float32, so a point, window and
+area of one field decode it once. A field is a whole map — a global one is
+millions of cells — so a session that reads hundreds of them, as a publication
+over a whole forecast does, holds only the last few. Closing the session lets go
+of all of it. Nothing is kept between sessions.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -44,6 +48,11 @@ BRANCH = "main"
 #: How long one request to an upstream store may take, and to connect.
 READ_TIMEOUT = "30s"
 CONNECT_TIMEOUT = "5s"
+
+#: How many decoded fields a session holds at once, most recently read first. Each
+#: is a whole map (a 0.25° global one is 4 MB as float32): enough for the reads of
+#: one field to share one decode, and for a series' readers to work side by side.
+HELD_FIELDS = 8
 
 #: An address in what the store's library says of a read it would not make.
 _ADDRESS = re.compile(r"[a-z][a-z0-9+.-]*://[^\s()'\"]+", re.IGNORECASE)
@@ -156,19 +165,41 @@ class OpenStores:
         self._lock = threading.Lock()
         self._stores: dict[tuple, _OpenStore] = {}
         self._store_locks: dict[tuple, threading.Lock] = {}
-        self._fields: dict[tuple, _ArraySource] = {}
+        self._fields: OrderedDict[tuple, _ArraySource] = OrderedDict()
         self._field_locks: dict[tuple, threading.Lock] = {}
 
     def __len__(self) -> int:
         return len(self._stores)
 
+    @property
+    def held_fields(self) -> int:
+        """How many decoded fields are held."""
+        with self._lock:
+            return len(self._fields)
+
+    @property
+    def held_field_bytes(self) -> int:
+        """The memory the held fields' values take."""
+        with self._lock:
+            return sum(source.nbytes for source in self._fields.values())
+
     def source(self, wanted: StoreSlice) -> _ArraySource:
-        """The decoded field ``wanted`` names, as a raster held in memory."""
+        """The decoded field ``wanted`` names, as a raster held in memory — held
+        while it is one of the :data:`HELD_FIELDS` most recently read."""
         key = wanted.key
         with self._lock_for(self._field_locks, key):
-            if key not in self._fields:
-                self._fields[key] = self._store(wanted).field(wanted)
-            return self._fields[key]
+            with self._lock:
+                held = self._fields.get(key)
+                if held is not None:
+                    self._fields.move_to_end(key)
+                    return held
+            decoded = self._store(wanted).field(wanted)
+            with self._lock:
+                self._fields[key] = decoded
+                while len(self._fields) > HELD_FIELDS:
+                    evicted, _source = self._fields.popitem(last=False)
+                    self._field_locks.pop(evicted, None)
+            return decoded
 
     def close(self) -> None:
         with self._lock:
@@ -216,7 +247,9 @@ class _OpenStore:
         if not asyncio.run(self.store.exists(f"{wanted.array}/{array.metadata.encode_chunk_key(cell)}")):
             raise StepNotHeld(f"The upstream store does not hold {wanted.array} at {_when(wanted)}.")
         try:
-            data = np.asarray(array[tuple(at.get(part, slice(None)) for part in axes)])
+            # float32, as every value a session returns is: a float64 store's field
+            # held as stored would cost twice the memory for nothing.
+            data = np.asarray(array[tuple(at.get(part, slice(None)) for part in axes)], dtype=np.float32)
         except Exception as exc:
             place = refused_place(str(exc))
             if place is not None:
@@ -266,6 +299,7 @@ class _ArraySource:
         from rasterio.crs import CRS
 
         self._data = data
+        self.nbytes = data.nbytes
         self.transform = transform
         self.crs = CRS.from_epsg(4326)
         self.height, self.width = data.shape

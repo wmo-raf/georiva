@@ -96,6 +96,17 @@ class Session:
         """How many Upstream stores this session holds open."""
         return len(self._stores)
 
+    @property
+    def held_fields(self) -> int:
+        """How many decoded Store fields this session holds — never more than
+        :data:`~.store.HELD_FIELDS`, however many it has read."""
+        return self._stores.held_fields
+
+    @property
+    def held_field_bytes(self) -> int:
+        """The memory this session's held Store fields take."""
+        return self._stores.held_field_bytes
+
     def close(self) -> None:
         self._open = False
         self._stores.close()
