@@ -8,6 +8,7 @@ import numpy as np
 
 from georiva.core.models import Variable
 from georiva.formats.base import BaseFormatPlugin
+from georiva.geoprocessing import wind_from_direction
 
 if TYPE_CHECKING:
     from wagtail.blocks import StructValue
@@ -237,8 +238,7 @@ class VariableExtractor:
         u = self._extract_source(u_source, file_path, timestamp, window)
         v = self._extract_source(v_source, file_path, timestamp, window)
 
-        direction = np.degrees(np.arctan2(u, v)) + 180.0
-        direction = np.mod(direction, 360.0)
+        direction = wind_from_direction(u, v)
         del u, v
         return direction
 

@@ -26,6 +26,7 @@ from .temporal import (
     temporal_aggregate,
     trend,
 )
+from .wind import wind_from_direction, wind_speed
 from .zonal import mask_and_aggregate, reproject_geometry, zonal_stats_from_array
 
 __all__ = [
@@ -40,6 +41,8 @@ __all__ = [
     "select_season",
     "temporal_aggregate",
     "trend",
+    "wind_from_direction",
+    "wind_speed",
     "mask_and_aggregate",
     "reproject_geometry",
     "zonal_stats_from_array",
