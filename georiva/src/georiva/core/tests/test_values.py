@@ -249,7 +249,8 @@ class WhichAssetsHaveValuesTests(TestCase):
         self.days = iter(range(1, 29))
 
     def asset(self, href, fmt):
-        item = Item.objects.create(collection=self.tree["collection"], time=datetime(2026, 3, next(self.days), tzinfo=UTC))
+        when = datetime(2026, 3, next(self.days), tzinfo=UTC)
+        item = Item.objects.create(collection=self.tree["collection"], time=when)
         return Asset.objects.create(item=item, variable=self.tree["variable"], href=href, format=fmt)
 
     def test_cogs_local_and_remote_and_store_assets_have_values(self):
