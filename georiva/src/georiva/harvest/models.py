@@ -233,13 +233,18 @@ class HarvestFeed(DataFeed):
     @property
     def harvests_a_forecast(self) -> bool:
         """Whether its collection is a forecast: the Upstream is a store with a
-        run axis, which a feed records as its Rolling window (ADR 0044 §7).
-        Such a collection is still pruned only by this harvest (ADR 0042)."""
+        run axis. A forecast store's window rolls and an analysis store's does
+        not (ADR 0044 §7), so the Rolling window is the feed's record of the
+        run axis: the wizard sets one exactly when the survey finds runs, and
+        the edit form can neither empty it nor add one to a fixed window. Such
+        a collection is still pruned only by this harvest (ADR 0042 §14)."""
         return self.is_store and bool(self.rolling_window_days)
 
     def mark_collection(self, collection=None) -> None:
         """Make its collection a forecast exactly when it harvests one. Only a
-        store feed knows: an items feed's collection is left as it stands."""
+        store feed knows: an items feed's collection is left as it stands.
+        Called as the feed is saved — even with no field to write — and as its
+        collection is created, the two moments either can change."""
         collection = collection or self.collection
         if collection is None or not self.is_store or collection.is_forecast == self.harvests_a_forecast:
             return

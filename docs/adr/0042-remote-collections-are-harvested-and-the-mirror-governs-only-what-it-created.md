@@ -153,7 +153,10 @@ never copied.**
     that needs them materializes the window first. Derived outputs are always local.
 
 13. **All remoteness is behind one seam: the upstream catalog client** (list collections; list items with assets in
-    a window). It is the only thing faked in tests; no test reaches a real upstream.
+    a window). It is the only thing faked in tests; no test reaches a real upstream. One exception, for an
+    Upstream store: `harvest.testing.LocalStore` writes a real Icechunk store on local disk and replaces how
+    `core.values` opens a store's address, so a test reads values from it — a seam beside the client, not behind it
+    (wmo-raf/georiva#758).
 
 14. **A harvested collection is pruned only by its harvest** (wmo-raf/georiva#760). Core forecast retention leaves
     every collection a Harvest feed owns alone, forecast or not: the harvest's window (a store's Rolling window) and
@@ -161,7 +164,9 @@ never copied.**
     the one rule retention uses both to prune and to tell the Sweep what it retired; `retain_past_forecasts` is not
     used for it, because it would describe the collection falsely. A store harvest whose Upstream store has a run
     axis marks its collection a forecast — on setup, and again whenever the feed is saved or re-checked, so a
-    collection set up before this is corrected in place.
+    collection set up before this is corrected in place. The feed records the run axis as its Rolling window: a
+    forecast store's window rolls and an analysis store's does not (ADR 0044 §7), the wizard sets one exactly when
+    the survey finds runs, and the edit form can neither empty it nor add one.
 
 ## Consequences
 
