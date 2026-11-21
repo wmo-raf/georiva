@@ -231,6 +231,26 @@ class HarvestFeed(DataFeed):
         return self.upstream_shape == UpstreamShape.STORE
 
     @property
+    def harvests_a_forecast(self) -> bool:
+        """Whether its collection is a forecast: the Upstream is a store with a
+        run axis, which a feed records as its Rolling window (ADR 0044 §7).
+        Such a collection is still pruned only by this harvest (ADR 0042)."""
+        return self.is_store and bool(self.rolling_window_days)
+
+    def mark_collection(self, collection=None) -> None:
+        """Make its collection a forecast exactly when it harvests one. Only a
+        store feed knows: an items feed's collection is left as it stands."""
+        collection = collection or self.collection
+        if collection is None or not self.is_store or collection.is_forecast == self.harvests_a_forecast:
+            return
+        collection.is_forecast = self.harvests_a_forecast
+        collection.save(update_fields=["is_forecast"])
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.mark_collection()
+
+    @property
     def window(self):
         """The fixed window, or — for a forecast store — the Rolling window as
         it stands now: runs started in the last `rolling_window_days` days."""
@@ -354,6 +374,7 @@ class HarvestFeed(DataFeed):
             defaults={"name": self.upstream_collection_id[:200], "harvested_by": self},
         )
         DataFeedCollectionLink.objects.get_or_create(data_feed=self, collection=collection)
+        self.mark_collection(collection)
         return collection
 
     def mapped_variables(self, collection) -> dict:

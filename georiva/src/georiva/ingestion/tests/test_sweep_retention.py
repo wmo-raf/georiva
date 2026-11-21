@@ -31,7 +31,7 @@ def _scan(paths):
         return {f.file_path: f.reason for f in find_unprocessed()}
 
 
-class SweepRetentionTests(TestCase):
+class RetentionFixture:
     def setUp(self):
         catalog = Catalog.objects.create(organisation=make_organisation(), name="IFS", slug="ifs", file_format="grib2")
         self.collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface", is_forecast=True)
@@ -59,6 +59,8 @@ class SweepRetentionTests(TestCase):
         )
         return file_path
 
+
+class SweepRetentionTests(RetentionFixture, TestCase):
     def test_a_file_whose_past_forecast_was_pruned_is_not_reingested(self):
         path = self._ingested("past.grib2", self.now - timedelta(days=60))
 
@@ -106,5 +108,45 @@ class SweepRetentionTests(TestCase):
         path = self._ingested("past.grib2", self.now - timedelta(days=60))
         prune_forecast_items()
         FileIngestion.objects.filter(file_path=path).update(force_reingest=True)
+
+        self.assertEqual(_scan([path]), {path: "reingest"})
+
+
+class HarvestedForecastRetentionTests(RetentionFixture, TestCase):
+    """A forecast collection a Harvest feed owns is pruned only by its harvest:
+    its Rolling window and Mirror are its retention (ADR 0042, #760)."""
+
+    def setUp(self):
+        super().setUp()
+        from georiva.harvest.models import HarvestFeed
+
+        HarvestFeed.objects.create(
+            name="Surface upstream",
+            catalog=self.collection.catalog,
+            upstream_url="https://stac.upstream.example/",
+            upstream_collection_id="surface",
+        ).ensure_collection()
+
+    def test_a_prune_keeps_its_past_items(self):
+        self._ingested("past.grib2", self.now - timedelta(days=60))
+
+        prune_forecast_items()
+
+        self.assertEqual(Item.objects.count(), 1)
+
+    def test_a_prune_keeps_its_older_runs_with_latest_run_only(self):
+        self.collection.retain_latest_run_only = True
+        self.collection.save()
+        future = self.now + timedelta(days=2)
+        self._ingested("old.grib2", future, reference_time=self.now - timedelta(hours=12))
+        self._ingested("new.grib2", future + timedelta(hours=3), reference_time=self.now)
+
+        prune_forecast_items()
+
+        self.assertEqual(Item.objects.count(), 2)
+
+    def test_the_sweep_never_takes_its_missing_past_items_for_retired(self):
+        path = self._ingested("past.grib2", self.now - timedelta(days=60))
+        Item.objects.all().delete()
 
         self.assertEqual(_scan([path]), {path: "reingest"})

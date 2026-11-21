@@ -155,6 +155,14 @@ never copied.**
 13. **All remoteness is behind one seam: the upstream catalog client** (list collections; list items with assets in
     a window). It is the only thing faked in tests; no test reaches a real upstream.
 
+14. **A harvested collection is pruned only by its harvest** (wmo-raf/georiva#760). Core forecast retention leaves
+    every collection a Harvest feed owns alone, forecast or not: the harvest's window (a store's Rolling window) and
+    its Mirror decide which of its rows exist, so each collection has one owner of its rows. The exclusion lives in
+    the one rule retention uses both to prune and to tell the Sweep what it retired; `retain_past_forecasts` is not
+    used for it, because it would describe the collection falsely. A store harvest whose Upstream store has a run
+    axis marks its collection a forecast — on setup, and again whenever the feed is saved or re-checked, so a
+    collection set up before this is corrected in place.
+
 ## Consequences
 
 - An upstream that honestly answers "this window is empty" empties the window here, and the zonal statistics computed

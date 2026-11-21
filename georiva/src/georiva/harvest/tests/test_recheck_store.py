@@ -19,7 +19,7 @@ from django.urls import reverse
 from django_redis import get_redis_connection
 
 from georiva.core.machine_plane.remote_assets import PUBLISHED_FIELD, REMOTE_ASSETS_KEY_PREFIX, variable_key
-from georiva.core.models import Asset, Catalog, Item
+from georiva.core.models import Asset, Catalog, Collection, Item
 from georiva.harvest import background_survey
 from georiva.harvest.models import HarvestFeed
 from georiva.ingestion.models import RunIngestion
@@ -506,6 +506,20 @@ class DecliningEverythingTests(StoreRecheckMixin, TestCase):
             self.answer({})
 
         self.run_now.assert_called_once_with()
+
+
+class AForecastHarvestedBeforeItWasMarkedTests(StoreRecheckMixin, TestCase):
+    """A feed set up before a forecast store's collection was made a forecast:
+    the AIFS field trial's, which needs no recreating (#760)."""
+
+    def setUp(self):
+        super().setUp()
+        Collection.objects.filter(pk=self.feed.collection.pk).update(is_forecast=False)
+
+    def test_a_recheck_saved_with_nothing_to_confirm_makes_its_collection_a_forecast(self):
+        self.answer({})
+
+        self.assertTrue(Collection.objects.get(pk=self.feed.collection.pk).is_forecast)
 
 
 class ConfirmedChangesReachTitilerTests(HearsStoreAnnouncements, StoreRecheckMixin, TestCase):

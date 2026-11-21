@@ -1325,6 +1325,9 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             changed.append("upstream_refusal")
         if changed:
             feed.save(update_fields=changed)
+        else:
+            # Saved with nothing to confirm, its collection still becomes what it harvests (#760).
+            feed.mark_collection()
         if "pinned_chunk_locations" in changed:
             _republish(feed)
         # The full pass over every run in the window, closed ones too: a store

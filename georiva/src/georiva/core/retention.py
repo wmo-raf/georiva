@@ -15,12 +15,18 @@ from georiva.core.models import Collection, Item
 
 
 def prunable_collections():
-    """The collections retention prunes (``_is_prunable`` is the same rule on one in hand)."""
-    return Collection.objects.filter(is_forecast=True, retain_past_forecasts=False, is_active=True)
+    """The collections retention prunes: active forecasts that do not retain past
+    forecasts, and that no Harvest feed owns. A harvested collection is pruned
+    only by its harvest — its Rolling window and Mirror are its retention, one
+    owner per collection's rows (ADR 0042)."""
+    return Collection.objects.filter(is_forecast=True, retain_past_forecasts=False, is_active=True).exclude(
+        feed_links__data_feed__harvestfeed__isnull=False
+    )
 
 
 def _is_prunable(collection) -> bool:
-    return collection.is_forecast and not collection.retain_past_forecasts and collection.is_active
+    """The same rule as ``prunable_collections``, on one collection in hand."""
+    return prunable_collections().filter(pk=collection.pk).exists()
 
 
 def _latest_reference_time(collection) -> datetime | None:

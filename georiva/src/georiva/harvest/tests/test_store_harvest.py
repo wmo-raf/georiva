@@ -25,6 +25,7 @@ from georiva.core.machine_plane.remote_assets import (
     variable_key,
 )
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+from georiva.core.tasks import prune_forecast_items
 from georiva.harvest.harvester import harvest
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
 from georiva.harvest.tasks import run_harvest
@@ -133,6 +134,16 @@ class StoreHarvestTests(StoreFeedMixin, TestCase):
         self.assertEqual(self.steps(wind), [(self.run, 0), (self.run, 3)])
         self.assertEqual(Item.objects.count(), 3)
         self.assertEqual(result.indexed, 5)
+
+    def test_its_collection_is_a_forecast_whose_past_steps_only_the_harvest_prunes(self):
+        # The run began a day ago: each of these steps is already in the past.
+        self.hold("temperature_2m", 0, 3, 6)
+        self.harvest()
+
+        prune_forecast_items()
+
+        self.assertTrue(self.feed.collection.is_forecast)
+        self.assertEqual(self.steps(), [(self.run, 0), (self.run, 3), (self.run, 6)])
 
     def test_a_step_no_mapped_array_holds_gets_no_row(self):
         # Step 6 is in the store's coordinates like every other; nothing is held there yet.
