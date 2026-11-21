@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from django.utils import timezone
 
+from georiva.core import retention
 from georiva.core.models import Catalog, Collection, Item
 from georiva.core.storage import BucketType
 from georiva.core.tasks import prune_forecast_items
@@ -150,3 +151,21 @@ class HarvestedForecastRetentionTests(RetentionFixture, TestCase):
         Item.objects.all().delete()
 
         self.assertEqual(_scan([path]), {path: "reingest"})
+
+
+class WhetherRetentionPrunesTests(RetentionFixture, TestCase):
+    """One rule answers pruning, the Sweep and STAC; a collection that says of itself it is
+    not pruned costs no query, so the Sweep's per-file question stays cheap."""
+
+    def test_a_pruned_forecast_is_pruned(self):
+        self.assertTrue(retention.is_pruned(self.collection))
+        self.assertIn(self.collection, retention.prunable_collections())
+
+    def test_a_collection_that_is_not_a_forecast_is_answered_without_a_query(self):
+        for attribute, value in (("is_forecast", False), ("retain_past_forecasts", True), ("is_active", False)):
+            with self.subTest(attribute):
+                collection = Collection.objects.get(pk=self.collection.pk)
+                setattr(collection, attribute, value)
+
+                with self.assertNumQueries(0):
+                    self.assertFalse(retention.is_pruned(collection))

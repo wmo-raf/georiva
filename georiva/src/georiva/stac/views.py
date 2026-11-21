@@ -347,7 +347,7 @@ class STACItemsView(STACGeoAPIView):
         )
 
         # Past items of a collection retention prunes are hidden unless the caller opts in
-        if retention.prunes(collection):
+        if retention.is_pruned(collection):
             include_past = request.query_params.get("include_past", "false").lower() == "true"
             if not include_past:
                 from django.utils import timezone
@@ -500,7 +500,7 @@ class STACItemDetailView(STACGeoAPIView):
 
         # Base queryset — respect retention's past-item policy
         base_qs = Item.objects.filter(collection=collection)
-        if retention.prunes(collection):
+        if retention.is_pruned(collection):
             from django.utils import timezone
 
             base_qs = base_qs.filter(time__gte=timezone.now())
