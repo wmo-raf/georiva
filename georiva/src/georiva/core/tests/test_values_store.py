@@ -122,6 +122,35 @@ class StoreReadTests(ReadsALocalStore, SimpleTestCase):
 
         self.assertEqual(opening.call_count, 1)
 
+    def test_a_long_session_holds_only_its_most_recent_fields(self):
+        # A batch over a whole forecast (a Forti build reads hundreds of global
+        # fields through one session) must not hold every field it decoded.
+        every = [self.at(run, step) for run in range(2) for step in range(3)]
+        with mock.patch.object(values.store, "HELD_FIELDS", 2), values.session() as s:
+            for wanted in every:
+                s.window(wanted, (0.0, 0.0, 40.0, 20.0))
+                self.assertLessEqual(s.held_fields, 2)
+            later = s.field(every[0])
+
+        np.testing.assert_array_equal(later.data, expected(0, 0))
+
+    def test_a_held_field_is_float32_whatever_the_store_keeps(self):
+        # The local store's arrays are float64, as AIFS's are: held so, each
+        # field would cost twice what the values a session returns need.
+        with values.session() as s:
+            s.field(self.at(0, 0))
+            self.assertEqual(s.held_field_bytes, 4 * len(LATITUDES) * len(LONGITUDES))
+
+    def test_a_field_read_again_soon_is_decoded_once(self):
+        decode = values.store._OpenStore.field
+        with mock.patch.object(values.store._OpenStore, "field", autospec=True, wraps=decode) as decoding:
+            with values.session() as s:
+                s.point(self.at(0, 1), 5.0, -15.0)
+                s.window(self.at(0, 1), (0.0, 0.0, 40.0, 20.0))
+                s.field(self.at(0, 1))
+
+        self.assertEqual(decoding.call_count, 1)
+
     def test_each_session_opens_the_store_again(self):
         with mock.patch.object(upstream, "open_repository", wraps=upstream.open_repository) as opening:
             values.field(self.at(0, 0))
