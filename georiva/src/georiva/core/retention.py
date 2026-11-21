@@ -24,8 +24,9 @@ def prunable_collections():
     )
 
 
-def _is_prunable(collection) -> bool:
-    """The same rule as ``prunable_collections``, on one collection in hand."""
+def prunes(collection) -> bool:
+    """Whether retention prunes ``collection``: the rule of ``prunable_collections``,
+    on one collection in hand. A reader that hides what retention will remove asks this."""
     return prunable_collections().filter(pk=collection.pk).exists()
 
 
@@ -58,7 +59,7 @@ def retires(collection, *, valid_time_end: datetime | None, reference_time: date
     ``valid_time_end`` is the file's last valid time. Without it nothing can be said, and
     the answer is no — the Sweep then re-ingests as it would for data lost.
     """
-    if not _is_prunable(collection):
+    if not prunes(collection):
         return False
     if valid_time_end is not None and valid_time_end < now:
         return True
