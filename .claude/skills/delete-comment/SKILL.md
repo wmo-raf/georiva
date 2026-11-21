@@ -25,11 +25,16 @@ the baseline. Read every comment and docstring in scope and put each one in exac
 
 **Decision Record:**
 
-- If the ADR it cites (or another ADR in `docs/adr/`) already states the point, delete the comment.
+- If an ADR in `docs/adr/` already states the point, delete the comment, but only if you can quote the ADR
+  sentence that says it. "The ADR covers this area" is not enough: a comment that explains why this particular
+  line exists (a recursion guard, a cost bound, a quirk of a framework) is usually more specific than any ADR.
 - If the point is architectural (it constrains more than this one spot) and no ADR has it, add it to the right ADR
   (or write a new one following the `domain-modeling` skill), then delete the comment.
 - Otherwise, if it is local and worth keeping, **leave it**. The ratchet keeps it from growing, and a later sweep
   can reconsider it. Never delete a reason the code can't tell a reader just to lower a number.
+- When unsure, keep it. A Decision Record deleted by mistake is lost; one kept by mistake costs a line.
+- Documentation that other repositories rely on (test fakes like `FakeUpstream`, plugin base classes, `#:`
+  attribute docs) is a contract, not a comment: keep it.
 
 Before deleting a comment, try to make the code say it instead: a better name, an extracted function, a constant,
 or a test that pins the behaviour.

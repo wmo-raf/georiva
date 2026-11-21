@@ -1,15 +1,3 @@
-"""The Color ramp catalog (ADR 0022): value-free aesthetics, tiered, seeded.
-
-Three subjects, each at its agreed seam:
-
-* the model — ordered colors, optional 0–1 positions, the gradient helper;
-* the seed migration — the curated instance-wide catalog under
-  matplotlib-compatible names, asserted against the migrated test database;
-* the admin surface — the same tier rules the palette admin has (org-scoped
-  listing, global tier read-only to operators, instance admin curates), plus
-  the gradient preview in the listing.
-"""
-
 from importlib import import_module
 
 from django.core.exceptions import ValidationError
@@ -97,8 +85,6 @@ class ColorRampModelTests(TestCase):
 
 
 class SeededCatalogTests(TestCase):
-    """The data migration's work, visible in the migrated test database."""
-
     def test_the_curated_catalog_is_seeded_at_the_instance_wide_tier(self):
         for name, ramp_type, hexes in SEED_RAMPS:
             with self.subTest(name=name):
@@ -123,8 +109,6 @@ class SeededCatalogTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class ColorRampAdminTierTests(TestCase):
-    """The seeded catalog plus one ramp each for two organisations."""
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
@@ -140,8 +124,6 @@ class ColorRampAdminTierTests(TestCase):
         add_member(self.user, self.kenya, role=OrganisationMembership.Role.ADMIN)
         self.client.login(username="amina", password=PASSWORD)
         self.client.defaults["HTTP_HOST"] = KENYA_HOST
-
-    # -- listing -----------------------------------------------------------
 
     def test_the_listing_shows_the_instance_wide_tier_and_this_organisations(self):
         response = self.client.get(reverse("colorramp:index"))
@@ -162,8 +144,6 @@ class ColorRampAdminTierTests(TestCase):
         response = self.client.get(reverse("colorramp:index"))
         self.assertNotContains(response, reverse("colorramp:edit", args=[self.shipped.pk]))
         self.assertContains(response, reverse("colorramp:edit", args=[self.kenya_ramp.pk]))
-
-    # -- writes ------------------------------------------------------------
 
     def test_a_member_cannot_edit_an_instance_wide_ramp(self):
         url = reverse("colorramp:edit", args=[self.shipped.pk])

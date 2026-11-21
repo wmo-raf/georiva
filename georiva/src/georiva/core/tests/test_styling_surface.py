@@ -1,19 +1,3 @@
-"""The Styling surface (ADR 0022, issue #321): one place where styling is tuned.
-
-Three seams:
-
-* the model — stop ordering on ``VariableStyle.clean()`` and the atomic
-  default-promotion helper, neither of which the earlier slices needed;
-* the admin surface — the collection Styling page and the canonical
-  per-variable form, driven through the admin test client: listing with
-  swatches, ramp application, stop fine-tuning, default promotion, deletion
-  guards, and org scoping of ramp choices;
-* the map preview (#382) — which item it draws and what the panel says when
-  there is nothing to draw. The map itself is JavaScript and is verified by
-  hand, as ``item_preview.html``'s already is; what is tested here is the
-  contract the page hands it.
-"""
-
 from datetime import UTC, datetime
 
 from django.core.exceptions import ValidationError
@@ -48,8 +32,6 @@ def make_ramp(name="Test ramp", organisation=None, hexes=("#000000", "#ffffff"))
 
 
 class VariableStyleOrderingTests(TestCase):
-    """Stop ordering is validated on the model — the single home of the rule."""
-
     @classmethod
     def setUpTestData(cls):
         cls.tree = make_org_tree(make_organisation())
@@ -131,8 +113,6 @@ class PromoteToDefaultTests(TestCase):
 
 
 class StylingSurfaceTestCase(TestCase):
-    """Shared fixture: one org tree, ramps in every tier, a signed-in member."""
-
     @classmethod
     def setUpTestData(cls):
         cls.org = make_organisation()
@@ -168,8 +148,6 @@ class StylingSurfaceTestCase(TestCase):
 
 
 class StylingPageTests(StylingSurfaceTestCase):
-    """The collection-level listing: every variable, range, default swatch."""
-
     def test_lists_every_variable_with_its_range(self):
         response = self.client.get(self.page_url)
         self.assertEqual(response.status_code, 200)
@@ -207,8 +185,6 @@ class StylingPageTests(StylingSurfaceTestCase):
 
 
 class VariableStylingFormTests(StylingSurfaceTestCase):
-    """The canonical per-variable form."""
-
     def test_the_form_renders_with_range_and_ramp_choices(self):
         response = self.client.get(self.form_url)
         self.assertEqual(response.status_code, 200)
@@ -219,12 +195,7 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         response = self.client.get(self.form_url)
         self.assertNotContains(response, "Foreign Rainfall")
 
-    # -- the ramp picker (#383) --------------------------------------------
-
     def test_ramps_reach_the_page_grouped_by_type(self):
-        """Grouping is the picker's one piece of teaching: an anomaly field
-        wants a diverging ramp and a total wants a sequential one, and a flat
-        list leaves that to memory."""
         diverging = make_ramp("House Anomaly", organisation=self.org)
         diverging.ramp_type = ColorRamp.RampType.DIVERGING
         diverging.save()
@@ -236,13 +207,10 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         names = {group["label"]: [ramp["name"] for ramp in group["ramps"]] for group in groups}
         self.assertIn("viridis", names["Sequential"])
         self.assertIn("RdBu", names["Diverging"])
-        # Each ramp appears under its own type and nowhere else.
         self.assertIn("House Anomaly", names["Diverging"])
         self.assertNotIn("House Anomaly", names["Sequential"])
 
     def test_every_ramp_carries_its_own_gradient(self):
-        # The markup needs no lookup table beside it, and the browser repaints
-        # the toggle from the row it was handed.
         response = self.client.get(self.form_url)
         ramps = [ramp for group in response.context["ramp_groups"] for ramp in group["ramps"]]
         self.assertTrue(ramps)
@@ -285,8 +253,6 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(VariableStyle.objects.get(variable=self.variable).ramp, self.org_ramp)
-
-    # -- range -------------------------------------------------------------
 
     def test_saving_the_range_updates_the_variable(self):
         response = self.client.post(
@@ -342,8 +308,6 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.assertEqual(response.status_code, 302)
         style.refresh_from_db()
         self.assertEqual(style.stops, tuned)
-
-    # -- style creation ----------------------------------------------------
 
     def test_creating_a_style_with_a_ramp_generates_stops_over_the_range(self):
         response = self.client.post(
@@ -436,8 +400,6 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(VariableStyle.objects.filter(variable=self.variable).exists())
-
-    # -- fine-tuning -------------------------------------------------------
 
     def test_submitted_stops_are_saved_verbatim(self):
         style = VariableStyle.objects.create(
@@ -544,10 +506,8 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "hex color")
 
-    # -- applying a ramp ---------------------------------------------------
-
     def test_applying_a_ramp_writes_nothing(self):
-        """Applying is a form gesture now (#382), not a database write.
+        """Applying is a form gesture, not a database write.
 
         The endpoint hands back stops the browser fills the form with; only
         Save persists them. A saved snapshot the operator has not saved over
@@ -627,8 +587,6 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
 
 
 class StyleSetManagementTests(StylingSurfaceTestCase):
-    """Named styles: promote-to-default and deletion guards."""
-
     def setUp(self):
         super().setUp()
         self.official = VariableStyle.objects.create(
@@ -746,12 +704,7 @@ class DemotedCollectionFormTests(StylingSurfaceTestCase):
 
 
 class PreviewItemChoiceTests(TestCase):
-    """Which item the map preview draws (#382).
-
-    The rule is newest run, earliest horizon — because a forecast feed's newest
-    *valid* time is its furthest horizon, and styling against a ten-day-out
-    field judges a guess rather than the weather.
-    """
+    """Which item the map preview draws (#382)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -899,8 +852,6 @@ class PreviewStepTests(TestCase):
 
 
 class PreviewStepEndpointTests(StylingSurfaceTestCase):
-    """The JSON the preview's prev / next buttons read."""
-
     def setUp(self):
         super().setUp()
         Item.objects.filter(collection=self.collection).delete()
@@ -960,8 +911,6 @@ class PreviewStepEndpointTests(StylingSurfaceTestCase):
 
 
 class PreviewPanelTests(StylingSurfaceTestCase):
-    """What the styling form hands the map, and what it says when it cannot."""
-
     def _cog_item(self, bounds=(0.0, 0.0, 10.0, 10.0)):
         item = Item.objects.create(
             collection=self.collection,
@@ -1010,9 +959,7 @@ class PreviewPanelTests(StylingSurfaceTestCase):
 
 class FitRangeHintTests(StylingSurfaceTestCase):
     """The range hint's server half (#562): the span of each style's stops,
-    handed to the page so it can name the styles a fitted range would clip.
-    The hint itself — when it shows, the Fit button — is JavaScript, verified
-    by hand like the map."""
+    handed to the page so it can name the styles a fitted range would clip."""
 
     def _style(self, slug, stops, **kwargs):
         return VariableStyle.objects.create(

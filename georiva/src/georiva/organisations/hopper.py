@@ -47,8 +47,6 @@ AVATAR_PALETTE_SIZE = 8
 
 @dataclass(frozen=True)
 class OrgHopperEntry:
-    """One organisation as the hopper shows it."""
-
     name: str
     slug: str
     host: str

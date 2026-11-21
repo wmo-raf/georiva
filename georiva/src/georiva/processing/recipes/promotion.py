@@ -27,7 +27,6 @@ from georiva.processing.registry import RecipeRegistry
 
 
 def _array_stats(data) -> dict:
-    """min/max/mean/std over the finite pixels of a raster band."""
     import numpy as np
 
     finite = data[np.isfinite(data)]
@@ -60,8 +59,6 @@ class PromotionRecipe(BaseRecipe):
     # The identity: a staged slice is published as it is held, in its
     # Variable's source unit, whatever that Variable is served in (ADR 0046 §1).
     input_units = {"source": SOURCE_UNIT}
-
-    # ---- declarative surface ------------------------------------------------
 
     def enumerate_units(self, selector) -> Iterable[ProductionUnit]:
         from georiva.processing.recipe import binding_input_collection_id
@@ -156,16 +153,12 @@ class PromotionRecipe(BaseRecipe):
             )
         return out
 
-    # ---- I/O seam (mocked in tests) -----------------------------------------
-
     def read_raster(self, source: ResolvedInput, asset):
         """Read one staged asset of the ``source`` input, in its declared unit,
         into ``(data, bounds, crs, width, height)`` — north-up, NaN for nodata
         (``core.values``). The recipe's only real I/O, patched in unit tests."""
         field = source.field(asset)
         return field.data, list(field.bounds), field.crs, field.width, field.height
-
-    # ---- helpers ------------------------------------------------------------
 
     @staticmethod
     def _published_collection(staging_item):

@@ -30,13 +30,6 @@ class _CountSummaryItem(SummaryItem):
         raise NotImplementedError
 
     def scoped_count(self, queryset):
-        """``queryset`` narrowed to the organisation whose dashboard this is.
-
-        Deliberately no ``is_active`` filter: the tiles link to the Catalog
-        accordion, which lists active and inactive rows alike, and a headline
-        that disagrees with the page under it is the bug this method exists to
-        prevent.
-        """
         return scoped_queryset(self.request, queryset).count()
 
     def get_context_data(self, parent_context):

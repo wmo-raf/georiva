@@ -208,7 +208,6 @@ class DispatchOnCommitTests(TestCase):
         cls.tree = make_org_tree(make_organisation("kenya"))
 
     def add_assets(self, count):
-        """``count`` more items, one asset each, on the tree's variable."""
         hrefs = []
         for day in range(2, 2 + count):
             item = Item.objects.create(collection=self.tree["collection"], time=datetime(2026, 3, day, tzinfo=UTC))
@@ -318,9 +317,6 @@ class ItemCountTests(TestCase):
 
 
 class SweepMarginTests(AssetsBucketTestCase):
-    """The sweep reads live hrefs before listing, so an object written in
-    between looks orphaned for a moment; the shared guard spares it."""
-
     def setUp(self):
         super().setUp()
         self.tree = make_org_tree(make_organisation("kenya"))

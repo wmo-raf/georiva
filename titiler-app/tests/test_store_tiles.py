@@ -252,7 +252,6 @@ def point(client, lon, lat, **query):
 
 
 def palette_colours(png: bytes) -> set[tuple[int, int, int]]:
-    """The colours of a tile's opaque pixels."""
     with MemoryFile(png) as memory, memory.open() as image:
         red, green, blue, alpha = image.read()
     opaque = alpha > 0
@@ -980,7 +979,6 @@ def decoded(megabytes: float) -> store_reader.Field:
 
 @pytest.fixture
 def cache_of(monkeypatch):
-    """Give the reader a field cache of so many bytes."""
 
     def sized(size: int) -> store_reader.FieldCache:
         cache = store_reader.FieldCache(size)
@@ -1165,8 +1163,6 @@ class TestDecodedFieldsAreKept:
         assert store_reader._fields.capacity == config.STORE_FIELD_CACHE_BYTES
 
 
-# Each worker opens the published stores at start (#684)
-
 #: Another Variable of the same collection, read from the same store.
 OTHER_HASH = f"georiva:remote-assets:{ORG}:{CATALOG}:{COLLECTION}:wind"
 #: A COG timestep of this module's Variable: absent from its hash, so read from our storage.
@@ -1333,11 +1329,7 @@ class TestStoresAreWarmedAtStart:
         assert warm.STORE_WARM is config.STORE_WARM
 
 
-# A running worker follows what Django publishes (#706)
-
-
 def eventually(holds, timeout: float = 10.0) -> None:
-    """Wait for ``holds()`` to be true, as a background thread makes it so."""
     deadline = clock.monotonic() + timeout
     while not holds():
         assert clock.monotonic() < deadline, "it never happened"

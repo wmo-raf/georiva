@@ -1,23 +1,3 @@
-"""
-GeoRiva STAC API Serializers
-
-STAC hierarchy:
-- Root Catalog
-  └── Catalogs (as STAC Collections)
-      └── Variables (as STAC Collections) — one per active variable
-          └── Items (filtered to that variable's assets)
-              └── Assets (for that variable only)
-
-Each GeoRiva Variable becomes a STAC Collection.
-STAC Collection ID = {collection.slug}/{variable.slug}
-STAC Collection URL = /collections/{catalog.slug}/{collection.slug}/{variable.slug}
-
-If a GeoRiva Collection has 4 variables, it appears as 4 STAC Collections.
-If it has 1 variable, it appears as 1 STAC Collection.
-
-Implements STAC Spec v1.0.0
-"""
-
 import calendar
 from datetime import timedelta
 
@@ -66,16 +46,12 @@ def build_style_renders(variable, *, with_colormap: bool) -> dict:
 
 
 class STACBaseURLMixin:
-    """Mixin to provide base URL from request context."""
-
     def _get_base_url(self):
         request = self.context.get("request")
         return get_base_stac_api_url(request)
 
 
 class STACLinkSerializer(serializers.Serializer):
-    """STAC Link object."""
-
     rel = serializers.CharField()
     href = serializers.CharField()
     type = serializers.CharField(required=False)
@@ -84,16 +60,12 @@ class STACLinkSerializer(serializers.Serializer):
 
 
 class STACProviderSerializer(serializers.Serializer):
-    """STAC Provider object."""
-
     name = serializers.CharField()
     url = serializers.URLField(required=False, allow_null=True)
     roles = serializers.ListField(child=serializers.CharField(), required=False)
 
 
 class STACAssetSerializer(serializers.Serializer):
-    """Serializes GeoRiva Asset to STAC Asset format."""
-
     href = serializers.CharField()
     type = serializers.CharField(source="media_type")
     title = serializers.CharField(source="name")
@@ -479,7 +451,6 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
 
     def get_title(self, obj):
         collection = obj.collection
-        # If the collection has multiple active variables, prefix with collection name
         variable_count = collection.variables.filter(is_active=True).count()
         if variable_count > 1:
             return f"{collection.name} - {obj.name}"
@@ -540,7 +511,6 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         return None
 
     def get_item_assets(self, obj):
-        """Declare expected assets for this variable."""
         item_assets = {}
 
         item_assets[f"{obj.slug}_cog"] = {
@@ -611,9 +581,6 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         if obj.unit:
             keywords.append(obj.unit.symbol)
         return keywords
-
-
-# Catalog as STAC Collection (top-level)
 
 
 class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin):
@@ -764,8 +731,6 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
 
 
 class STACRootCatalogSerializer(serializers.Serializer, STACBaseURLMixin):
-    """Root STAC Catalog — landing page."""
-
     type = serializers.SerializerMethodField()
     stac_version = serializers.SerializerMethodField()
     id = serializers.SerializerMethodField()
@@ -833,10 +798,6 @@ class STACRootCatalogSerializer(serializers.Serializer, STACBaseURLMixin):
 
 
 class STACCatalogListSerializer(serializers.Serializer, STACBaseURLMixin):
-    """
-    List of Catalogs (as Collections) — response for /collections/.
-    """
-
     collections = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
 
@@ -853,11 +814,6 @@ class STACCatalogListSerializer(serializers.Serializer, STACBaseURLMixin):
 
 
 class STACVariableCollectionListSerializer(serializers.Serializer, STACBaseURLMixin):
-    """
-    List of variable collections within a Catalog.
-    Response for /collections/{catalog}/collections/.
-    """
-
     collections = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
 

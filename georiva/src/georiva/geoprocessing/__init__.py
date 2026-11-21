@@ -1,14 +1,4 @@
-"""
-GeoRiva shared geoprocessing operations.
-
-A pure, **non-Django** compute library used by both write-side processing
-(compute-on-write) and read-side analysis (compute-on-read). Functions take
-in-memory raster objects (numpy arrays with an affine transform + CRS, or
-xarray DataArrays/Datasets) plus parameters, and return rasters or scalars.
-
-No Django, no storage, no request layer — callers own their own I/O. This
-keeps every operation unit-testable without a database and reusable on both
-sides. See docs/adr/0005-generic-derivation-engine.md.
+"""A pure, non-Django compute library (ADR 0005).
 
 Implemented on the stack already present in the image (numpy, rasterio,
 xarray, cftime). Regridding uses ``rasterio.warp.reproject`` and calendar

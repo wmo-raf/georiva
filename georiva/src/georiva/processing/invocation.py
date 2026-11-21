@@ -374,7 +374,7 @@ def invalidate_downstream(changed_item, *, dispatch: bool = True, sweep=None) ->
                     why="inputs_changed",
                 )
                 count += 1
-            frontier.append(derived)  # continue forward through intermediates
+            frontier.append(derived)
     return count
 
 

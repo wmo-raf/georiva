@@ -43,7 +43,6 @@ class DataManagersGatingTests(TestCase):
         dial_org(self.client)
         self.client.force_login(self._data_manager())
         self.assertEqual(self.client.get(reverse("catalog:index")).status_code, 200)
-        # Raw add/edit forms are denied server-side (redirect with permission error)
         self.assertEqual(self.client.get(reverse("catalog:add")).status_code, 302)
 
     def test_data_manager_cannot_edit_collections_raw(self):

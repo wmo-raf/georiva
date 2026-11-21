@@ -154,8 +154,6 @@ class UpsertVariableUnitsTests(TestCase):
         variable.refresh_from_db()
         self.assertEqual(variable.source_unit.symbol, "degC")
 
-    # -------- seeds are served-unit values, stored converted (ADR 0046 §3) --------
-
     def _kelvin_served_in_celsius(self, **fields):
         return CollectionVariable(
             key="2t",
@@ -363,8 +361,6 @@ class UpsertVariableStyleSeedTests(TestCase):
         fields.update(overrides)
         return CollectionVariable(**fields)
 
-    # -------- palette: ramp name stretched over the declared range --------
-
     def test_palette_seeds_default_style_from_the_catalog_ramp(self):
         variable = self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))
 
@@ -399,8 +395,6 @@ class UpsertVariableStyleSeedTests(TestCase):
         # No style row: serving falls back to grayscale.
         self.assertEqual(variable.styles.count(), 0)
         self.assertEqual(variable.value_max, 500.0)
-
-    # -------- palette_stops: canonical stops, materialized verbatim --------
 
     def test_palette_stops_seed_the_default_style_verbatim(self):
         stops = ((0.0, "#000000"), (250.0, "#ff0000"), (500.0, "#ffffff"))
@@ -492,8 +486,6 @@ class UpsertVariableStyleSeedTests(TestCase):
         variable = self.service._upsert_variable(self.collection, self._var_def(value_range=None, palette_stops=stops))
 
         self.assertEqual([s["value"] for s in variable.styles.get().stops], [0.0, 500.0])
-
-    # -------- create-only: re-provision never touches styles --------
 
     def test_reprovision_never_modifies_an_existing_style(self):
         variable = self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))

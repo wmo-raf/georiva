@@ -762,9 +762,6 @@ class DirectDropTimeValidationTests(TestCase):
         mock_task.delay.assert_not_called()
 
 
-# process_incoming_file task — job_id wiring
-
-
 @patch("task_ferry.handler.JobHandler.run")
 class ProcessIncomingFileJobIdTests(TestCase):
     def _make_job(self, file_path="chirps/rainfall/2024/01/15/file.tif", bucket="incoming"):

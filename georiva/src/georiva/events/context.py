@@ -20,8 +20,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
 
-class NoEventContext(RuntimeError):
-    """A Domain event was recorded with no context set."""
+class NoEventContext(RuntimeError): ...
 
 
 @dataclass(frozen=True)

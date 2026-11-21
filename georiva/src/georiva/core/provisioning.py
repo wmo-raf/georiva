@@ -63,7 +63,6 @@ def resolve_unit(symbol: str):
 
 
 def build_source_block(block_type: str, source_name: str, vertical_dimension: str = "", vertical_value=None) -> dict:
-    """One Variable ``sources`` StreamField block in its canonical dict form."""
     return {
         "type": block_type,
         "value": {
@@ -75,5 +74,4 @@ def build_source_block(block_type: str, source_name: str, vertical_dimension: st
 
 
 def passthrough_sources(source_name: str) -> list:
-    """The ``sources`` value for a passthrough Variable: one primary block."""
     return [build_source_block("primary", source_name)]

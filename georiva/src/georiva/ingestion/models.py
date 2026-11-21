@@ -77,8 +77,6 @@ def organisation_id_for_key(file_path: str):
 
 @register_snippet
 class FileIngestion(models.Model):
-    """Per-file record of processing a single file from MinIO into STAC items and assets."""
-
     # Written before its collections are known, so there is no FK chain to an
     # organisation to follow. Its owner is the first segment of ``file_path`` —
     # the org slug, by the storage grammar — and the one listing that shows these
@@ -90,8 +88,6 @@ class FileIngestion(models.Model):
         PROCESSING = "processing", "Processing"
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
-
-    # Identity — unique per file
 
     bucket = models.CharField(
         max_length=50,
@@ -186,7 +182,6 @@ class FileIngestion(models.Model):
 
     @property
     def is_stale(self) -> bool:
-        """A lock is stale if processing exceeds LOCK_TIMEOUT."""
         if self.status != self.Status.PROCESSING:
             return False
         if not self.locked_at:
@@ -195,24 +190,16 @@ class FileIngestion(models.Model):
 
     @property
     def can_retry(self) -> bool:
-        """Check if file hasn't exceeded max retries."""
         return self.retry_count < self.MAX_RETRIES
 
     @property
     def duration_seconds(self) -> float | None:
-        """Processing duration if completed."""
         if self.completed_at and self.locked_at:
             return (self.completed_at - self.locked_at).total_seconds()
         return None
 
     @classmethod
     def register(cls, bucket: str, file_path: str, **kwargs) -> tuple["FileIngestion", bool]:
-        """
-        Register a file in the log. Returns (log, created).
-
-        If the file is already registered, returns the existing record.
-        Extra kwargs are passed to defaults (reference_time, etc).
-        """
         defaults = {
             "status": cls.Status.PENDING,
         }
@@ -288,12 +275,6 @@ class FileIngestion(models.Model):
         timestep_count: int = None,
         read_version: str = "",
     ):
-        """Mark a file as successfully processed.
-
-        The sole writer of COMPLETED, which is why the model-run hook hangs here
-        rather than off a ``post_save`` receiver: this is a bulk ``update()`` and
-        emits no ``post_save`` at all.
-        """
         completed_at = dj_timezone.now()
         with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
             with transaction.atomic():
@@ -435,12 +416,10 @@ class FileIngestion(models.Model):
 
     @classmethod
     def is_known(cls, bucket: str, file_path: str) -> bool:
-        """Check if a file is already registered (any status)."""
         return cls.objects.filter(bucket=bucket, file_path=file_path).exists()
 
     @classmethod
     def is_done(cls, bucket: str, file_path: str) -> bool:
-        """Check if a file has been successfully processed."""
         return cls.objects.filter(
             bucket=bucket,
             file_path=file_path,
@@ -516,7 +495,6 @@ class FileIngestion(models.Model):
 
     @classmethod
     def is_stale_pending(cls, bucket, file_path) -> bool:
-        """True when the file is pending and has sat past PENDING_TIMEOUT."""
         cutoff = dj_timezone.now() - cls.PENDING_TIMEOUT
         return cls.objects.filter(
             bucket=bucket, file_path=file_path, status=cls.Status.PENDING, updated_at__lt=cutoff
@@ -524,7 +502,6 @@ class FileIngestion(models.Model):
 
     @classmethod
     def get_retryable(cls, limit: int = 50):
-        """Get failed files that can be retried."""
         return cls.objects.filter(
             status=cls.Status.FAILED,
             retry_count__lt=cls.MAX_RETRIES,
@@ -532,7 +509,6 @@ class FileIngestion(models.Model):
 
     @classmethod
     def get_permanently_failed(cls):
-        """Get files that have exceeded max retries."""
         return cls.objects.filter(
             status=cls.Status.FAILED,
             retry_count__gte=cls.MAX_RETRIES,
@@ -944,7 +920,6 @@ class RunIngestion(models.Model):
 
     @classmethod
     def latest_closed(cls, collection):
-        """The most recent closed run for a collection, or None."""
         return cls.objects.filter(collection=collection, status=cls.Status.CLOSED).order_by("-reference_time").first()
 
 
@@ -1041,8 +1016,6 @@ class FileIngestionFinished(DomainEvent):
 
 
 class RunIngestionClosed(DomainEvent):
-    """A model run finished arriving into a collection (ADR 0026, ADR 0030)."""
-
     label = "Run closed"
 
     run = models.ForeignKey(RunIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
@@ -1089,9 +1062,6 @@ class RunIngestionReopened(DomainEvent):
 
     def summary(self):
         return f"Reopened by a late file; now revision {self.revision}"
-
-
-# Push feeds (ADR 0034)
 
 
 class PushFeed(models.Model):
@@ -1287,7 +1257,6 @@ class UploadSession(models.Model):
             self.mark_failed()
 
     def _check_auto_complete(self):
-        """Auto-complete when all deliveries have reached a terminal state."""
         if self.status != self.Status.ACTIVE:
             return
         terminal = {Delivery.Status.ACCEPTED}
@@ -1638,8 +1607,6 @@ class PushSender(models.Model):
 
 
 class _PushSenderEvent(DomainEvent):
-    """The shared snapshot of an event about a machine sender."""
-
     push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     feed_name = models.CharField(max_length=255)
     sender_label = models.CharField(max_length=100)
@@ -1660,8 +1627,6 @@ class _PushSenderEvent(DomainEvent):
 
 
 class PushSenderAdded(_PushSenderEvent):
-    """A machine sender was added to a push feed."""
-
     label = "Sender added"
     verb = "added"
 
@@ -1700,7 +1665,7 @@ class FileIngestionJob(Job):
     """
 
     # Machine-written job/telemetry record — kept out of Wagtail's reference
-    # index (see core/test_reference_index_exclusion.py).
+    # index (see core/tests/test_reference_index_exclusion.py).
     wagtail_reference_index_ignore = True
 
     file_path = models.CharField(

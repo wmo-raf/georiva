@@ -20,8 +20,6 @@ from .validators import ORG_SLUG_MAX_LENGTH, validate_org_slug
 
 
 class Organisation(models.Model):
-    """One institution on the instance, reachable at its own Site hostname."""
-
     ORGANISATION_LOOKUP = ORGANISATION_SELF
 
     name = models.CharField(max_length=255, help_text="Display name of the institution.")
@@ -116,8 +114,6 @@ class Organisation(models.Model):
 
 
 class OrganisationMembership(models.Model):
-    """Links a user to an organisation with one of the two launch roles."""
-
     ORGANISATION_LOOKUP = "organisation"
 
     class Role(models.TextChoices):

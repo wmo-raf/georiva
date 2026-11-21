@@ -79,14 +79,11 @@ def _formats():
 
 
 def local_q(prefix: str = "") -> Q:
-    """Rows whose asset's bytes are an object in our assets bucket."""
     return ~remote_q(prefix)
 
 
 @dataclass(frozen=True)
 class AssetLocation:
-    """Where one asset's bytes are, and how to reach them."""
-
     href: str
     #: The asset's `format`, where the caller has its row. An href alone does
     #: not say whether it names a file or a store.
@@ -111,13 +108,11 @@ class AssetLocation:
 
     @property
     def key(self) -> str:
-        """The asset's key in the assets bucket. A Remote asset has none."""
         if self.is_remote:
             raise ValueError(f"A remote asset has no key in our storage: {self.href}")
         return self.href
 
     def public_url(self) -> str:
-        """The URL a consumer reads the bytes at: the upstream's own, untouched, for a Remote asset."""
         if self.is_remote:
             return self.href
         return storage.assets.url(self.key)

@@ -53,8 +53,6 @@ class PageTreeScopingTests(TestCase):
         self.client.login(username="amina", password=PASSWORD)
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
 
-    # -- the explorer ------------------------------------------------------
-
     def test_the_explorer_at_the_tree_root_lists_only_this_organisations_root(self):
         response = self.client.get(reverse("wagtailadmin_explore_root"))
         self.assertEqual(response.status_code, 200)
@@ -74,8 +72,6 @@ class PageTreeScopingTests(TestCase):
         response = self.client.get("/admin/api/main/pages/", {"child_of": self.kenya_root.pk})
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"Uganda", response.content)
-
-    # -- single-page views -------------------------------------------------
 
     def test_editing_another_organisations_page_is_not_found(self):
         url = reverse("wagtailadmin_pages:edit", args=[self.uganda_page.pk])
@@ -105,8 +101,6 @@ class PageTreeScopingTests(TestCase):
         url = reverse("wagtailadmin_pages:history", args=[self.uganda_page.pk])
         self.assertEqual(self.client.get(url).status_code, 404)
 
-    # -- the tree root -----------------------------------------------------
-
     def test_adding_a_page_under_the_tree_root_is_not_found(self):
         """The root belongs to no organisation, so nothing may be authored there."""
         from wagtail.models import Page
@@ -124,8 +118,6 @@ class PageTreeScopingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Uganda Met")
 
-    # -- bulk actions ------------------------------------------------------
-
     def test_a_bulk_action_on_another_organisations_page_is_not_found(self):
         """Bulk actions name their pages in the query string, not the path."""
         url = reverse("wagtail_bulk_action", args=["wagtailcore", "page", "delete"]) + f"?id={self.uganda_page.pk}"
@@ -134,8 +126,6 @@ class PageTreeScopingTests(TestCase):
     def test_a_bulk_action_on_this_organisations_page_still_works(self):
         url = reverse("wagtail_bulk_action", args=["wagtailcore", "page", "delete"]) + f"?id={self.kenya_page.pk}"
         self.assertEqual(self.client.get(url).status_code, 200)
-
-    # -- search and choosers -----------------------------------------------
 
     def test_page_search_does_not_reach_across_organisations(self):
         response = self.client.get(reverse("wagtailadmin_pages:search"), {"q": "Bulletin"})
@@ -151,8 +141,6 @@ class PageTreeScopingTests(TestCase):
     def test_the_page_chooser_cannot_browse_into_another_organisations_tree(self):
         url = reverse("wagtailadmin_choose_page_child", args=[self.uganda_root.pk])
         self.assertEqual(self.client.get(url).status_code, 404)
-
-    # -- the other host ----------------------------------------------------
 
     def test_the_same_user_sees_the_other_tree_on_the_other_host(self):
         """Host-scoped, not user-scoped: this is what the org-hopper is for."""

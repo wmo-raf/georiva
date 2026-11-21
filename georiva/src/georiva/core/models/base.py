@@ -1,28 +1,9 @@
-"""
-Abstract STAC base models shared by the two data tiers.
-
-The data layer has two tiers that mirror the same STAC spec but play different
-roles (see docs/adr/0004-staging-tier-and-abstract-stac-models.md):
-
-- Published — the concrete ``Collection`` / ``Item`` / ``Asset`` in this app
-  (product-grained, served, ``Item`` is a TimescaleDB hypertable).
-- Staging — ``StagingCollection`` / ``StagingItem`` / ``StagingAsset`` in the
-  ``staging`` app (source-grained, not served, no hypertable).
-
-These abstract bases hold only the **non-relational** fields the two tiers
-share. The relational fields differ per tier (different ``collection`` targets,
-different ``item`` parents, different ``variable`` reverse accessors) and so
-stay on the concrete models, as do tier-specific ``Meta``, panels, and methods.
-"""
-
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 
 class AbstractCollection(models.Model):
-    """Non-relational fields shared by Published and Staging collections."""
-
     slug = models.SlugField(max_length=100)
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -43,8 +24,6 @@ class AbstractCollection(models.Model):
 
 
 class AbstractSpatialItem(models.Model):
-    """Non-relational spatial/raster fields shared by Published and Staging items."""
-
     # Source tracking — convention: "{bucket}:{file_path}".
     source_file = models.CharField(
         max_length=500,
@@ -79,13 +58,6 @@ class AbstractSpatialItem(models.Model):
 
 
 class AbstractAsset(models.Model):
-    """
-    Non-relational fields shared by Published and Staging assets.
-
-    The ``item`` parent and ``variable`` FK differ per tier (different parent
-    models, different reverse accessors) and stay on the concrete models.
-    """
-
     class Role(models.TextChoices):
         DATA = "data", _("Data")
         VISUAL = "visual", _("Visual")
@@ -133,7 +105,6 @@ class AbstractAsset(models.Model):
     height = models.IntegerField(null=True, blank=True)
     bands = models.IntegerField(null=True, blank=True, default=1)
 
-    # Statistics (computed during processing)
     stats_min = models.FloatField(null=True, blank=True)
     stats_max = models.FloatField(null=True, blank=True)
     stats_mean = models.FloatField(null=True, blank=True)

@@ -2,10 +2,9 @@
 
 An ``Asset.href`` is a key in our assets bucket, or — for a Remote asset
 (ADR 0042) — an Upstream URL. Each test here builds a Remote asset directly
-(no harvester exists yet) and follows it down one path that used to treat every
-href as a key: the public URL, the STAC API, the delete that follows a row out,
-and the orphan sweep. The local asset beside it is the control: its behaviour
-must not move.
+and follows it down one path that used to treat every href as a key: the public
+URL, the STAC API, the delete that follows a row out, and the orphan sweep. The
+local asset beside it is the control: its behaviour must not move.
 """
 
 import os

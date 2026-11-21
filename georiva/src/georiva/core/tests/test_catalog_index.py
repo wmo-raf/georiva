@@ -54,7 +54,6 @@ class CatalogIndexTests(TestCase):
         response = self.client.get(self.url)
         html = response.content.decode()
 
-        # 3 collections total, 2 active
         self.assertIn("3 collections", html)
         self.assertIn("2", html)
         self.assertIn("active", html)
@@ -134,8 +133,6 @@ class CatalogIndexTests(TestCase):
         self.assertNotContains(response, "Bravo")
 
     def test_header_search_matches_collection_name(self):
-        # Searching a collection's name should surface its parent catalog,
-        # even though the term doesn't appear in the catalog's own name.
         gfs = self._catalog("GFS", "gfs")
         ecmwf = self._catalog("ECMWF", "ecmwf")
         Collection.objects.create(catalog=gfs, name="temperature-2m", slug="t2m")
@@ -163,8 +160,6 @@ class CatalogIndexTests(TestCase):
 
 
 class CatalogIndexAffordanceTests(TestCase):
-    """The catalog accordion only shows affordances the user can actually use."""
-
     def setUp(self):
         self.catalog = Catalog.objects.create(
             organisation=make_organisation(), name="Models", slug="models-idx", file_format="grib2"

@@ -8,19 +8,6 @@ asset's ``href`` in place (e.g. a filename-scheme change) while the old object
 lingers in the bucket, or when an on-commit deletion of a deleted row's object
 (ADR 0032) gave up or spared it — and from before that existed.
 
-Only object types that correspond to an ``Asset`` (COG/GeoTIFF, PNG, WebP, JPEG)
-are ever selected — a non-asset object such as the legacy ``.json`` metadata
-sidecars ingestion wrote alongside each asset before ADR 0024 is deliberately
-left alone, so a sweep can never remove a legitimate file that simply isn't
-modelled as an ``Asset`` row.
-
-Deleting an object is guarded the same way whoever asks for it — the
-on-commit deletion that follows an Asset row out (``asset_deletion``) and the
-sweep alike — by :func:`deletion_verdict`: never a key a live ``href`` names,
-and never an object written at or after the cutoff, since a key is
-deterministic and a re-ingest may already have put new bytes under it before
-its row exists (ADR 0032).
-
 Kept dependency-free so it is unit-testable without a live bucket; the callers
 supply the object listing, the live-href set and the modified times.
 """

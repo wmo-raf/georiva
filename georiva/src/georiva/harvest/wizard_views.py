@@ -84,12 +84,10 @@ DEFAULT_STORE_CADENCE = 60
 
 
 def _cadences(store) -> list[tuple[int, str]]:
-    """The cadences an operator may choose from for this feed."""
     return STORE_CADENCES if store else CADENCES
 
 
 def _default_cadence(store) -> int:
-    """The cadence chosen for an operator who chooses none."""
     return DEFAULT_STORE_CADENCE if store else DEFAULT_CADENCE
 
 
@@ -140,9 +138,6 @@ def _too_slow(why) -> str:
     ) % {"why": why}
 
 
-# ── Step 1: the catalog's address ───────────────────────────────────────────
-
-
 def harvest_wizard_step1(request):
     require_active_org(request)
     session = _session(request)
@@ -187,9 +182,6 @@ def _survey_address(address: str):
     if not found.collections:
         return (reason_for(Shape.NO_API) if not found.has_api else _("This catalog lists no collections.")), None, False
     return None, found, False
-
-
-# ── Step 2: pick a collection ───────────────────────────────────────────────
 
 
 def harvest_wizard_step2(request):
@@ -244,9 +236,6 @@ def _choose(session: dict, collection_id: str, title: str, survey: dict) -> None
     session.pop("checking", None)
     session.setdefault("surveys", {})[collection_id] = survey
     session.update({"collection_id": collection_id, "collection_title": title, "survey": survey})
-
-
-# ── Step 3: what the survey found ───────────────────────────────────────────
 
 
 def harvest_wizard_step3(request):
@@ -331,9 +320,6 @@ def _collect(request, session: dict):
         "georivaharvest/wizard_step3_checking.html",
         {"session": session, "checking": checking, "wait": wait, **_chrome(3)},
     )
-
-
-# ── Step 4: choose images, confirm where their files are ────────────────────
 
 
 def harvest_wizard_step4(request):
@@ -440,8 +426,6 @@ def _number(value) -> float | None:
     return number if number == number and abs(number) != float("inf") else None
 
 
-# ── Units: what the Upstream's values are in, and what they are shown in ────
-#
 # A harvested Variable's source unit is the Upstream's own (ADR 0046 §9): lifted
 # from what it declares, shown and not asked. The operator chooses the served
 # unit, and confirms the Water flag the field's name proposes (§6). The value
@@ -514,7 +498,6 @@ def _units_chosen_earlier(earlier: dict) -> dict:
 
 
 def _units_posted(row: dict, index: int, posted) -> dict:
-    """A row as it was posted."""
     unit_id = _whole(posted.get(f"unit_{index}"))
     return {
         "source_unit_id": row["source_unit"].pk if row["source_unit"] else _whole(posted.get(f"source_unit_{index}")),
@@ -600,8 +583,6 @@ def _unconfirmed(chosen: list[dict], survey: dict, confirmed: list[dict]) -> lis
         for host in missing
     ]
 
-
-# ── Step 4, for an Upstream store: choose fields, confirm where its data is ──
 
 #: How many fields one message names before it says how many more there are.
 _NAMED_IN_A_MESSAGE = 5
@@ -890,9 +871,6 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
     return chosen, errors, False
 
 
-# ── Step 5: schedule and save ───────────────────────────────────────────────
-
-
 def harvest_wizard_step5(request):
     from georiva.core.models import Catalog
 
@@ -1117,9 +1095,6 @@ def _seen(assets) -> list[dict]:
         if asset["readable"]:
             seen.append({"key": asset["key"], "title": asset["title"]})
     return seen
-
-
-# ── Re-check upstream, on a feed that exists ────────────────────────────────
 
 
 _RECHECK_KEY = "georiva_harvest_recheck"

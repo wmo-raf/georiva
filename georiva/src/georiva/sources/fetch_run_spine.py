@@ -84,7 +84,6 @@ class RunResult:
 
     def add_error(self, error: str):
         self.errors.append(error)
-        # Keep only last 50 errors
         if len(self.errors) > 50:
             self.errors = self.errors[-50:]
 

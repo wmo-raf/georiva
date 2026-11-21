@@ -1,30 +1,3 @@
-"""
-GeoRiva EDR API Serializers
-
-EDR hierarchy:
-- Landing Page
-  └── Collections  (one per GeoRiva Collection)
-      └── parameter_names  (one entry per active Variable)
-          └── x-georiva    (palette, value range, rendering hints)
-
-Implements OGC API - Environmental Data Retrieval 1.1 (19-086r6)
-Phase 1: Collection metadata only (landing page, conformance, collection list, collection detail)
-
-Temporal values strategy:
-  - Collections without reference_time → flat ISO string list (EDR-compliant)
-  - Collections with reference_time    → flat ISO list in extent.temporal.values
-                                          + structured runs in x-georiva.runs
-                                          (keeps spec compliance while enabling
-                                           frontend URL construction)
-
-Both time lists are bounded on purpose: the flat list is the latest run only,
-and ``x-georiva.runs`` is the newest ``runs_limit`` runs. A client that wants
-more follows the ``related`` link to ``/api/runs/{catalog}/{collection}/``,
-which knows every run and will hand over one run's valid times on request.
-Why the window exists, and why the runs route is where the rest lives, is ADR
-0026's "valid times belong to the runs route" amendment (issue #600).
-"""
-
 from django.urls import reverse
 from rest_framework import serializers
 
@@ -34,19 +7,11 @@ from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 from .ids import edr_collection_href, edr_collection_id
 
-# How many recent runs x-georiva.runs carries, and the most a caller may ask
-# for with ?runs_limit=. The ceiling is a *body* bound, not a row count a client
-# may raise at will: each run drags its every lead time along, so twenty runs of
-# a 48-step model is already ~1,000 timestamps. A client that wants further back
-# than that follows the related link to the runs route, which lists runs without
-# their times.
 DEFAULT_RUNS_LIMIT = 5
 MAX_RUNS_LIMIT = 20
 
 
 class EDRBaseURLMixin:
-    """Provide EDR base URL from request context."""
-
     def _get_base_url(self) -> str:
         request = self.context.get("request")
         if request:
@@ -56,9 +21,6 @@ class EDRBaseURLMixin:
     def _get_stac_base_url(self) -> str:
         request = self.context.get("request")
         return get_base_stac_api_url(request)
-
-
-# Parameter serializer — one Variable → one parameter_names entry
 
 
 class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
@@ -170,8 +132,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
 
         return data
 
-    # ── Reference time detection ───────────────────────────────────────────
-
     def _check_has_reference_time(self, collection: Collection) -> bool:
         """
         Fallback DB check — used only when the view hasn't annotated the queryset.
@@ -180,8 +140,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         where reference_time is set but is_forecast may be False.
         """
         return collection.has_runs()
-
-    # ── Extent ────────────────────────────────────────────────────────────
 
     def _build_extent(self, collection: Collection, has_reference_time: bool) -> dict:
         bbox = collection.spatial_extent or [-180, -90, 180, 90]
@@ -275,7 +233,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             for reference_time in reference_times
         ]
 
-    # ── Parameter names ───────────────────────────────────────────────────
     def _build_parameter_names(self, collection: Collection) -> dict:
         parameter_names = {}
         variables = (
@@ -293,14 +250,10 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
 
         return parameter_names
 
-    # ── Data queries ──────────────────────────────────────────────────────
-
     def _build_data_queries(self, collection_url: str) -> dict:
         # Metadata plane only: no data-query route exists (see edr/urls.py), so
         # advertising one would send an EDR client to a 404.
         return {}
-
-    # ── Providers ─────────────────────────────────────────────────────────
 
     def _build_providers(self, collection: Collection) -> list:
         catalog = collection.catalog
@@ -311,8 +264,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
                 provider["url"] = catalog.provider_url
             providers.append(provider)
         return providers
-
-    # ── Links ─────────────────────────────────────────────────────────────
 
     def _build_links(
         self,
@@ -375,8 +326,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
 
         return links
 
-    # ── GeoRiva metadata ──────────────────────────────────────────────────
-
     def _build_georiva_metadata(self, collection: Collection, has_reference_time: bool) -> dict:
         """
         GeoRiva-specific metadata that doesn't fit the EDR spec.
@@ -415,9 +364,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             meta["runs_limit"] = limit
 
         return {k: v for k, v in meta.items() if v is not None}
-
-
-# Collection list serializer — summary shape for /collections/
 
 
 class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):

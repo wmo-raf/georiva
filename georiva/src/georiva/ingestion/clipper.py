@@ -17,11 +17,6 @@ class BoundaryClipper:
     """
 
     def __init__(self, boundary: "AdminBoundary" = None, apply_mask: bool = True):
-        """
-        Args:
-            boundary: AdminBoundary instance with PostGIS geometry
-            apply_mask: Whether to apply precise geometry mask (vs bbox only)
-        """
         self.boundary = boundary
         self.apply_mask = apply_mask
         self._shapely_geom = None
@@ -41,7 +36,6 @@ class BoundaryClipper:
 
     @property
     def shapely_geom(self):
-        """Convert PostGIS geometry to Shapely for masking."""
         if self._shapely_geom is None and self.boundary:
             from shapely import wkt
 
@@ -55,16 +49,9 @@ class BoundaryClipper:
         src_height: int,
     ) -> dict | None:
         """
-        Compute pixel window for clipped extraction.
-
-        Args:
-            src_bounds: Source data bounds [west, south, east, north]
-            src_width: Source raster width in pixels
-            src_height: Source raster height in pixels
-
-        Returns:
-            dict with x_off, y_off, width, height, bounds
-            or None if no clipping needed
+        Compute pixel window for clipped extraction from ``src_bounds``
+        [west, south, east, north]: a dict with x_off, y_off, width, height,
+        bounds, or None if no clipping is needed.
         """
         if not self.bbox:
             return None
@@ -94,7 +81,6 @@ class BoundaryClipper:
         win_width = min(win_width, src_width - x_off)
         win_height = min(win_height, src_height - y_off)
 
-        # Recompute exact bounds from pixel window
         exact_west = src_west + x_off * res_x
         exact_north = src_north - y_off * res_y
         exact_east = exact_west + win_width * res_x

@@ -25,7 +25,7 @@ class VirtualZarrManifest(TimeStampedModel):
 
     The Django fields (repo_path, watermark, snapshot_id, coverage) are
     derived caches — the source of truth for what the repo contains is the
-    latest Icechunk commit's metadata (design decision 5).
+    latest Icechunk commit's metadata.
     """
 
     LOCK_TIMEOUT = timedelta(minutes=30)
@@ -44,8 +44,6 @@ class VirtualZarrManifest(TimeStampedModel):
     #: Statuses a build may be claimed from.  READY needs no build, BUILDING is
     #: already claimed, and NO_DATA is terminal until data arrives.
     BUILDABLE_STATUSES = (Status.PENDING, Status.STALE, Status.FAILED)
-
-    # Identity — one manifest per variable
 
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
@@ -118,7 +116,6 @@ class VirtualZarrManifest(TimeStampedModel):
     error = models.TextField(blank=True)
 
     class Meta:
-        # ordering by collection then variable slug for readable admin lists
         ordering = ["variable__collection", "variable__slug"]
         indexes = [
             models.Index(
@@ -133,7 +130,6 @@ class VirtualZarrManifest(TimeStampedModel):
 
     @property
     def collection(self):
-        """Convenience accessor — always self.variable.collection."""
         return self.variable.collection
 
     @classmethod
@@ -147,7 +143,6 @@ class VirtualZarrManifest(TimeStampedModel):
         return f"{collection.catalog.storage_prefix}/{collection.slug}/{variable.slug}/"
 
     def get_repo_path(self) -> str:
-        """Return (or derive) the repo prefix for this record."""
         if self.repo_path:
             return self.repo_path
         return self.make_repo_path(self.variable)
@@ -508,7 +503,6 @@ class VirtualZarrBuildLog(models.Model):
 
     @classmethod
     def prune_expired(cls) -> int:
-        """Delete rows older than RETENTION; returns the number removed."""
         cutoff = timezone.now() - cls.RETENTION
         deleted, _ = cls.objects.filter(started_at__lt=cutoff).delete()
         return deleted

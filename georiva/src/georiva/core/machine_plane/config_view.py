@@ -89,17 +89,12 @@ from georiva.core.models import Collection, Variable
 
 
 class TileConfigView(APIView):
-    """Return rendering config for a variable (internal use by Titiler)."""
-
     permission_classes = []
     authentication_classes = []
 
     def get(self, request, org_slug, catalog_slug, collection_slug, variable_slug):
         active_org = getattr(request, "active_org", None)
         if active_org is not None and active_org.slug != org_slug:
-            # A host that resolved is the authority; the path may only agree
-            # with it. Reported as absent, not forbidden — which catalogs
-            # another institution runs is not this caller's business.
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         try:
@@ -154,7 +149,6 @@ class TileConfigView(APIView):
 
 
 def _served(variable, style) -> dict:
-    """The numbers a client reads, in the served unit (ADR 0046 §15)."""
     vmin, vmax = variable.served_range
     stops = variable.served_palette(style.as_weatherlayers_palette()) if style is not None else []
     return {"vmin": vmin, "vmax": vmax, "unit": variable.unit.symbol, "stops": stops}

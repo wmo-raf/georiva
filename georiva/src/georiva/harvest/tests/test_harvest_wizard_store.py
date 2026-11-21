@@ -70,8 +70,6 @@ class StoreWizardMixin(WizardMixin):
         self.upstream.become_store(href, dimensions, self.arrays, chunk_locations=self.places, **kwargs)
         self.upstream.field_places = {path: self.places[0] for path in self.arrays} if self.places else {}
 
-    # The steps, each as an operator takes it.
-
     def reach_fields(self):
         self.assertRedirects(self.give_address(STATIC), step(2))
         self.assertRedirects(self.pick_collection("noaa-gfs-forecast-virtual"), step(3))

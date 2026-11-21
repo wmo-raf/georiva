@@ -78,7 +78,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     )
 
     interval_minutes = models.PositiveIntegerField(
-        default=360,  # 6 hours
+        default=360,
         validators=[MinValueValidator(5)],
         verbose_name=_("Run Interval"),
         help_text=_("Minutes between runs (global default for all collections)"),
@@ -129,7 +129,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         return f"{self.name} - {self.get_real_instance_class().__name__}"
 
     def get_loader_config(self) -> dict:
-        """Get loader configuration dictionary."""
         return {}
 
     @property
@@ -227,7 +226,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
 
     @classmethod
     def get_collection_link_model(cls):
-        """Return the DataFeedCollectionLink subclass for this feed type. Default: base class."""
         return DataFeedCollectionLink
 
     @classmethod
@@ -261,7 +259,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         return source_class(config)
 
     def get_loader(self, collection=None):
-        """Create fully configured Loader instance."""
         from .loader import Loader
 
         return Loader(
@@ -305,7 +302,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         )
 
     def is_due(self) -> bool:
-        """Check if data feed is due to run."""
         if not self.is_active:
             return False
 
@@ -478,7 +474,6 @@ class DataFeedCollectionLink(PolymorphicModel):
         return self.interval_minutes or self.data_feed.interval_minutes
 
     def is_due(self) -> bool:
-        """Return True if this collection is due to run."""
         if not self.data_feed.is_active:
             return False
         if not self.last_run_at:
@@ -505,7 +500,6 @@ class DataFeedCollectionLink(PolymorphicModel):
         return []
 
     def has_configurable_fields(self) -> bool:
-        """Return True if there are any operator-editable config fields on this link."""
         return bool(self.get_panels())
 
     @classmethod
@@ -648,8 +642,8 @@ class DerivedProductInput(models.Model):
     (tier routing, dispatch, input resolution) matches by FK rather than
     re-matching a slug on each event. `source_key` keeps the declared key for
     re-resolution across upgrades and for diagnostics. Deleting the bound
-    `Collection` cascades this row away (surfaced as an *unbound* product in a
-    later slice)."""
+    `Collection` cascades this row away, leaving the product *unbound*
+    (ADR-0010 §6)."""
 
     ORGANISATION_LOOKUP = "product__data_feed__catalog__organisation"
 
@@ -969,7 +963,6 @@ class FetchRun(models.Model):
 
     @property
     def retried_as(self):
-        """The run that retried this one, if any."""
         return self.resumes.order_by("pk").first()
 
     def mark_completed(self, retry_after=None, **counters):
@@ -1042,8 +1035,6 @@ class FetchRun(models.Model):
 
 
 class FetchedFile(models.Model):
-    """Per-file record within a FetchRun."""
-
     class Status(models.TextChoices):
         # Planned, not yet reached. "Waiting", not "Queued": queued is the
         # loader's remote-provider state.

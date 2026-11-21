@@ -27,13 +27,11 @@ from pathlib import Path
 
 import pytz
 
-# Pattern: GR--YYYYMMDDTHHMM--rest_of_filename
 GEORIVA_REFTIME_PATTERN = re.compile(r"^GR--(\d{8}T\d{4})--(.+)$")
 GEORIVA_REFTIME_FORMAT = "%Y%m%dT%H%M"
 
 
 def has_reference_time(filename: str) -> bool:
-    """Check if a filename carries a GR-- reference time prefix."""
     return GEORIVA_REFTIME_PATTERN.match(filename) is not None
 
 

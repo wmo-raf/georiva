@@ -21,7 +21,6 @@ _INGESTION_EVENT_TYPES = frozenset(
 
 
 def ingestion_events_sse(request):
-    """Async SSE endpoint streaming ingestion (FileIngestion/Job) events."""
     # Resolved here, while the request is still in hand: the stream itself
     # outlives the view and has no request to ask.
     org = require_active_org(request)

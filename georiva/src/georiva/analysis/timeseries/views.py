@@ -137,9 +137,6 @@ class AreaTimeseriesView(APIView):
         "time_start":  "2020-01-01",
         "time_end":    "2024-12-31"
     }
-
-    Runs synchronously.  For large areas or long time ranges, wrap this
-    in a Celery task and return a task_id instead (see tasks.py).
     """
 
     def post(self, request: Request) -> Response:

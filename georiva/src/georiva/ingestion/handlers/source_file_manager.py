@@ -23,10 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class SourceFileManager:
-    """
-    Handles the lifecycle of the raw source file during ingestion.
-    """
-
     @contextmanager
     def download_to_temp(self, origin: "Bucket", file_path: str):
         """
@@ -42,7 +38,7 @@ class SourceFileManager:
             tmp_path = Path(tmp_dir) / original_name
 
             with origin.open(file_path, "rb") as src, open(tmp_path, "wb") as dst:
-                while chunk := src.read(8 * 1024 * 1024):  # 8 MB chunks
+                while chunk := src.read(8 * 1024 * 1024):
                     dst.write(chunk)
 
             yield tmp_path

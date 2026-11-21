@@ -28,7 +28,6 @@ class ItemPreviewTests(TestCase):
         return self.client.get(reverse("item_preview", args=[item.pk]))
 
     def test_a_store_asset_is_drawn(self):
-        # Titiler draws a Store asset's map from the store (ADR 0044 §9) — the preview asks it to.
         response = self._preview(STORE, Asset.Format.ZARR)
         self.assertContains(response, 'data-visualizable="true"')
         self.assertContains(response, "encoded-preview.png")

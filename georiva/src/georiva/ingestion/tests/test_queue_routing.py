@@ -1,27 +1,3 @@
-"""What is allowed to sit in front of a file waiting to be ingested (#398).
-
-The ingestion worker defaults to concurrency 1, which makes ``georiva-ingestion``
-a strict FIFO: whatever is on it delays every file behind it. One ECMWF IFS
-fetch (2 collections x 81 variables x 16 steps) fans out ~1,300 follow-up tasks
-at ~1.5s each — per COG asset for zonal statistics, per variable for
-virtual-Zarr builds — and while those shared the ingestion queue the *next*
-feed's ``process_staging_file`` waited 30-40 minutes behind bookkeeping nobody
-was waiting on. Not a stall — new COGs simply appeared half an hour late
-because derived bookkeeping held the line.
-
-So what is pinned here is not "two tasks moved" but the admission rule that
-keeps the queue fast, stated as a closed set: ``georiva-ingestion`` carries
-fetch and extraction — the work whose latency *is* data availability — and
-nothing else. A new task routed there has to be added to ``TIME_CRITICAL``
-deliberately, which is the moment to ask whether it belongs.
-
-The second half guards the way this was lost in the first place. A queue named
-on a task declaration is only a default: ``apply_async(queue=...)`` silently
-overrides it, and all four dispatch sites did exactly that. Declarations that
-callers may contradict are not a routing policy, so no dispatch site names a
-queue at all — the declaration is the single source of truth.
-"""
-
 import ast
 from pathlib import Path
 
@@ -136,15 +112,6 @@ class IngestionQueueAdmissionTests(TestCase):
 
 
 class TaskFerryQueueTests(TestCase):
-    """The other way onto the ingestion queue.
-
-    django-task-ferry runs every registered ``JobType`` through one task,
-    ``task_ferry.tasks.run_async_job``, dispatched to ``TASK_FERRY["CELERY_QUEUE"]``
-    — so the closed set above is only closed if that setting and the job types
-    riding it are held to the same rule. They are not ``georiva.*`` tasks and
-    the AST sweep does not reach into the package, so they are asserted here.
-    """
-
     def test_job_types_on_the_ingestion_queue_are_fetch_and_extraction(self):
         from django.conf import settings
         from task_ferry.registry import job_type_registry

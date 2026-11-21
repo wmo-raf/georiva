@@ -1,25 +1,3 @@
-"""The sweep claims a manifest before dispatching it (#398).
-
-``sweep_virtual_zarr_pending`` runs every 5 minutes and dispatches every
-buildable manifest. The build task marked itself BUILDING when it *started*,
-which on a queue with a backlog is much later than when it was queued — so a
-manifest that waited more than 5 minutes was still PENDING when the next sweep
-looked, and was dispatched again. And again. The IFS backlog in #398 was 30-40
-minutes deep: seven sweeps, seven copies.
-
-While the build ran on the concurrency-1 ingestion queue the copies merely ran
-one after another, wasting a rebuild each. Moving these builds to
-``georiva-processing`` puts four pool slots behind them, so the copies can now
-overlap — two writers on one Icechunk repo, a ConflictError, and a manifest
-flipped to FAILED by a race the docstrings claimed was impossible.
-
-The fix is to claim at dispatch rather than at start: the status moves to
-BUILDING in the same conditional UPDATE that decides whether to dispatch, so a
-manifest can be in flight exactly once. Crash recovery is unchanged and now
-covers the queued window too — a claim whose task never runs looks exactly like
-a worker that died mid-build, and ``reset_stale_locks`` already handles that.
-"""
-
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -130,8 +108,6 @@ class SweepDispatchTests(TestCase):
         manifest.refresh_from_db()
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.BUILDING)
         self.assertEqual(manifest.locked_by, current_claim, "the stale copy took a lock it does not hold")
-
-    # -- the operator's rebuild ----------------------------------------------
 
     def test_an_operator_rebuild_claims_a_ready_manifest_the_sweep_would_skip(self):
         """``build_virtual_zarr`` resolves --all and --collection to manifests in

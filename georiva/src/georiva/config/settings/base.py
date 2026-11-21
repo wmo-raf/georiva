@@ -10,8 +10,6 @@ from georiva.version import VERSION
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE_DIR = os.path.dirname(PROJECT_DIR)
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 env = environ.Env(
     DEBUG=(bool, False),
@@ -204,8 +202,6 @@ TEMPLATES = [
 WSGI_APPLICATION = "georiva.config.wsgi.application"
 ASGI_APPLICATION = "georiva.config.asgi.application"
 
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DB_CONNECTION_MAX_AGE = env.int("DB_CONNECTION_MAX_AGE", default=0)
 DB_CONN_HEALTH_CHECKS = env.bool("DB_CONN_HEALTH_CHECKS", default=False)
@@ -224,8 +220,6 @@ DATABASES = {
     )
 }
 
-# Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -242,8 +236,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
 
 LANGUAGE_CODE = "en-us"
 
@@ -253,8 +245,6 @@ USE_I18N = True
 
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATICFILES_FINDERS = [
     "django.contrib.staticfiles.finders.FileSystemFinder",
@@ -344,7 +334,6 @@ GEORIVA_ZARR_TIME_CHUNK = env.int("GEORIVA_ZARR_TIME_CHUNK", default=1)
 GEORIVA_ZARR_ENABLED = env.bool("GEORIVA_ZARR_ENABLED", default=True)
 
 
-# Common S3/MinIO options (shared across all buckets)
 _S3_OPTIONS = {
     "region_name": AWS_S3_REGION_NAME,
     "endpoint_url": AWS_S3_ENDPOINT_URL,
@@ -366,7 +355,6 @@ if GEORIVA_STORAGE_BACKEND == "s3":
         },
     }
 
-    # Register one Django storage backend per bucket
     for _key, _bucket_conf in GEORIVA_BUCKETS.items():
         _options = {
             **_S3_OPTIONS,
@@ -404,7 +392,6 @@ else:
 # can exceed this limit within Wagtail's page editor.
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10_000
 
-# Tenancy
 # Every organisation is served from <slug>.<GEORIVA_BASE_DOMAIN>; the central org
 # sits on the apex itself. One login covers the whole instance, so the session and
 # CSRF cookies are scoped to the parent domain — except on a single-label base
@@ -417,13 +404,6 @@ GEORIVA_SITE_PORT = env.int("GEORIVA_SITE_PORT", default=80)
 # membership in one place.
 GEORIVA_ADMIN_PATH_PREFIX = "/admin/"
 
-# Where a plugin's app is served from (ADR 0039). The prefix is reserved for
-# plugin pages, so a page route cannot take a path core answers or a page slug an
-# editor chose; emptying it mounts apps at the site root, which shares a space
-# with the page tree and is the operator's own call. `GEORIVA_WEB_APP_MOUNTS`
-# renames one plugin's mount — `georiva_forecast_viewer=viewer` serves it at
-# `/app/viewer/` — because the address an organisation gives its users is theirs
-# to pick, not the plugin's.
 GEORIVA_WEB_APP_PATH_PREFIX = env.str("GEORIVA_WEB_APP_PATH_PREFIX", default="app/")
 GEORIVA_WEB_APP_MOUNTS = env.dict("GEORIVA_WEB_APP_MOUNTS", default={})
 
@@ -466,8 +446,6 @@ CSRF_FAILURE_VIEW = "georiva.config.views.csrf_failure"
 
 WAGTAIL_SITE_NAME = "GeoRiva"
 
-# Search
-# https://docs.wagtail.org/en/stable/topics/search/backends.html
 WAGTAILSEARCH_BACKENDS = {
     "default": {
         "BACKEND": "wagtail.search.backends.database",
@@ -569,7 +547,7 @@ CELERY_BEAT_SCHEDULE = {}
 TASK_FERRY = {
     "EXECUTOR": "task_ferry.executors.celery.CeleryExecutor",
     "CELERY_QUEUE": "georiva-ingestion",
-    "PROGRESS_CACHE_TIMEOUT": 7200,  # 2 hours
+    "PROGRESS_CACHE_TIMEOUT": 7200,
     "JOB_EXPIRY_DAYS": 14,
 }
 
@@ -642,7 +620,7 @@ VUE_FRONTEND_DEV_SERVER_URL = env.str("VUE_FRONTEND_DEV_SERVER_URL", default="ht
 VUE_FRONTEND_DEV_SERVER_PATH = "/static/vue/src"
 VUE_FRONTEND_STATIC_PATH = "vue"
 
-# Temp directory for intermediate files processing.
+# Where intermediate files are written while a file is processed.
 GEORIVA_TEMP_DIR = env("GEORIVA_TEMP_DIR", default="/var/tmp/georiva")
 
 # Pixel threshold above which variable processing switches to chunked mode.

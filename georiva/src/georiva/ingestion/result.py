@@ -49,7 +49,6 @@ class IngestionResult:
 
     @property
     def size_reduction_percent(self) -> float | None:
-        """Storage reduction achieved by clipping, as a percentage."""
         if self.original_size and self.clipped_size:
             original_pixels = self.original_size[0] * self.original_size[1]
             clipped_pixels = self.clipped_size[0] * self.clipped_size[1]

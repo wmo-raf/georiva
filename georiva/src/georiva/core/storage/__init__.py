@@ -22,8 +22,7 @@ object keys, so a Titiler tile URL and the COG key behind it differ only by
 prefix.
 
 The re-exports below are the surface the old top-level ``core/storage.py``
-offered, kept so its callers — the singleton has 27 of them — did not have to
-move with it. The other modules are imported by their own paths.
+offered, kept so its callers did not have to move with it. The other modules are imported by their own paths.
 """
 
 from .manager import (  # noqa: F401

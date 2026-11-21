@@ -1,23 +1,3 @@
-"""The discipline a derived artefact is rebuilt under (ADR 0027).
-
-``virtual_zarr`` debugged this machinery once already — the double-dispatch race
-of #398, and the recycled-claim window that claiming alone does not close — and
-a second builder was about to reimplement it from the same starting point. What
-is pinned here is the part that was expensive to learn:
-
-- a build is claimed in the same conditional UPDATE that decides to dispatch it,
-  so a record queued behind a backlog is not dispatched again by the next sweep;
-- the claim identifies the *dispatch*, not the worker, so a copy whose claim was
-  recycled while it waited stands down instead of running beside its
-  replacement;
-- an expired lock is the only crash recovery there is, and it has to cover the
-  queued window as well as the build.
-
-The last class validates the base against ``VirtualZarrManifest`` by inspection
-— the shape was extracted from it and it is deliberately *not* migrated onto it
-(ADR 0027), so nothing but a test keeps the two from drifting apart.
-"""
-
 from datetime import timedelta
 from unittest.mock import MagicMock
 
@@ -303,8 +283,6 @@ class DispatchTests(BuildDisciplineTestCase):
         self.assertTrue(claim.startswith("dispatch-"))
 
     def test_a_record_already_in_flight_is_not_queued_again(self):
-        """The #398 regression: a build waiting behind a backlog is BUILDING,
-        not PENDING, so the next sweep passes over it."""
         record = self.make()
         task = MagicMock()
         dispatch_build(Buildable, record.pk, task, claimed_by="sweep")
@@ -322,8 +300,6 @@ class DispatchTests(BuildDisciplineTestCase):
         self.assertNotEqual(self.reread(first).locked_by, self.reread(second).locked_by)
 
     def test_dispatch_never_names_a_queue(self):
-        """ADR 0025: the queue a task declares is the routing, and a caller that
-        overrides it silently wins. ``apply_async`` is not reached from here."""
         record = self.make()
         task = MagicMock()
 
@@ -339,9 +315,6 @@ class StandDownTests(BuildDisciplineTestCase):
         self.assertFalse(stand_down(record, "claim-1"))
 
     def test_a_copy_whose_claim_was_recycled_stands_down(self):
-        """The window claiming alone does not close: a queue wait longer than
-        LOCK_TIMEOUT frees the row, a later sweep dispatches a replacement, and
-        both copies are live."""
         record = self.make(Buildable.Status.BUILDING, locked_by="claim-2")
 
         self.assertTrue(stand_down(record, "claim-1"))
@@ -444,13 +417,6 @@ class BuildLogTests(BuildDisciplineTestCase):
 
 
 class ShapedForVirtualZarrTests(TestCase):
-    """The base was extracted from ``VirtualZarrManifest`` and deliberately does
-    not replace it (ADR 0027): migrating a live model onto a new base is a
-    separate decision with a migration attached, and the second grain has to
-    exist first. So the fit is validated by inspection — which is only worth
-    anything if something notices when the two drift.
-    """
-
     def test_the_state_machine_is_the_same_six_states(self):
         self.assertEqual(
             {choice.value for choice in VirtualZarrManifest.Status},
@@ -470,9 +436,6 @@ class ShapedForVirtualZarrTests(TestCase):
         base_fields = {f.name for f in BuildDisciplinedModel._meta.get_fields()}
         manifest_fields = {f.name for f in VirtualZarrManifest._meta.get_fields()}
 
-        # ``watermark`` is the manifest's input fingerprint under an older name
-        # and a datetime type — the one field that would be renamed by a
-        # migration onto the base.
         self.assertEqual(base_fields - manifest_fields, {"input_fingerprint"})
 
     def test_the_discipline_the_base_promises_is_callable_on_the_manifest(self):

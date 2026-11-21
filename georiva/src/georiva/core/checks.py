@@ -14,9 +14,6 @@ from .plugin_manifest import load_manifest, missing_required_env, parse_requires
 
 @register()
 def check_plugin_requires_env(app_configs, **kwargs):
-    """Report required ``requires_env`` variables a plugin declares but the
-    environment lacks (#113). A warning, or an error under
-    ``GEORIVA_STRICT_PLUGIN_ENV``."""
     strict = getattr(settings, "GEORIVA_STRICT_PLUGIN_ENV", False)
     missing_level = Error if strict else Warning
     folders = getattr(settings, "GEORIVA_PLUGIN_FOLDER_BY_APP", {})

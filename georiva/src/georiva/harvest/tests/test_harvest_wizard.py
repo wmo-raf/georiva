@@ -98,8 +98,6 @@ class WizardMixin:
         for args in self.surveys_started:
             background_survey.run(*args)
 
-    # The steps, each as an operator takes it.
-
     def give_address(self, address=ADDRESS):
         return self.client.post(step(1), {"upstream_url": address})
 

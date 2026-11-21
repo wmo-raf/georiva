@@ -50,7 +50,6 @@ def resolve_site_port(port=None):
 
 
 def build_org_hostname(slug, base_domain=None):
-    """The hostname an organisation's Site is served from."""
     return f"{slug}.{resolve_base_domain(base_domain)}"
 
 

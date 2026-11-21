@@ -112,7 +112,7 @@ def build_cog_url(
     Construct the MinIO COG URL from path components.
 
     Path convention (org-first, matching the storage grammar every bucket key
-    follows — see georiva/core/path_resolution.py):
+    follows):
       {org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{variable}_{HHMMSS}.tif
       {org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{variable}_{HHMMSS}__ref{YYYYMMDDTHHmmss}.tif
 
@@ -256,7 +256,6 @@ def SemanticTileConfig(
         description="Named style to render with; omission means the variable's default style",
     ),
 ) -> dict:
-    """Resolve rendering config for the variable the path names (see :func:`resolve_tile_config`)."""
     return resolve_tile_config(org_slug, catalog_slug, collection_slug, variable_slug, style)
 
 
@@ -364,5 +363,4 @@ class RescaleAlgorithm(BaseAlgorithm):
 def SemanticRescale(
     tile_config: dict = Depends(SemanticTileConfig),
 ) -> BaseAlgorithm | None:
-    """Return a rescale algorithm using vmin/vmax from the tile config."""
     return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"], boundary=tile_config.get("boundary"))

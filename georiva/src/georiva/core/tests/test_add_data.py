@@ -8,8 +8,6 @@ User = get_user_model()
 
 
 class AddDataFrontDoorTests(TestCase):
-    """The Add Data front door routes data managers to the right setup wizard."""
-
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "a@a.com", "pw")
         dial_org(self.client)
@@ -19,7 +17,6 @@ class AddDataFrontDoorTests(TestCase):
         response = self.client.get(reverse("add_data"))
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
-        # Routes to the DataFeed setup wizard and the New Push Feed Wizard
         self.assertIn(reverse("data_feed_add_select"), html)
         self.assertIn(reverse("upload_wizard_step1"), html)
 
@@ -43,5 +40,4 @@ class AddDataFrontDoorTests(TestCase):
     def test_front_door_requires_admin_access(self):
         self.client.logout()
         response = self.client.get(reverse("add_data"))
-        # Wagtail admin auth redirects anonymous users to login
         self.assertEqual(response.status_code, 302)

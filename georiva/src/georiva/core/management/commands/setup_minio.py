@@ -1,18 +1,3 @@
-"""
-Management command to configure GeoRiva's MinIO/S3 buckets.
-
-Sets up:
-    georiva-incoming   → Redis notifications (triggers ingestion)
-    georiva-sources    → Redis notifications (triggers ingestion)
-    georiva-archive    → no notifications, private
-    georiva-assets     → public read access (serves processed data)
-    georiva-publications → no notifications, private (re-exported for foreign readers)
-    georiva-quarantine   → no notifications, private, objects expire after 30 days
-
-Usage:
-    python manage.py setup_minio
-"""
-
 import json
 
 import boto3
@@ -118,17 +103,13 @@ class Command(BaseCommand):
                 f"\n{'[DRY RUN] ' if dry_run else ''}Setting up: {bucket_name} ({config.get('description', '')})"
             )
 
-            # 1. Ensure bucket exists
             self._ensure_bucket(s3, bucket_name, dry_run)
 
-            # 2. Set bucket policy
             if config.get("public_read"):
                 self._set_public_read_policy(s3, bucket_name, dry_run)
             else:
                 self._set_private_policy(s3, bucket_name, dry_run)
 
-            # 3. Configure notifications. A bucket may opt into a different
-            #    Redis target (e.g. staging → its own list) via notify_arn_setting.
             if config.get("notify_on_create"):
                 arn = redis_arn
                 arn_setting = config.get("notify_arn_setting")
@@ -136,7 +117,6 @@ class Command(BaseCommand):
                     arn = getattr(settings, arn_setting, redis_arn)
                 self._set_redis_notification(s3, bucket_name, arn, dry_run)
 
-            # 4. Expire objects that are only held temporarily.
             if config.get("expiry_days"):
                 self._set_expiry_rule(s3, bucket_name, config["expiry_days"], dry_run)
 
@@ -157,7 +137,6 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.ERROR(f"  ✗ Failed to create {bucket_name}: {e}"))
 
     def _set_public_read_policy(self, s3, bucket_name: str, dry_run: bool):
-        """Allow public read access (for assets bucket)."""
         policy = {
             "Version": "2012-10-17",
             "Statement": [
@@ -185,7 +164,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"  ✗ Failed to set policy: {e}"))
 
     def _set_private_policy(self, s3, bucket_name: str, dry_run: bool):
-        """Remove any public policy (private bucket)."""
         if dry_run:
             self.stdout.write("  → Would ensure private policy")
             return
@@ -201,7 +179,6 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR(f"  ✗ Failed to set private policy: {e}"))
 
     def _set_expiry_rule(self, s3, bucket_name: str, days: int, dry_run: bool):
-        """Expire every object in the bucket ``days`` days after it was written."""
         if dry_run:
             self.stdout.write(f"  → Would set {days}-day expiry rule")
             return
@@ -231,9 +208,6 @@ class Command(BaseCommand):
         MinIO maps QueueConfigurations to its internal SQS-style ARNs.
         The redis_arn must match the identifier used in
         MINIO_NOTIFY_REDIS_ENABLE_<IDENTIFIER> (e.g. arn:minio:sqs::primary:redis).
-
-        Triggers on s3:ObjectCreated:* so the ingestion pipeline
-        picks up new files in incoming/sources buckets.
         """
         notification_config = {
             "QueueConfigurations": [

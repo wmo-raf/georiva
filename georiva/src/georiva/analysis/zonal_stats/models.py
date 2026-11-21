@@ -9,10 +9,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
     Zonal statistics for one (Item, Variable, AdminBoundary) triple.
 
     TimescaleDB hypertable partitioned by ``time`` (valid_time).
-
-    Unique constraint: (item, variable, boundary) — one row per
-    boundary per variable per timestep.  Safe to re-compute with
-    bulk_create(update_conflicts=True).
     """
 
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
@@ -49,11 +45,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
     )
 
     class Meta:
-        # TimescaleModel provides the 'time' field (= valid_time).
-        # We add ordering and indexes but NOT unique_together because
-        # TimescaleDB hypertables do not support unique constraints that
-        # don't include the partition column.  Uniqueness is enforced at
-        # the application layer via bulk_create(update_conflicts=True).
         ordering = ["-time"]
         constraints = [
             models.UniqueConstraint(
@@ -84,7 +75,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
 
     @property
     def reference_time(self):
-        """Forecast reference time from the parent Item."""
         return self.item.reference_time
 
     @property

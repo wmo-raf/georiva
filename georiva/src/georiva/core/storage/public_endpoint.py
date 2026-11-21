@@ -38,8 +38,6 @@ _LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]", "::1", "0.0.0.0")
 
 @dataclass(frozen=True)
 class UploadEndpoint:
-    """What the settings say about the upload endpoint, from one point of view."""
-
     scheme: str
     host: str
     #: Set when an upload from this page can never work. One of the constants above.

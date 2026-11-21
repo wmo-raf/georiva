@@ -1,10 +1,3 @@
-"""
-GeoRiva Item and Asset Models
-
-Item: TimescaleDB hypertable for time-series raster data
-Asset: Individual files associated with an Item, linked to Variables
-"""
-
 from django.db import models
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
@@ -25,16 +18,13 @@ class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedMo
 
     Uses TimescaleDB hypertable for efficient time-series queries.
     The 'time' field from TimescaleModel serves as valid_time.
-
-    Spatial/raster fields (source_file, bounds, geometry, width, height,
-    resolution_x/y, crs, properties) are inherited from AbstractSpatialItem.
     """
 
     # Excluded from Wagtail's reference index: an Item is machine-generated data
     # written on every ingestion/derivation, not editorial content whose usage or
     # delete-protection matters. Snippet registration would otherwise enrol it,
     # making every save run update_reference_index_task inline in the pipeline
-    # workers. See core/test_reference_index_exclusion.py.
+    # workers.
     wagtail_reference_index_ignore = True
 
     ORGANISATION_LOOKUP = "collection__catalog__organisation"
@@ -45,8 +35,6 @@ class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedMo
         related_name="items",
     )
 
-    # Time dimensions
-    # 'time' from TimescaleModel = valid_time (what time data represents)
     reference_time = models.DateTimeField(
         null=True,
         blank=True,
@@ -79,39 +67,32 @@ class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedMo
 
     @property
     def valid_time(self):
-        """Alias for TimescaleModel's time field."""
         return self.time
 
     @property
     def horizon(self):
-        """Forecast horizon as timedelta."""
         if self.reference_time:
             return self.time - self.reference_time
         return None
 
     @property
     def horizon_hours(self):
-        """Forecast horizon in hours."""
         if self.horizon:
             return self.horizon.total_seconds() / 3600
         return None
 
     @property
     def is_forecast(self):
-        """True if this is forecast data (has reference_time)."""
         return self.reference_time is not None
 
     def get_asset(self, variable_slug: str) -> "Asset":
-        """Get asset for a specific variable."""
         return self.assets.filter(variable__slug=variable_slug).first()
 
     def get_asset_by_role(self, role: str) -> "Asset":
-        """Get asset by role."""
         return self.assets.filter(roles__contains=[role]).first()
 
     @property
     def data_assets(self):
-        """Get all data assets."""
         return self.assets.filter(roles__contains=["data"])
 
     @property
@@ -127,9 +108,6 @@ class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedMo
         return None
 
     def display_time(self, time_resolution: str = "") -> str:
-        """
-        Format valid_time according to the collection's time resolution.
-        """
         formats = {
             "sub_hourly": "%d %b %Y %H:%M",
             "hourly": "%d %b %Y %H:%M",
@@ -154,9 +132,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
     A stored data file for a specific Variable within an Item.
 
     Links Item (when/where) to Variable (what) with the actual file (href).
-
-    File/classification/stats fields and the Role/Format enums are inherited
-    from AbstractAsset; only the tier-specific relations live here.
     """
 
     ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
@@ -168,7 +143,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
         db_constraint=False,
     )
 
-    # Link to Variable (carries units, styling, visualization config)
     variable = models.ForeignKey(
         "georivacore.Variable",
         on_delete=models.CASCADE,
@@ -199,8 +173,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
 
     def __str__(self):
         return f"{self.item} / {self.variable.slug} - {self.format}"
-
-    # Properties from Variable (convenience accessors)
 
     @property
     def name(self):
@@ -234,17 +206,14 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
 
     @property
     def overviews(self):
-        """For COG: overview levels."""
         return self.extra_fields.get("overviews", [])
 
     @property
     def compression(self):
-        """For COG: compression method."""
         return self.extra_fields.get("compression")
 
     @property
     def nodata(self):
-        """Nodata value."""
         return self.extra_fields.get("nodata")
 
     @property
@@ -261,21 +230,16 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
 
     @property
     def preview_url(self) -> str:
-        """TiTiler preview URL for this asset."""
         from georiva.core.machine_plane import titiler_preview_url
 
         return titiler_preview_url(self.item, self.variable)
 
 
 class ItemManager(models.Manager):
-    """Custom manager for Item with common query patterns."""
-
     def for_collection(self, collection):
-        """Get items for a collection, ordered by time descending."""
         return self.filter(collection=collection).order_by("-time")
 
     def latest(self, collection=None):
-        """Get the most recent item."""
         qs = self.all()
         if collection:
             qs = qs.filter(collection=collection)
@@ -378,7 +342,6 @@ class ItemManager(models.Manager):
         return candidates.filter(earlier).order_by("-time", "-pk").first()
 
     def latest_forecast_run(self, collection):
-        """Get items from the latest forecast run."""
         latest_ref = (
             self.filter(collection=collection, reference_time__isnull=False)
             .order_by("-reference_time")
@@ -390,21 +353,18 @@ class ItemManager(models.Manager):
         return self.none()
 
     def in_time_range(self, start, end, collection=None):
-        """Get items within a time range."""
         qs = self.filter(time__gte=start, time__lte=end)
         if collection:
             qs = qs.filter(collection=collection)
         return qs.order_by("time")
 
     def valid_at(self, valid_time, collection=None):
-        """Get items valid at a specific time."""
         qs = self.filter(time=valid_time)
         if collection:
             qs = qs.filter(collection=collection)
         return qs.order_by("-reference_time")
 
     def with_assets(self):
-        """Prefetch assets for efficiency."""
         return self.prefetch_related("assets", "assets__variable")
 
 

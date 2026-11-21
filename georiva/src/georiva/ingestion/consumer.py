@@ -402,7 +402,6 @@ def _consume_loop(stop_event=None):
             continue
 
         # MinIO Redis access format: [{"Event": [{...}], "EventTime": "..."}]
-        # Fallback to webhook-style {"Records": [...]} just in case
         if isinstance(payload, list):
             records = [ev for item in payload for ev in item.get("Event", [])]
         else:
@@ -419,7 +418,6 @@ def run_minio_consumer(stop_event=None):
     """
     Block on the MinIO Redis event list and dispatch Celery tasks.
 
-    Intended to run in a daemon thread inside the ingestion worker.
     stop_event is a threading.Event; set it to trigger a clean shutdown.
     """
     logger.info("MinIO event consumer started, listening on key: %s", REDIS_KEY)

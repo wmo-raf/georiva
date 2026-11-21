@@ -75,8 +75,6 @@ class LoaderAbortTests(TestCase):
     def _assert_sum_holds(self, run):
         self.assertEqual(run.files_fetched + run.files_skipped + run.files_failed, run.files_requested)
 
-    # ── SOURCE ──────────────────────────────────────────────────────────────
-
     def test_a_source_failure_stops_the_run(self):
         result, attempted = self._run([ok, failed(FailureScope.SOURCE, DNS_ERROR), ok, ok])
 
@@ -99,8 +97,6 @@ class LoaderAbortTests(TestCase):
         self._run([failed(FailureScope.SOURCE, DNS_ERROR)])
 
         self.assertEqual(FetchRunFinished.objects.get().outcome, "failed")
-
-    # ── TRANSIENT circuit breaker ───────────────────────────────────────────
 
     def test_three_consecutive_transient_failures_stop_the_run(self):
         transient = failed(FailureScope.TRANSIENT, "Read timed out")
@@ -141,8 +137,6 @@ class LoaderAbortTests(TestCase):
         self.assertEqual(len(attempted), 2)
         self.assertEqual(self._fetch_run().status, FetchRun.Status.FAILED)
 
-    # ── exceptions ──────────────────────────────────────────────────────────
-
     def test_an_exception_generating_the_plan_fails_the_run(self):
         def generate(collection):
             raise ConnectionError(DNS_ERROR)
@@ -167,8 +161,6 @@ class LoaderAbortTests(TestCase):
         # Our own failure, not the source's: the feed's other collections still run.
         self.assertIsNone(result.source_unavailable)
 
-    # ── unchanged ───────────────────────────────────────────────────────────
-
     def test_a_run_that_walks_every_file_stays_completed_however_many_failed(self):
         self._run([failed(FailureScope.FILE)] * 4)
 
@@ -180,8 +172,6 @@ class LoaderAbortTests(TestCase):
         self._run([], requests=[])
 
         self.assertEqual(self._fetch_run().status, FetchRun.Status.COMPLETED)
-
-    # ── run page ────────────────────────────────────────────────────────────
 
     def test_an_aborted_run_reads_as_stopped_early(self):
         self._run([failed(FailureScope.SOURCE, DNS_ERROR)])

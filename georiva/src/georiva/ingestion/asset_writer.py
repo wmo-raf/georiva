@@ -64,17 +64,6 @@ class AssetWriter:
           Pass 2 — cog_translate builds overviews and rewrites in true
                    COG layout (overviews first, full-res last), which
                    minimises HTTP range requests from TiTiler and QGIS.
-
-        Args:
-            data:        2D or 3D (bands first) numpy array of any numeric dtype.
-            output_path: Destination path in the bucket.
-            bounds:      (west, south, east, north) in the given CRS.
-            crs:         Coordinate reference system (default EPSG:4326).
-            nodata:      NoData value; None declares none. ``FROM_DTYPE``
-                         (the default) derives one from the dtype.
-
-        Returns:
-            Final stored path.
         """
         bands = data if data.ndim == 3 else data[np.newaxis]
         count, height, width = bands.shape
@@ -119,12 +108,9 @@ class AssetWriter:
                 tmp_path = tmp.name
             cog_path = tmp_path.replace(".tif", "_cog.tif")
 
-            # Pass 1 — write raw data as a plain GeoTIFF
-            # No overviews here — cog_translate handles that in pass 2.
             with rasterio.open(tmp_path, "w", **raw_profile) as dst:
                 dst.write(bands)
 
-            # Pass 2 — build overviews and rewrite in true COG byte order.
             # overview_resampling="average" is appropriate for continuous
             # fields (precipitation, temperature). Use "nearest" for
             # categorical data (land cover, alert levels).
@@ -136,7 +122,7 @@ class AssetWriter:
                 overview_resampling="average",
                 nodata=_nodata,
                 forward_band_tags=True,  # preserve band-level CF metadata
-                quiet=True,  # suppress progress bar in production
+                quiet=True,
             )
 
             with open(cog_path, "rb") as f:

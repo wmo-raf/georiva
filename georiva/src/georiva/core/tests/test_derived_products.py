@@ -76,7 +76,6 @@ class OutputRefTests(SimpleTestCase):
 
 
 def _definition(**overrides):
-    """A minimal valid DerivedProductDefinition, overridable per-test."""
     kwargs = dict(
         key="anomaly",
         recipe_type="climatology",

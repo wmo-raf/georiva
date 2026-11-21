@@ -22,7 +22,6 @@ def safe_divide(numerator, denominator):
     """
     with np.errstate(divide="ignore", invalid="ignore"):
         result = numerator / denominator
-    # Replace inf/-inf produced by zero denominators with NaN.
     try:
         return result.where(np.isfinite(result))  # xarray
     except AttributeError:

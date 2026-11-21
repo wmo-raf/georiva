@@ -45,21 +45,6 @@ class Topic(Indexed, TimeStampedModel):
 
 
 class Catalog(Indexed, TimeStampedModel):
-    """
-    A data source that produces multiple collections.
-
-    Examples: GFS, CHIRPS, ERA5, MSG
-
-    This is an organizational grouping - it defines how data is ingested
-
-    A Catalog is the tenancy root of the data tree: everything beneath it
-    (Collection, Variable, Item, Asset, DataFeed, upload configs, virtual-zarr
-    manifests, zonal stats) belongs to the catalog's organisation transitively
-    through the FK chain, and carries no organisation FK of its own.
-    """
-
-    # The tenancy root: everything beneath declares the path that reaches this
-    # field. See organisations/access.py.
     ORGANISATION_LOOKUP = "organisation"
 
     organisation = models.ForeignKey(

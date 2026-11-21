@@ -89,8 +89,6 @@ class BucketRegistrationTests(SimpleTestCase):
         self.assertEqual(StorageManager().bucket("publications").bucket_type, BucketType.PUBLICATIONS)
 
     def test_it_is_configured_and_never_notifies(self):
-        """A notification on this bucket would hand a publication's own output
-        back to the ingestion consumer as a file to ingest."""
         from georiva.core.management.commands.setup_minio import BUCKET_CONFIGS
 
         self.assertIn("publications", settings.GEORIVA_BUCKETS)
@@ -132,9 +130,6 @@ class WriteTests(SinkTestCase):
         self.assertEqual(self.sink.read_bytes("nairobi/100/grid/latitude"), b"\x00\x01")
 
     def test_rewriting_a_key_replaces_it_rather_than_renaming(self):
-        """``latest/<area>`` is rewritten every run and polled by exact name, so
-        ``FileSystemStorage``'s habit of appending a suffix would leave the
-        reader following a name nothing writes to any more."""
         self.sink.write("nairobi/100/meta.json", b"first")
         key = self.sink.write("nairobi/100/meta.json", b"second")
 
@@ -271,8 +266,6 @@ class ListingAndPruningTests(SinkTestCase):
         self.assertTrue(self.sink.exists("latest/nairobi"))
 
     def test_a_superseded_version_including_its_own_manifest_can_be_dropped(self):
-        """A version directory whose ``complete.json`` cannot be deleted never
-        goes away, so retention would leave one orphan per run forever."""
         self.sink.publish_markers([CompletionMarker("nairobi/100/complete.json", b"{}")])
 
         removed = self.sink.delete_prefix("nairobi/100", include_markers=True)
@@ -286,11 +279,6 @@ class ListingAndPruningTests(SinkTestCase):
 
 
 class InstanceWideRootTests(SinkTestCase):
-    """One root for the whole instance, for a reader meant to see several
-    organisations at once — the form that costs ADR 0027 its strongest
-    sentence, and keeps only the collision guarantee below.
-    """
-
     def make_instance_sink(self, root="_forti", marker_patterns=FORTI_MARKERS):
         return PublicationSink.instance_wide(root, marker_patterns=marker_patterns, bucket=self.bucket)
 
@@ -465,7 +453,7 @@ class InstanceWideMarkerTests(SinkTestCase):
         self.assertEqual(org_sink.delete_prefix("", include_markers=True), 1)
 
     def test_the_children_of_a_shared_root_are_not_all_areas(self):
-        """What M5.4's retention has to know. Under ``{org}/{slug}/`` every
+        """Under ``{org}/{slug}/`` every
         child of the root was an area; here the publisher's own documents sit
         beside them, and core cannot tell which is which because the layout
         under the root is the publisher's."""

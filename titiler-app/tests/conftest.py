@@ -79,7 +79,6 @@ def overriding(base, **overrides):
 
 
 def kvp(**overrides):
-    """``KVP_BASE`` with parameters replaced, or removed via ``NAME=None``."""
     return overriding(KVP_BASE, **overrides)
 
 
@@ -339,8 +338,6 @@ class ObjectStore:
         self._failures: dict[str, int | list[int]] = {}
         self.requests: list[str] = []
 
-    # -- what a test arranges ------------------------------------------------
-
     def url_for(self, path: str) -> str:
         return f"http://127.0.0.1:{self._port}/{path}"
 
@@ -363,8 +360,6 @@ class ObjectStore:
     def recovers(self, path: str) -> None:
         """Whatever was wrong with ``path`` stops being wrong."""
         self._failures.pop(path, None)
-
-    # -- what the store answers ----------------------------------------------
 
     def answer(self, path: str, byte_range: str | None) -> tuple[int, bytes, str | None]:
         """``(status, body, content_range)`` for one request, recording it."""

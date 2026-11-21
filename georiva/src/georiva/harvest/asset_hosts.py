@@ -91,8 +91,6 @@ def public_bucket_host(bucket: str, region: str) -> str | None:
     return f"{bucket}.s3.{region}.amazonaws.com"
 
 
-# ── Where a virtual Upstream store's data lives ─────────────────────────────
-
 #: A Google bucket's name: dots and underscores are allowed in it, and it is never built into a host.
 _GS_BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]")
 

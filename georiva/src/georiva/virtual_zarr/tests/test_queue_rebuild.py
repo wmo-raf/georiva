@@ -82,8 +82,6 @@ class QueueRebuildActionTests(TestCase):
             **extra,
         )
 
-    # -- status transitions --------------------------------------------------
-
     def test_ready_manifest_is_queued_and_becomes_buildable(self):
         variable = self._variable()
         manifest = self._manifest(
@@ -166,8 +164,6 @@ class QueueRebuildActionTests(TestCase):
         manifest = VirtualZarrManifest.objects.get(variable=variable)
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.PENDING)
 
-    # -- gates: method, permission, tenancy ----------------------------------
-
     def test_get_is_not_allowed(self):
         variable = self._variable()
         manifest = self._manifest(
@@ -224,8 +220,6 @@ class QueueRebuildActionTests(TestCase):
         manifest.refresh_from_db()
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
 
-    # -- redirect ------------------------------------------------------------
-
     def test_redirects_back_to_the_page_the_button_lives_on(self):
         variable = self._variable()
         self._manifest(variable, status=VirtualZarrManifest.Status.READY)
@@ -245,8 +239,6 @@ class QueueRebuildActionTests(TestCase):
             response.headers["Location"],
             reverse("variable_virtual_zarr", args=[variable.pk]),
         )
-
-    # -- the button on the monitoring surfaces -------------------------------
 
     def test_collection_tab_offers_the_action(self):
         variable = self._variable()

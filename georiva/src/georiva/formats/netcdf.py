@@ -88,7 +88,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         return results
 
     def get_timestamps(self, file_path: PathLike, variable_name: str) -> list[datetime]:
-        """Get timestamps for a specific variable."""
         file_path = Path(file_path)
 
         try:
@@ -114,7 +113,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> Generator[VariableInfo, None, None]:
-        """Open a NetCDF variable lazily."""
         file_path = Path(file_path)
 
         ds = self._open(file_path)
@@ -203,7 +201,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         ) as var_info:
             data = var_info.compute()
 
-            # NetCDF-specific: replace fill values with NaN
             data = self._apply_fill_value(data, var_info.data)
 
             height = int(data.shape[0]) if data.ndim > 1 else 1
@@ -223,7 +220,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
             )
 
     def _open(self, file_path: Path) -> xr.Dataset:
-        """Open a NetCDF file with lazy loading."""
         return xr.open_dataset(file_path, chunks={}, engine="netcdf4")
 
     _TIME_NAMES = {"time", "valid_time", "t", "datetime", "xtime"}
@@ -379,7 +375,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
 
     @staticmethod
     def _apply_fill_value(data: np.ndarray, var) -> np.ndarray:
-        """Replace fill values with NaN."""
         fill_value = None
         if hasattr(var, "encoding") and "_FillValue" in var.encoding:
             fill_value = var.encoding["_FillValue"]

@@ -1,11 +1,3 @@
-"""
-Model-level tests for VirtualZarrManifest after the Icechunk swap.
-
-The record now tracks an Icechunk repository (org-first prefix on the zarr
-bucket) instead of a kerchunk JSON key.  Django fields are derived caches;
-the repo's commit metadata is the source of truth (design decision 5).
-"""
-
 from datetime import UTC, datetime
 
 from django.test import TestCase
@@ -45,8 +37,6 @@ class VirtualZarrManifestTests(TestCase):
     def _manifest(self, **kwargs) -> VirtualZarrManifest:
         return VirtualZarrManifest.objects.create(variable=self.variable, **kwargs)
 
-    # -- repo path derivation ------------------------------------------------
-
     def test_make_repo_path_is_org_first_prefix_with_trailing_slash(self):
         path = VirtualZarrManifest.make_repo_path(self.variable)
         self.assertEqual(
@@ -65,14 +55,10 @@ class VirtualZarrManifestTests(TestCase):
         manifest = self._manifest(repo_path="acme/other/prefix/")
         self.assertEqual(manifest.get_repo_path(), "acme/other/prefix/")
 
-    # -- READY gate ----------------------------------------------------------
-
     def test_open_dataset_refuses_non_ready(self):
         manifest = self._manifest()
         with self.assertRaises(ValueError):
             manifest.open_dataset()
-
-    # -- mark_ready persists the derived cache -------------------------------
 
     def test_mark_ready_records_repo_state(self):
         manifest = self._manifest()
@@ -112,8 +98,6 @@ class VirtualZarrManifestTests(TestCase):
             manifest.mark_stale()
             manifest.refresh_from_db()
             self.assertEqual(manifest.status, VirtualZarrManifest.Status.STALE)
-
-    # -- NO_DATA parking -----------------------------------------------------
 
     def test_mark_no_data_clears_lock_and_error(self):
         manifest = self._manifest()

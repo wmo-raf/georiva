@@ -16,8 +16,6 @@ from georiva.core.web_apps import DEFAULT_ICON, served_web_apps
 
 @dataclass(frozen=True)
 class PortalApp:
-    """One link, ready to draw."""
-
     plugin: str
     title: str
     description: str

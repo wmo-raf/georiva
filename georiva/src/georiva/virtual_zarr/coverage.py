@@ -94,8 +94,6 @@ def is_lock_expired(
 
 @dataclass(frozen=True)
 class VariableCoverage:
-    """Everything a monitoring surface shows about one variable's repo."""
-
     variable: Variable
     manifest: VirtualZarrManifest | None
     status: str  # manifest status value; "" when no manifest row
@@ -110,7 +108,7 @@ class VariableCoverage:
     lag: timedelta | None
     repo_size_bytes: int
     repo_object_count: int
-    error: str  # manifest.error (last failure message)
+    error: str
     repo_read_error: str  # non-empty when the live repo read itself failed
     # Assets the repo does not hold, by reason (#732) — as of the last build.
     left_out: tuple[LeftOut, ...] = ()
@@ -170,13 +168,11 @@ class VariableCoverage:
 
 
 def collection_coverage(collection, *, now=None) -> list[VariableCoverage]:
-    """One report per Variable in the collection, ordered by slug."""
     variables = list(collection.variables.order_by("slug"))
     return _coverage_for(collection, variables, now)
 
 
 def variable_coverage(variable, *, now=None) -> VariableCoverage:
-    """The per-variable report (drill-down / future status API)."""
     return _coverage_for(variable.collection, [variable], now)[0]
 
 
@@ -280,9 +276,6 @@ def _one_variable(variable, manifest, catalog: _CatalogState, now) -> VariableCo
     )
 
 
-# The per-variable detail (drill-down page / future status API)
-
-
 @dataclass(frozen=True)
 class SnapshotEntry:
     """One commit in the repo's ancestry, tip first."""
@@ -295,8 +288,6 @@ class SnapshotEntry:
 
 @dataclass(frozen=True)
 class StoreArray:
-    """One array in the store at the repo tip."""
-
     name: str
     shape: tuple[int, ...]
     dtype: str
@@ -305,14 +296,12 @@ class StoreArray:
 
 @dataclass(frozen=True)
 class VariableDetail:
-    """The drill-down report: coverage plus history and repo internals."""
-
     coverage: VariableCoverage
     build_history: tuple[VirtualZarrBuildLog, ...]  # builds only, newest first
     last_failure_at: datetime | None  # latest failed build's finish stamp
     last_gc: VirtualZarrBuildLog | None
     snapshots: tuple[SnapshotEntry, ...]  # ancestry of main, tip first
-    store_arrays: tuple[StoreArray, ...]  # structure at the tip
+    store_arrays: tuple[StoreArray, ...]
     detail_read_error: str  # non-empty when the ancestry/store read failed
 
 

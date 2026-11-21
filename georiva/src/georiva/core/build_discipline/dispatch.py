@@ -1,18 +1,3 @@
-"""Putting a build on a queue, and recording that it happened.
-
-Every entry point here exists because doing the obvious thing is wrong in a way
-that only shows up under load:
-
-``dispatch_build``   claims *before* queueing, so a record waiting behind a
-                     backlog is not dispatched again by the next sweep (#398)
-``stand_down``       lets a copy holding a recycled claim exit rather than run
-                     beside its replacement
-``sweep_builds``     recovers abandoned claims before looking for work, so a
-                     crashed build is picked up on the same pass
-``build_attempt``    records a failed attempt with whatever it had learned
-                     before it died, not just the exception
-"""
-
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -23,8 +8,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SweepResult:
-    """What one sweep pass did."""
-
     reset: int
     dispatched: int
 

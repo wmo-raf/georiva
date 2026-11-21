@@ -54,7 +54,6 @@ EARTH_RADIUS = 6378137.0
 
 
 def gfi(**overrides):
-    """``GFI_BASE`` with parameters replaced, or removed via ``NAME=None``."""
     return overriding(GFI_BASE, **overrides)
 
 

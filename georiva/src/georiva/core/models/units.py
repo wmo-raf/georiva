@@ -7,8 +7,6 @@ from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 
 class Unit(models.Model):
-    """Shared reference data: one instance-wide list of units (decision #259)."""
-
     ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
 
     name = models.CharField(max_length=255, verbose_name=_("Name"), help_text=_("Name of the unit"), unique=True)

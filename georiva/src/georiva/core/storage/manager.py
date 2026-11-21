@@ -36,8 +36,6 @@ logger = logging.getLogger(__name__)
 
 
 class BucketType:
-    """Known bucket types in GeoRiva."""
-
     INCOMING = "incoming"
     SOURCES = "sources"
     STAGING = "staging"
@@ -51,11 +49,6 @@ class BucketType:
 
 
 def get_bucket_config() -> dict[str, str]:
-    """
-    Get bucket name mapping from settings.
-
-    Falls back to defaults if not configured.
-    """
     return getattr(
         settings,
         "GEORIVA_BUCKETS",
@@ -69,13 +62,6 @@ def get_bucket_config() -> dict[str, str]:
 
 
 class Bucket:
-    """
-    Interface to a single storage bucket.
-
-    Wraps a Django storage backend and provides file operations
-    scoped to one bucket.
-    """
-
     def __init__(self, bucket_type: str, storage_name: str):
         self.bucket_type = bucket_type
         self.storage_name = storage_name
@@ -86,7 +72,6 @@ class Bucket:
 
     @property
     def storage(self):
-        """Lazy-load the Django storage backend."""
         if self._storage is None:
             self._storage = storages[self.storage_name]
         return self._storage
@@ -105,27 +90,14 @@ class Bucket:
 
     @property
     def bucket_name(self) -> str:
-        """Return the S3 bucket name, or the local storage root."""
         if self.is_s3:
             return self.storage.bucket_name
         return getattr(self.storage, "location", self.storage_name)
-
-    # ---- Core file operations -----------------------------------------------
 
     def exists(self, path: str) -> bool:
         return self.storage.exists(path)
 
     def save(self, path: str, content) -> str:
-        """
-        Save content to a path in this bucket.
-
-        Args:
-            path: Destination path relative to bucket root.
-            content: bytes, file-like object, or Django File.
-
-        Returns:
-            The actual saved path.
-        """
         if isinstance(content, bytes):
             content = ContentFile(content)
 
@@ -154,7 +126,6 @@ class Bucket:
         return rasterio.open(f"{self.bucket_name}/{path}", opener=storage.get_zarr_fs())
 
     def delete(self, path: str) -> bool:
-        """Delete a file. Returns True if it existed."""
         if self.exists(path):
             self.storage.delete(path)
             return True
@@ -217,15 +188,7 @@ class Bucket:
     def modified_time(self, path: str):
         return self.storage.get_modified_time(path)
 
-    # ---- Listing ------------------------------------------------------------
-
     def list_files(self, path: str = "", recursive: bool = False) -> list[dict]:
-        """
-        List files under a path.
-
-        Returns:
-            List of dicts: {'path', 'size', 'modified'}
-        """
         files = []
 
         try:
@@ -293,15 +256,12 @@ class Bucket:
             logger.error("Failed to list directories in %s: %s", path, e)
             return []
 
-    # ---- Presigned URLs (S3/MinIO only) -------------------------------------
-
     def get_presigned_url(
         self,
         path: str,
         expiration: int = 3600,
         method: str = "get_object",
     ) -> str | None:
-        """Generate a presigned URL for download or upload."""
         if not self.is_s3:
             return None
 
@@ -350,10 +310,7 @@ class Bucket:
             ExpiresIn=expiration,
         )
 
-    # ---- Intra-bucket operations --------------------------------------------
-
     def copy(self, src_path: str, dest_path: str) -> str:
-        """Copy a file within this bucket."""
         if self.is_s3:
             try:
                 self.storage.bucket.copy(
@@ -368,104 +325,54 @@ class Bucket:
         return self.save(dest_path, data)
 
     def move(self, src_path: str, dest_path: str) -> str:
-        """Move a file within this bucket."""
         saved = self.copy(src_path, dest_path)
         self.delete(src_path)
         return saved
 
 
 class StorageManager:
-    """
-    Central interface to all GeoRiva storage buckets.
-
-    Usage:
-        storage = StorageManager()
-
-        # Access buckets
-        storage.incoming.save("sat-imagery/ndvi/file.tif", data)
-        storage.sources.list_files("weather-stations/synop/")
-
-        # Cross-bucket operations
-        storage.archive_and_process(
-            source=storage.incoming,
-            path="sat-imagery/ndvi/raw.tif",
-        )
-    """
-
     def __init__(self):
         self._buckets: dict[str, Bucket] = {}
 
     def _get_bucket(self, bucket_type: str) -> Bucket:
-        """Get or create a Bucket handle."""
         if bucket_type not in self._buckets:
             storage_name = f"georiva-{bucket_type}"
             self._buckets[bucket_type] = Bucket(bucket_type, storage_name)
         return self._buckets[bucket_type]
 
-    # ---- Named bucket accessors ---------------------------------------------
-
     @property
     def incoming(self) -> Bucket:
-        """User-uploaded raw data."""
         return self._get_bucket(BucketType.INCOMING)
 
     @property
     def sources(self) -> Bucket:
-        """Plugin-collected data."""
         return self._get_bucket(BucketType.SOURCES)
 
     @property
     def staging(self) -> Bucket:
-        """Raw inputs held for derivation (not served, not auto-materialized)."""
         return self._get_bucket(BucketType.STAGING)
 
     @property
     def archive(self) -> Bucket:
-        """Long-term raw data preservation."""
         return self._get_bucket(BucketType.ARCHIVE)
 
     @property
     def assets(self) -> Bucket:
-        """Final processed datasets."""
         return self._get_bucket(BucketType.ASSETS)
 
     @property
     def zarr(self) -> Bucket:
-        """Zarr analysis-ready store bucket (derived cache of COG assets)."""
         return self._get_bucket(BucketType.ZARR)
 
     @property
     def publications(self) -> Bucket:
-        """Data re-exported in a foreign reader's own format.
-
-        Everything on the other buckets is written for GeoRiva to read back;
-        this one holds bytes laid out for something else entirely — a point
-        forecast transposed out of per-timestep COGs, say, for a service that
-        knows nothing about STAC. Keys stay org-first
-        (``{org}/{publication-slug}/…``) so a reader can be pointed at one
-        organisation's prefix and be unable to see another's.
-
-        Written through ``core.publishing.PublicationSink``, which is where the
-        rule that completion markers go last lives.
-        """
         return self._get_bucket(BucketType.PUBLICATIONS)
 
     @property
     def quarantine(self) -> Bucket:
-        """Deliveries refused out of ``incoming`` (ADR 0034), under the key they arrived with.
-
-        Nothing reads from here except a Retry, and no sweep or notification covers it, so a
-        rejected file stays rejected until someone sends it back. Files expire after 30 days.
-        """
         return self._get_bucket(BucketType.QUARANTINE)
 
     def get_zarr_fs(self):
-        """
-        Return a configured fsspec filesystem for direct Zarr I/O.
-
-        ZarrWriter uses this to build a zarr.storage.FsspecStore that
-        bypasses Django's storage layer (required for zarr v3 chunked writes).
-        """
         if settings.GEORIVA_STORAGE_BACKEND == "local":
             import fsspec
 
@@ -481,12 +388,9 @@ class StorageManager:
         )
 
     def bucket(self, bucket_type: str) -> Bucket:
-        """Get a bucket by type string."""
         if bucket_type not in BucketType.ALL:
             raise ValueError(f"Unknown bucket type: {bucket_type!r}. Valid types: {BucketType.ALL}")
         return self._get_bucket(bucket_type)
-
-    # ---- Cross-bucket operations --------------------------------------------
 
     def transfer(
         self,
@@ -495,20 +399,6 @@ class StorageManager:
         src_path: str,
         dest_path: str | None = None,
     ) -> str:
-        """
-        Copy a file between buckets.
-
-        Uses S3 server-side copy when both buckets are S3-backed.
-
-        Args:
-            source: Source bucket.
-            dest: Destination bucket.
-            src_path: Path in source bucket.
-            dest_path: Path in dest bucket (defaults to src_path).
-
-        Returns:
-            The path in the destination bucket.
-        """
         dest_path = dest_path or src_path
 
         if source.is_s3 and dest.is_s3:
@@ -533,7 +423,6 @@ class StorageManager:
             except Exception as e:
                 logger.warning("S3 cross-bucket copy failed, falling back: %s", e)
 
-        # Fallback: read from source, write to dest
         data = source.read_bytes(src_path)
         saved = dest.save(dest_path, data)
         logger.info(
@@ -552,12 +441,9 @@ class StorageManager:
         src_path: str,
         dest_path: str | None = None,
     ) -> str:
-        """Copy between buckets, then delete from source."""
         saved = self.transfer(source, dest, src_path, dest_path)
         source.delete(src_path)
         return saved
-
-    # ---- Pipeline helpers ---------------------------------------------------
 
     def archive_raw(self, source: Bucket, path: str) -> str:
         """
@@ -582,29 +468,12 @@ class StorageManager:
         processed_data: bytes,
         delete_source: bool = False,
     ) -> dict:
-        """
-        Full ingest pipeline: archive raw → save processed asset.
-
-        Args:
-            source: The bucket the raw file is in (incoming or sources).
-            path: Path to the raw file in the source bucket.
-            asset_path: Destination path in the assets bucket.
-                        e.g. "kenya/sat-imagery/ndvi/temperature/2025/01/15/20250115T060000_temp.tif"
-            processed_data: The processed bytes to save as an asset.
-            delete_source: Whether to remove the raw file after archiving.
-
-        Returns:
-            Dict with archive_path and asset_path.
-        """
-        # 1. Archive the raw file
         archived = self.archive_raw(source, path)
         logger.info("Archived: %s/%s → archive/%s", source.bucket_type, path, archived)
 
-        # 2. Save processed data to assets
         saved_asset = self.assets.save(asset_path, processed_data)
         logger.info("Asset saved: %s", saved_asset)
 
-        # 3. Optionally clean up source
         if delete_source:
             source.delete(path)
             logger.info("Deleted source: %s/%s", source.bucket_type, path)
@@ -614,8 +483,6 @@ class StorageManager:
             "asset_path": saved_asset,
             "source": f"{source.bucket_type}/{path}",
         }
-
-    # ---- Asset path builder -------------------------------------------------
 
     @staticmethod
     def build_asset_path(
@@ -646,18 +513,7 @@ class StorageManager:
         ts = timestamp.astimezone(pytz.utc)
         return f"{org}/{catalog}/{collection}/{variable}/{ts.year}/{ts.month:02d}/{ts.day:02d}/{filename}"
 
-    # ---- Bucket initialization (for Docker/startup) -------------------------
-
     def ensure_buckets(self) -> list[str]:
-        """
-        Ensure all required buckets exist.
-
-        For S3/MinIO, creates buckets if missing.
-        For local storage, creates directories.
-
-        Returns:
-            List of bucket names that were created.
-        """
         created = []
 
         for bucket_type in BucketType.ALL:

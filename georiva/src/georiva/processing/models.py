@@ -206,8 +206,6 @@ class DerivationRun(TimeStampedModel):
         run.refresh_from_db()
         return run
 
-    # -- transitions ---------------------------------------------------------
-    #
     # Each ending is one atomic block: the row update and the attempt event commit
     # together or not at all. Only the worker holding the lock reaches these, which
     # is what makes it the winner — a worker refused the lock in ``acquire`` never

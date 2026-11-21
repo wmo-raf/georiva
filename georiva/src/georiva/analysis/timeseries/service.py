@@ -31,8 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ManifestNotReady(Exception):
-    """Raised when the VirtualZarrManifest for a variable is not READY."""
+class ManifestNotReady(Exception): ...
 
 
 class RemoteRangeTooLarge(Exception):
@@ -306,7 +305,6 @@ class TimeseriesService:
         return session.virtual_dataset(manifest, internal=self._internal)
 
     def _filter_time(self, da, time_start, time_end):
-        """Apply an optional time range slice to a DataArray."""
         if time_start is None and time_end is None:
             return da
 
@@ -357,7 +355,6 @@ class TimeseriesService:
             return da.where(mask == 0)
 
         except ImportError:
-            # regionmask not installed — fall back to bbox only with a warning.
             logger.warning(
                 "regionmask not installed — polygon masking skipped. "
                 "Install regionmask for precise polygon masking: "

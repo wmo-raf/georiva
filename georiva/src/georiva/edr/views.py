@@ -23,15 +23,6 @@ exactly as STAC's is (#271): the organisation never appears in an id, and
 Cross-API relationships:
     EDR collection detail  → links to STAC collection via canonical rel
     STAC collection        → can link to EDR collection detail
-
-Future additions:
-    GET /api/edr/collections/{collection_id}/position/
-    GET /api/edr/collections/{collection_id}/area/
-    GET /api/edr/collections/{collection_id}/locations/
-    GET /api/edr/collections/{collection_id}/instances/
-
-    Each resolves its collection through `resolve_edr_collection`, which gives
-    it the bare-slug redirect for free.
 """
 
 from django.db.models import Exists, OuterRef
@@ -114,22 +105,11 @@ def resolve_edr_collection(request, collection_id: str, queryset=None):
 
 
 class EDRAPIView(APIView):
-    """Base view for all EDR endpoints."""
-
     renderer_classes = [EDRJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
 
 
 class EDRLandingPageView(EDRAPIView):
-    """
-    EDR API Landing Page.
-
-    GET /api/edr/
-
-    Returns service metadata and links to conformance,
-    collections, and API definition.
-    """
-
     def get(self, request: Request) -> Response:
         base_url = get_full_url_by_request(request, "/api/edr/")
         organisation = require_active_org(request)
@@ -175,15 +155,6 @@ class EDRLandingPageView(EDRAPIView):
 
 
 class EDRConformanceView(EDRAPIView):
-    """
-    EDR Conformance Declaration.
-
-    GET /api/edr/conformance/
-
-    Declares which OGC conformance classes this implementation satisfies.
-    Currently: core + collections metadata only.
-    """
-
     def get(self, request: Request) -> Response:
         return Response(
             {
@@ -194,8 +165,6 @@ class EDRConformanceView(EDRAPIView):
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/oas30",
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/html",
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/geojson",
-                    # Future
-                    # "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/covjson",
                 ]
             }
         )
@@ -226,7 +195,6 @@ class EDRCollectionListView(EDRAPIView):
                 "variables",
             )
             .annotate(
-                # Single EXISTS subquery per collection — no per-row extra queries
                 has_reference_time=Exists(
                     Item.objects.filter(
                         collection=OuterRef("pk"),

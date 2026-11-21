@@ -72,8 +72,6 @@ class _MultiInputFixtureRecipe(BaseRecipe):
         self._out_col = output_collection
         self._out_var = output_variable
 
-    # ---- declarative surface ------------------------------------------------
-
     def enumerate_units(self, selector):
         return [{"slice": "2020-01"}]
 
@@ -123,8 +121,6 @@ class _MultiInputFixtureRecipe(BaseRecipe):
             )
         ]
 
-    # ---- harmonization (recipe-side, via geoprocessing) ---------------------
-
     def _harmonized(self, resolved_input):
         """Read one input's array on its own grid and regrid to the target."""
         item = resolved_input.items[0]
@@ -140,8 +136,6 @@ class _MultiInputFixtureRecipe(BaseRecipe):
             resampling="nearest",
         )
 
-    # ---- I/O seam (in-memory for tests) -------------------------------------
-
     def read_array(self, item):
         """
         The recipe's single I/O seam. Here it synthesises a constant array on
@@ -153,8 +147,6 @@ class _MultiInputFixtureRecipe(BaseRecipe):
         west, south, east, north = item.bounds
         transform = from_bounds(west, south, east, north, w, h)
         return np.ones((h, w), dtype="float32"), transform, item.crs
-
-    # ---- helpers ------------------------------------------------------------
 
     @staticmethod
     def _select(model, collection_slug, *, required):
@@ -211,8 +203,6 @@ class _MultiInputFixture(TestCase):
             name="PET",
             visibility=Collection.Visibility.PUBLIC,
         )
-
-    # -- fixture builders (each input on a *different* grid) ------------------
 
     def _add_precip(self, checksum="precip-1"):
         si = StagingItem.objects.create(

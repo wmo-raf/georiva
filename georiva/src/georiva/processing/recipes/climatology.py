@@ -57,8 +57,6 @@ class ClimatologyRecipe(BaseRecipe):
     # unit): what an input is served in never reaches an archive (ADR 0046 §13).
     input_units = {"value": SOURCE_UNIT, "baseline": SOURCE_UNIT}
 
-    # ---- candidate generation ----------------------------------------------
-
     def candidate_units(self, trigger) -> Iterable[ProductionUnit]:
         """
         Climatology is scheduled/manual, not event-driven: the product space
@@ -100,8 +98,6 @@ class ClimatologyRecipe(BaseRecipe):
             "baseline": baseline,
         }
 
-    # ---- input resolution ---------------------------------------------------
-
     def resolve_inputs(self, unit: ProductionUnit) -> dict[str, ResolvedInput]:
         items = self._staging_items(unit)
         assets = [a for si in items for a in si.assets.all()]
@@ -113,8 +109,6 @@ class ClimatologyRecipe(BaseRecipe):
             # distinct, required selector for the anomaly quantities.
             resolved["baseline"] = ResolvedInput("baseline", required=True, items=items, assets=assets)
         return resolved
-
-    # ---- outputs mapping ----------------------------------------------------
 
     def outputs(self, unit: ProductionUnit) -> OutputItem:
         si = self._staging_items(unit)[0]
@@ -136,8 +130,6 @@ class ClimatologyRecipe(BaseRecipe):
                 }
             },
         )
-
-    # ---- transform ----------------------------------------------------------
 
     def transform(self, unit: ProductionUnit, resolved) -> list[OutputAsset]:
         season = unit["season"]
@@ -182,7 +174,6 @@ class ClimatologyRecipe(BaseRecipe):
 
     @staticmethod
     def _array_stats(array) -> dict:
-        """NaN-aware min/max/mean/std for the derived raster (empty if all-NaN)."""
         import numpy as np
 
         if not np.isfinite(array).any():
@@ -193,8 +184,6 @@ class ClimatologyRecipe(BaseRecipe):
             "mean": float(np.nanmean(array)),
             "std": float(np.nanstd(array)),
         }
-
-    # ---- I/O seam (mocked in tests) ----------------------------------------
 
     def read_series(self, source: ResolvedInput):
         """
@@ -230,8 +219,6 @@ class ClimatologyRecipe(BaseRecipe):
         if quantity in ("anomaly", "trend"):
             return difference_unit(source)
         raise ValueError(f"unknown quantity: {quantity!r}")
-
-    # ---- helpers ------------------------------------------------------------
 
     @staticmethod
     def _slice_years(da, window, time_dim: str = "time"):

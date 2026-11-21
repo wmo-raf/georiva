@@ -99,13 +99,9 @@ from .pages import org_root_page, page_is_in_org_tree, scope_pages
 #: ``base_content_type`` so that a workflow over a specific page type is found by
 #: the base type — which is why the field names are part of the declaration.
 EXTERNAL_DECLARATIONS = {
-    # A page audit-log entry carries a real foreign key to its page.
     "wagtailcore.PageLogEntry": via_related("page"),
-    # A snippet audit-log entry names its subject generically.
     "wagtailcore.ModelLogEntry": via_content_object("content_type", "object_id"),
-    # Workflow state: the subject under moderation, page or snippet.
     "wagtailcore.WorkflowState": via_content_object("base_content_type", "object_id"),
-    # One task within that workflow — owned by whatever the state is owned by.
     "wagtailcore.TaskState": via_related("workflow_state"),
 }
 

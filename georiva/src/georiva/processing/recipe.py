@@ -127,8 +127,6 @@ def resolve_declared_inputs(inputs, *, unit=None) -> dict[str, ResolvedInput]:
         model = StagingItem if staging else Item
         collection_id = getattr(ref, "collection_id", None)
         if collection_id is not None:
-            # Resolve by identity (FK), not slug. Staging items reach the core
-            # Collection through their StagingCollection's link.
             field = "collection__collection_id" if staging else "collection_id"
             qs = model.objects.filter(**{field: collection_id})
         else:
@@ -205,8 +203,6 @@ class OutputAsset:
 
 
 class BaseRecipe(ABC):
-    """Base class for derivation recipes. Subclasses register on the engine."""
-
     type: str = ""
     version: str = "1"
     #: Whether this recipe creates the Variables of the collections it writes
@@ -215,6 +211,7 @@ class BaseRecipe(ABC):
     #: needing sources; a recipe that copies into a collection of file-read
     #: Variables (promotion) says False.
     creates_output_variables: bool = True
+
     #: The unit each input is read in, by role (ADR 0046 §13): a unit symbol, or
     #: :data:`SOURCE_UNIT` to read it as it is held, for arithmetic that holds in
     #: any unit and an output written down in the unit it read in. Never the
@@ -225,11 +222,8 @@ class BaseRecipe(ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
-    # ---- declarative surface -------------------------------------------------
-
     @abstractmethod
-    def enumerate_units(self, selector: Any) -> Iterable[ProductionUnit]:
-        """Which ProductionUnits does this selector cover?"""
+    def enumerate_units(self, selector: Any) -> Iterable[ProductionUnit]: ...
 
     def declared_inputs(self, unit: ProductionUnit) -> list:
         """
@@ -254,8 +248,7 @@ class BaseRecipe(ABC):
         return all(ri.present for ri in resolved.values() if ri.required)
 
     @abstractmethod
-    def outputs(self, unit: ProductionUnit) -> OutputItem:
-        """Map a unit onto the Published Item it produces."""
+    def outputs(self, unit: ProductionUnit) -> OutputItem: ...
 
     @abstractmethod
     def transform(self, unit: ProductionUnit, resolved: dict[str, ResolvedInput]) -> list[OutputAsset]:
@@ -276,8 +269,6 @@ class BaseRecipe(ABC):
         symbol = self.output_unit(unit, resolved)
         found, _ = Unit.objects.get_or_create(symbol=symbol, defaults={"name": symbol})
         return found
-
-    # ---- candidate generation (event-driven; overridable) -------------------
 
     def candidate_units(self, trigger: Any) -> Iterable[ProductionUnit]:
         """

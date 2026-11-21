@@ -61,11 +61,8 @@ def _uuid_param(request, name):
 def timeline(request, correlation_id):
     """One whole chain, oldest first (ADR 0030): everything that shares a Correlation.
 
-    Reads the index table and fetches details per type from the registry, so it
-    works whichever plugins are installed — a type whose table is absent is
-    drawn without details. Scoped through the tenancy dispatcher: a viewer sees
-    their own organisation's events, and learns only that the chain continues
-    elsewhere when rows exist beyond their scope.
+    A type whose table is absent is drawn without details; a viewer learns only
+    that the chain continues elsewhere when rows exist beyond their scope.
 
     ``?from=<event>`` draws one branch of the chain; ``?event=<event>`` marks
     one event and opens the group folding it. A folded repeat is sent without
@@ -176,12 +173,6 @@ def timeline(request, correlation_id):
 
 
 def failures(request):
-    """Every failed and refused event in the window, newest first (ADR 0033).
-
-    Behind the dashboard's failures panel, under the same ADR 0030 exception and
-    reached only from it: no menu entry. ``?type=&group=`` narrows it to one
-    failure group, the panel line that linked here.
-    """
     from urllib.parse import urlencode
 
     from django.core.paginator import Paginator

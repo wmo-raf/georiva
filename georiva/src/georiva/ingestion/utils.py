@@ -7,9 +7,6 @@ import pytz
 
 
 def iter_windows(width: int, height: int, block_size: int = 2048) -> Generator[tuple[int, int, int, int], None, None]:
-    """
-    Yield (x_offset, y_offset, width, height) windows for chunked processing.
-    """
     for y in range(0, height, block_size):
         h = min(block_size, height - y)
         for x in range(0, width, block_size):

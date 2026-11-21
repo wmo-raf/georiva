@@ -66,8 +66,6 @@ class ManifestAdminTests(TestCase):
         self.client.login(username="amina", password=PASSWORD)
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
 
-    # -- cross-org: fail closed --------------------------------------------
-
     def test_listing_shows_only_this_organisations_manifests(self):
         response = self.client.get(reverse(f"{URL_NS}:list"))
         self.assertEqual(response.status_code, 200)
@@ -87,8 +85,6 @@ class ManifestAdminTests(TestCase):
             with self.subTest(view=url_name):
                 response = self.client.get(reverse(f"{URL_NS}:{url_name}", args=[self.kenya_manifest.pk]))
                 self.assertEqual(response.status_code, 200)
-
-    # -- listing: columns and filters --------------------------------------
 
     def test_listing_shows_status_and_built_at_columns(self):
         response = self.client.get(reverse(f"{URL_NS}:list"))
@@ -114,8 +110,6 @@ class ManifestAdminTests(TestCase):
             {"status": VirtualZarrManifest.Status.READY},
         )
         self.assertContains(response, "kenya-forecast")
-
-    # -- form: derived caches stay derived ---------------------------------
 
     def test_coverage_summary_fields_are_not_editable(self):
         response = self.client.get(reverse(f"{URL_NS}:edit", args=[self.kenya_manifest.pk]))

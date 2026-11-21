@@ -147,7 +147,6 @@ def _unique_style_slug(variable, name):
 
 
 def _add_model_errors(form, error):
-    """Surface a model ValidationError on the plain form driving it."""
     for field, messages_ in error.message_dict.items():
         target = field if field in form.fields else None
         for message in messages_:
@@ -289,7 +288,6 @@ def variable_preview_step(request, collection_pk, variable_pk):
 
 
 def collection_styling(request, collection_pk):
-    """The collection's Styling page: every variable, range and default swatch."""
     collection = get_org_object_or_404(
         request,
         Collection.objects.select_related("catalog"),
@@ -337,7 +335,6 @@ def _get_style_or_none(variable, slug):
 
 
 def variable_styling(request, collection_pk, variable_pk):
-    """The canonical per-variable form (ADR 0022): range, ramp, stops, styles."""
     collection = get_org_object_or_404(
         request,
         Collection.objects.select_related("catalog"),
@@ -517,11 +514,9 @@ def variable_styling(request, collection_pk, variable_pk):
 def variable_style_stops(request, collection_pk, variable_pk):
     """A ramp's stops over the variable's range, generated and *not* saved.
 
-    What the styling form's "Apply ramp" reads. Applying used to be a POST that
-    regenerated the snapshot in the database behind a confirm round-trip, so the
-    only way to see a ramp on real data was to destroy the tuning it replaced.
-    Here the stops come back as JSON, fill the form unsaved, and the map
-    repaints — nothing is lost until Save, and a reload undoes it.
+    What the styling form's "Apply ramp" reads: the stops come back as JSON,
+    fill the form unsaved, and the map repaints — nothing is lost until Save,
+    and a reload undoes it.
 
     It runs the same :func:`served_ramp_stops` the model's ``apply_ramp()`` does
     over the same saved range, so what the form fills in is exactly what a saved

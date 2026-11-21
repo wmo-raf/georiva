@@ -16,8 +16,8 @@ class FileRequest:
     represents what we WANT to fetch - it may or may not exist yet.
     """
 
-    identifier: str  # Unique ID for this request
-    filename: str  # Desired filename
+    identifier: str
+    filename: str
 
     valid_time: datetime | None = None  # What time the data represents
     reference_time: datetime | None = None  # Forecast run time (if applicable)
@@ -27,7 +27,7 @@ class FileRequest:
 
     expected_size: int | None = None
     expected_format: str | None = None  # 'grib', 'netcdf', etc.
-    variables: list[str] = field(default_factory=list)  # Variables in this file
+    variables: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """JSON-safe representation, persisted on FetchedFile so a single
@@ -42,7 +42,6 @@ class FileRequest:
 
     @classmethod
     def from_dict(cls, payload: dict) -> "FileRequest":
-        """Rebuild a request from to_dict() output."""
         data = dict(payload)
         for key in ("valid_time", "reference_time"):
             if data.get(key) is not None:
@@ -62,8 +61,6 @@ class FileRequest:
 
 
 class FetchMode(str, Enum):
-    """How the fetch strategy operates."""
-
     SYNC = "sync"  # Direct download (HTTP, FTP, S3)
     ASYNC = "async"  # Queue-based (CDS API, MARS)
     STREAM = "stream"  # Real-time streaming (MQTT, WebSocket)
@@ -94,8 +91,6 @@ class FailureScope(str, Enum):
 
 @dataclass
 class FetchResult:
-    """Result of fetching a single file."""
-
     request: FileRequest
     local_path: Path | None = None
     success: bool = False
@@ -117,7 +112,6 @@ class FetchResult:
         return not self.success
 
     def fail(self, error: str, scope: FailureScope) -> "FetchResult":
-        """Record this fetch as failed, and why."""
         self.success = False
         self.error = error
         self.status = "failed"
@@ -160,22 +154,18 @@ class BaseFetchStrategy(ABC):
     @property
     @abstractmethod
     def mode(self) -> FetchMode:
-        """Return the fetch mode."""
         pass
 
     @abstractmethod
     def connect(self) -> None:
-        """Establish connection."""
         pass
 
     @abstractmethod
     def disconnect(self) -> None:
-        """Close connection."""
         pass
 
     @abstractmethod
     def fetch(self, request: FileRequest, local_path: Path) -> FetchResult:
-        """Fetch a single file."""
         pass
 
     def check_status(self, job_id: str) -> FetchResult:

@@ -1,7 +1,3 @@
-"""
-Request and response serializers for the timeseries API.
-"""
-
 from __future__ import annotations
 
 from rest_framework import serializers
@@ -115,7 +111,7 @@ class AreaRequestSerializer(serializers.Serializer):
             if not geom.is_valid:
                 raise serializers.ValidationError(f"Invalid geometry: {explain_validity(geom)}")
         except ImportError:
-            pass  # shapely not installed — skip deep validation
+            pass
 
         return value
 

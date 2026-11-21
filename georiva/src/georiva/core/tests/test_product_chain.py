@@ -1,22 +1,3 @@
-"""
-Tests for the pure product-dependency chain (ADR-0008/0009, issue #166).
-
-The chain is the product-level DAG: product P depends on product Q iff a
-*required* input of P at *published* tier names a collection among Q's outputs
-(tier-awareness is essential — staging inputs come from the loader, not another
-product), unioned with each definition's explicit ``depends_on``. All functions
-are pure over a sequence of DerivedProductDefinitions: no DB, no recipe
-execution, so the module is importable from both the feed layer and the engine
-(ADR-0005). The DB-backed resolution lives elsewhere; these tests assert the
-graph math only.
-
-The fixture is CHIRPS-shaped (one resolution): a promotion that serves raw
-staging data at published tier, a climatology built from staging, and an anomaly
-that consumes staging value + the *published* climatology baseline. The one true
-edge is anomaly -> climatology; a tier-blind rule would fabricate
-anomaly -> promotion, which these tests guard against.
-"""
-
 from django.test import SimpleTestCase
 
 from georiva.core.derived_products import (
@@ -51,7 +32,6 @@ def _product(key, *, inputs=(), outputs=(), recipe_type="recipe", depends_on=())
 
 
 def _chirps_defs():
-    """CHIRPS 'monthly' resolution: promotion, climatology, anomaly."""
     raw = "chirps-monthly"
     clim = "chirps-monthly-climatology"
     promotion = _product(
@@ -88,8 +68,6 @@ class ProductDependenciesTests(SimpleTestCase):
         self.assertEqual(deps["promotion"], set())
 
     def test_explicit_depends_on_is_unioned_with_inferred_edges(self):
-        # A non-data-flow dependency the tier rule can't see is declared
-        # explicitly and joins the inferred set.
         defs = [
             _product("a", outputs=(OutputRef(role="o", collection="a-out"),)),
             _product("b", depends_on=("a",)),
@@ -98,7 +76,6 @@ class ProductDependenciesTests(SimpleTestCase):
         self.assertEqual(product_dependencies(defs)["b"], {"a"})
 
     def test_optional_or_staging_inputs_never_create_edges(self):
-        # Only required + published inputs infer a dependency.
         producer = _product("p", outputs=(OutputRef(role="o", collection="shared"),))
         optional = _product("opt", inputs=(InputRef(role="x", collection="shared", tier="published", required=False),))
         staging = _product("stg", inputs=(InputRef(role="x", collection="shared", tier="staging"),))
@@ -112,7 +89,6 @@ class ProductDependentsTests(SimpleTestCase):
     def test_dependents_is_the_inverse_of_dependencies(self):
         deps = product_dependents(_chirps_defs())
 
-        # climatology is depended on by anomaly; nothing depends on anomaly.
         self.assertEqual(deps["climatology"], {"anomaly"})
         self.assertEqual(deps["anomaly"], set())
         self.assertEqual(deps["promotion"], set())
@@ -136,14 +112,11 @@ def _three_tier_chain():
 
 class ClosureTests(SimpleTestCase):
     def test_dependencies_closure_is_transitive_upstream(self):
-        # c needs b needs a -> enabling c requires both b and a (the auto-tick /
-        # structural-gate set). Excludes the product itself.
         closure = dependencies_closure(_three_tier_chain(), "c")
 
         self.assertEqual(closure, {"a", "b"})
 
     def test_dependents_closure_is_transitive_downstream(self):
-        # Disabling a cascades to b and c (the confirmation set).
         closure = dependents_closure(_three_tier_chain(), "a")
 
         self.assertEqual(closure, {"b", "c"})
@@ -172,8 +145,6 @@ class ValidateChainTests(SimpleTestCase):
             validate_chain([a, b])
 
     def test_data_flow_cycle_is_rejected(self):
-        # a consumes b's published output and b consumes a's -> a real cycle the
-        # tier-aware rule infers, caught before any run.
         a = _product(
             "a",
             inputs=(InputRef(role="i", collection="b-out", tier="published"),),
@@ -188,7 +159,6 @@ class ValidateChainTests(SimpleTestCase):
             validate_chain([a, b])
 
     def test_self_loop_via_data_flow_is_rejected(self):
-        # A product consuming its own published output at required tier.
         loop = _product(
             "loop",
             inputs=(InputRef(role="i", collection="loop-out", tier="published"),),
@@ -198,8 +168,6 @@ class ValidateChainTests(SimpleTestCase):
             validate_chain([loop])
 
     def test_two_products_declaring_the_same_output_key_are_rejected(self):
-        # An output collection may have exactly one producer — two products
-        # claiming the same output key is ambiguous provenance (ADR-0010 §1).
         a = _product("a", outputs=(OutputRef(role="o", collection="shared-out"),))
         b = _product("b", outputs=(OutputRef(role="o", collection="shared-out"),))
         with self.assertRaises(ChainError) as ctx:
@@ -207,9 +175,6 @@ class ValidateChainTests(SimpleTestCase):
         self.assertIn("shared-out", str(ctx.exception))
 
     def test_input_key_outside_the_feed_namespace_is_rejected(self):
-        # When collection_keys is supplied, every input must resolve to either a
-        # raw collection-definition key or a sibling product's output key
-        # (ADR-0010 §1). A key that is neither is a plugin bug.
         product = _product(
             "clim",
             inputs=(InputRef(role="value", collection="ghost-raw", tier="staging"),),
@@ -248,8 +213,6 @@ class TopologicalStagesTests(SimpleTestCase):
         stages = topological_stages(_chirps_defs())
         keys_by_stage = [[d.key for d in stage] for stage in stages]
 
-        # climatology (and promotion, independent) come before anomaly; order
-        # within a stage follows declaration order.
         self.assertEqual(keys_by_stage, [["promotion", "climatology"], ["anomaly"]])
 
     def test_stage_order_is_stable_by_declaration(self):

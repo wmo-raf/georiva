@@ -68,8 +68,6 @@ def build_tree(organisation, *, variable_name):
 
 
 class MachinePlaneAddressTests(TestCase):
-    """The URLs and cache keys Django emits for Titiler and Martin."""
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = make_organisation("kenya")
@@ -96,8 +94,6 @@ class MachinePlaneAddressTests(TestCase):
         )
 
     def test_an_encoded_preview_url_carries_the_render_config_token(self):
-        """The immutable cache header on encoded-preview.png is only safe
-        because a render-range edit is a *different URL* (ADR 0021)."""
         item = self.kenya_tree["item"]
         variable = self.kenya_tree["variable"]
         url = titiler_encoded_preview_url(item, variable)
@@ -244,9 +240,6 @@ class WmtsAddressTests(TestCase):
         )
 
     def test_a_keyed_kvp_endpoint_carries_the_credential_param(self):
-        """#362: the keyed document advertises this endpoint as where its
-        reader asks everything next, on the same ``api_key`` parameter the
-        tile gate reads (ADR 0015)."""
         self.assertEqual(
             wmts_kvp_endpoint(self.kenya, api_key="grv_secret"),
             "/titiler/kenya/wmts?api_key=grv_secret",
@@ -290,8 +283,6 @@ class WmtsAddressTests(TestCase):
         )
 
     def test_a_keyed_capabilities_url_carries_the_credential_param(self):
-        """#360: the keyed document advertises this as its own refresh URL, on
-        the same ``api_key`` parameter the tile gate reads (ADR 0015)."""
         self.assertEqual(
             wmts_capabilities_url(self.kenya, api_key="grv_secret"),
             "/api/wmts/kenya/WMTSCapabilities.xml?api_key=grv_secret",
@@ -705,8 +696,6 @@ class TileConfigOrgSegmentTests(TestCase):
             404,
         )
 
-    # -- the public half ---------------------------------------------------
-    #
     # `/api/` is publicly proxied, so this URL is reachable by anyone. The path
     # segment is trusted only where the reason for trusting it holds — no
     # organisation answers the host. On a tenant's host the Host wins.
@@ -866,15 +855,6 @@ class StyleSelectorAddressTests(TestCase):
 
 
 class StyleMultiplicityCacheTests(TestCase):
-    """Every style is warm, and the styleless key is the default's alias.
-
-    Titiler resolves ``?style=analyst`` into the segmented key and a styleless
-    request into the alias, so both must always exist and the alias must always
-    mirror whichever style is currently default — including in the same
-    request that flipped it. An alias that diverges is a bug in the
-    default-flip signal, not a feature (ADR 0023).
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
@@ -953,13 +933,6 @@ class StyleMultiplicityCacheTests(TestCase):
 
 @override_settings(ALLOWED_HOSTS=["*"])
 class TileConfigStyleParamTests(TestCase):
-    """`?style=` on the tile-config endpoint: the seam Titiler resolves through.
-
-    Omission serves the default; a named style serves that style; an unknown
-    slug is a 404 and never a fallback — silently serving the wrong style
-    would be worse than failing (ADR 0023).
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
@@ -997,14 +970,6 @@ class TileConfigStyleParamTests(TestCase):
 
 @override_settings(ALLOWED_HOSTS=["*"])
 class TileConfigStylesIndexTests(TestCase):
-    """Discovery rides the existing endpoint, not a new one (ADR 0023).
-
-    The payload is the resolved style's config plus an index of every style
-    the variable carries, so a client can build a style picker from the same
-    response it renders with. The index is the same whichever style was asked
-    for — it describes the variable, not the answer.
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = make_organisation("kenya")
@@ -1052,9 +1017,6 @@ class TileConfigStylesIndexTests(TestCase):
         self.assertNotIn("styles", build_variable_payload(self.variable))
 
     def test_a_private_collections_styles_are_exactly_as_invisible_as_it_is(self):
-        """Visibility is the collection's, inherited (ADR 0023): the
-        public-only constraint on this callback applies to styles identically,
-        named or not."""
         from georiva.core.models import Collection
 
         Collection.objects.filter(pk=self.tree["collection"].pk).update(

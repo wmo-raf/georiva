@@ -2,17 +2,7 @@ from django.forms import widgets
 
 
 class ConditionalCheckbox(widgets.CheckboxInput):
-    """
-    A checkbox that shows/hides a target panel when toggled.
-
-    Usage:
-        FieldPanel(
-            'is_forecast',
-            widget=ConditionalCheckbox(
-                target_panel_id='panel-child-details-forecast_configuration-section'
-            ),
-        )
-    """
+    """A checkbox that shows/hides a target panel when toggled."""
 
     def __init__(self, target_panel_id: str, *args, **kwargs):
         super().__init__(*args, **kwargs)

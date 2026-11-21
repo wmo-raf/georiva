@@ -73,12 +73,10 @@ ROOT_NODE_URL_NAMES = frozenset(
 
 
 def org_root_page(request):
-    """The page that is the whole of this organisation's tree."""
     return require_active_org(request).root_page
 
 
 def scope_pages(request, queryset):
-    """``queryset`` narrowed to the pages under this organisation's root."""
     return queryset.descendant_of(org_root_page(request), inclusive=True)
 
 

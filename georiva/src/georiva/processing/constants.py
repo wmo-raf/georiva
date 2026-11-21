@@ -13,20 +13,20 @@ margin after the hard kill instead of after hours.
 # ``engine.run_unit`` catches (``except Exception``) → ``mark_failed`` → the lock
 # is released immediately. This is the graceful recovery path for a task that has
 # simply run too long (e.g. a pathologically large raster, or contention).
-RUN_UNIT_SOFT_TIME_LIMIT_SECONDS = 13 * 60  # 780s
+RUN_UNIT_SOFT_TIME_LIMIT_SECONDS = 13 * 60
 
 # Hard limit: the worker force-kills the task's process. No chance to release the
 # lock, so the lock timeout below is the backstop. Only reached when the soft
 # exception can't unwind — e.g. stuck in a native GDAL/rasterio call that ignores
 # Python signals.
-RUN_UNIT_HARD_TIME_LIMIT_SECONDS = 15 * 60  # 900s
+RUN_UNIT_HARD_TIME_LIMIT_SECONDS = 15 * 60
 
 # Grace after the hard kill before another worker may reclaim the lock, letting
 # the killed task's DB state and broker redelivery settle.
-LOCK_TIMEOUT_MARGIN_SECONDS = 5 * 60  # 300s
+LOCK_TIMEOUT_MARGIN_SECONDS = 5 * 60
 
 # The DerivationRun stale-lock timeout. Strictly greater than the hard task limit
 # (so a live, time-limited task's lock is never stolen) plus the settle margin —
 # 20 min total, versus the old fixed 2h that left a dead unit unrecoverable for
 # hours.
-DERIVATION_LOCK_TIMEOUT_SECONDS = RUN_UNIT_HARD_TIME_LIMIT_SECONDS + LOCK_TIMEOUT_MARGIN_SECONDS  # 1200s = 20 min
+DERIVATION_LOCK_TIMEOUT_SECONDS = RUN_UNIT_HARD_TIME_LIMIT_SECONDS + LOCK_TIMEOUT_MARGIN_SECONDS

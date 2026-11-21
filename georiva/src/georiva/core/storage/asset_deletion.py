@@ -42,8 +42,6 @@ _BUFFER_ATTR = "_georiva_pending_asset_deletions"
 
 
 class _PendingDeletions:
-    """The hrefs one transaction has deleted rows for, flushed on its commit."""
-
     def __init__(self, using: str):
         self.using = using
         self.hrefs: list[str] = []
@@ -73,8 +71,6 @@ def _pending_for(using: str) -> _PendingDeletions:
 
 
 def on_asset_deleted(sender, instance, using, **kwargs):
-    # A Remote asset's bytes are upstream's, not ours: its row goes alone
-    # (ADR 0043 §8).
     if not instance.href or instance.location.is_remote:
         return
     pending = _pending_for(using)

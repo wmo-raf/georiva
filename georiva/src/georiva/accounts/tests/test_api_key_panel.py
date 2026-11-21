@@ -1,12 +1,3 @@
-"""The panel where a person manages their own keys, and nobody else's.
-
-The one thing this surface must never do is let a key be listed, revoked or
-reasoned about by anyone other than its holder. Keys are not organisation data
-— an org admin has no business over their members' personal credentials, and a
-superuser has no more claim on them than anyone else — so every lookup here is
-scoped by ``request.user`` rather than by the active organisation.
-"""
-
 from django.test import TestCase, override_settings
 from django.urls import reverse
 

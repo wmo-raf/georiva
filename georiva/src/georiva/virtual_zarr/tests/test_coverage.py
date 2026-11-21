@@ -113,9 +113,6 @@ class LockExpiryTests(SimpleTestCase):
         self.assertTrue(is_lock_expired(None, _t(0), self.TIMEOUT))
 
 
-# Service over DB fixtures (no repo behind the manifests)
-
-
 class CoverageServiceTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -282,9 +279,6 @@ class CoverageServiceTests(TestCase):
 
         self.assertEqual(report.status, VirtualZarrManifest.Status.FAILED)
         self.assertEqual(report.error, "boom")
-
-
-# Service over a real Icechunk repo (existing integration-test pattern)
 
 
 def _purge_prefix(bucket, prefix: str) -> None:

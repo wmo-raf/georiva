@@ -1,12 +1,3 @@
-"""
-GeoRiva HTTP Fetch Strategy
-
-For direct HTTP/HTTPS downloads from:
-- ECMWF Open Data
-- NOAA NOMADS
-- Any direct URL source
-"""
-
 import time
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -67,7 +58,6 @@ class HTTPFetchStrategy(BaseFetchStrategy):
         return FetchMode.SYNC
 
     def connect(self) -> None:
-        """Create HTTP session with retry configuration."""
         self._session = requests.Session()
 
         retry_strategy = Retry(
@@ -101,7 +91,6 @@ class HTTPFetchStrategy(BaseFetchStrategy):
         self.logger.debug("HTTP session initialized")
 
     def disconnect(self) -> None:
-        """Close HTTP session."""
         if self._session:
             self._session.close()
             self._session = None
@@ -153,7 +142,6 @@ class HTTPFetchStrategy(BaseFetchStrategy):
                         f.write(chunk)
                         bytes_downloaded += len(chunk)
 
-                        # Log progress every 10 seconds for large files
                         now = time.time()
                         if expected_size and expected_size > 10_000_000 and (now - last_log_time) > 10:
                             pct = (bytes_downloaded / expected_size) * 100
@@ -324,7 +312,6 @@ class AuthenticatedHTTPFetchStrategy(HTTPFetchStrategy):
         self.auth_header_value = self.config.get("auth_header_value")
 
     def connect(self) -> None:
-        """Create authenticated HTTP session."""
         super().connect()
 
         if self.auth_type == "basic":

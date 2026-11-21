@@ -44,14 +44,6 @@ class BoundaryChooserViewSet(ChooserViewSet):
 
 
 class TopicViewSet(ModelViewSet):
-    """The instance's thematic taxonomy, curated by the instance admin.
-
-    Topics are shared reference data (decision #259): one vocabulary across the
-    instance, so that "Rainfall" means the same thing on every organisation's
-    portal. Editing that vocabulary is therefore an instance-admin act, and org
-    members meet topics only as options on the catalog form.
-    """
-
     model = Topic
     # Under Settings, not the main menu: curating the instance-wide vocabulary
     # is an instance-admin act, and the entry is superuser-only anyway.
@@ -231,12 +223,6 @@ class GlobalTierIndexView(generic.IndexView):
 
 
 class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
-    """The Color ramp catalog (ADR 0022): both tiers listed, one writable.
-
-    The instance-wide catalog is readable by every organisation and curated by
-    the instance admin; an organisation creates and edits only its own ramps.
-    """
-
     model = ColorRamp
     icon = "palette"
     # Under Settings, not the main menu: the ramp catalog is a reference library
@@ -249,12 +235,6 @@ class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
     exclude_form_fields = ["created_at", "updated_at"]
     add_view_class = GlobalTierCreateView
     index_view_class = GlobalTierIndexView
-    # Wagtail's generic copy view binds its form to the *source* row, so saving
-    # renames that row instead of duplicating it (verified against Wagtail 7.4.2).
-    # Harmless-looking on a single-tenant instance; here it would be a member
-    # rewriting the instance-wide ramp every organisation renders with. Until
-    # that is fixed upstream or worked around deliberately, ramps are copied by
-    # creating one.
     copy_view_enabled = False
     list_display = ["name", "preview", "ramp_type", "owner_label"]
 

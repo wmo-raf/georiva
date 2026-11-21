@@ -1,22 +1,4 @@
-"""The addresses of the services that answer without a Host.
-
-Titiler and Martin read object storage and the database directly. Neither sees a
-usable Host header — the browser dials them through nginx on whatever hostname
-the portal happens to run on, and Titiler dials Django back on an internal
-container name that belongs to no organisation at all. So neither can resolve a
-tenant the way ``OrganisationMiddleware`` does, and neither should try:
-tenancy logic copied into a second and third service is tenancy logic that
-drifts out of step with the first.
-
-The organisation therefore travels *in the address*. Titiler's routes open with
-an ``{org}`` segment, Martin's function takes an ``org`` parameter, and both stay
-purely conventional — they read the org they were handed and join or concatenate
-with it, deciding nothing. Deciding is Django's job, and this module is where it
-happens: every machine-plane URL on the instance is built here, from an object
-whose organisation was already established by the request that fetched it. Host
-and path then agree because the same request produced both.
-
-The grammar mirrors the storage grammar deliberately (``{org}/{catalog}/…``, see
+"""The grammar mirrors the storage grammar deliberately (``{org}/{catalog}/…``, see
 ``core.storage.path_resolution``): a Titiler tile URL and the COG key behind it differ
 only by prefix, so an operator reading one can find the other.
 
@@ -171,12 +153,10 @@ def org_slug_of(collection) -> str:
 
 
 def titiler_collection_root(org_slug, catalog_slug, collection_slug) -> str:
-    """The Titiler route prefix identifying one collection of one organisation."""
     return f"{TITILER_PREFIX}/{org_slug}/{catalog_slug}/{collection_slug}"
 
 
 def titiler_variable_root(org_slug, catalog_slug, collection_slug, variable_slug) -> str:
-    """The Titiler route prefix identifying one variable of one organisation."""
     return f"{titiler_collection_root(org_slug, catalog_slug, collection_slug)}/{variable_slug}"
 
 
@@ -261,8 +241,6 @@ def data_version_token(asset) -> str:
 
 
 def preview_version_token(variable, style=None, asset=None) -> str:
-    """The ``v=`` of a colorized preview: style token, plus the data version
-    when the asset is known."""
     token = style_version_token(variable, style)
     if asset is None:
         return token
@@ -270,14 +248,6 @@ def preview_version_token(variable, style=None, asset=None) -> str:
 
 
 def render_config_token(variable) -> str:
-    """A short hash of everything baked into an encoded texture's pixels.
-
-    Carried as ``v=`` on :func:`titiler_encoded_preview_url` so a change to the
-    variable's render range is a *different URL* — the endpoint answers with an
-    immutable cache header, and this token is what makes that safe (ADR 0021).
-    A hash rather than a stored counter: identical config always yields the
-    same URL, and there is no version state to migrate or drift.
-    """
     return hashlib.sha1(_render_range_basis(variable).encode()).hexdigest()[:8]
 
 
@@ -287,14 +257,9 @@ def _render_range_basis(variable) -> str:
     One spelling for the two token schemes, so a change to what "the render
     range" means cannot move one token and not the other."""
     basis = f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
-    # The served unit changes no pixel, but it changes the numbers a client
-    # unscales a texture into and labels it with (ADR 0046 §16). Only when it
-    # differs from the source unit, so an unconverted variable keeps its URLs.
+    # Only when converted, so an unconverted variable keeps its URLs.
     if variable.unit_id != variable.source_unit_id:
         basis += f":unit={variable.unit.symbol}:{variable.scale}:{variable.offset}"
-    # A catalog that crops its maps to a boundary (ADR 0038) bakes that crop into
-    # every texture and preview, so moving to or from it must be a different URL.
-    # Only when it applies, so every other catalog keeps the URLs it already has.
     catalog = variable.collection.catalog
     if catalog.clip_mode == "display" and catalog.boundary_id is not None:
         basis += f":display={catalog.boundary_id}"
@@ -302,17 +267,9 @@ def _render_range_basis(variable) -> str:
 
 
 def style_version_token(variable, style=None) -> str:
-    """A short hash of everything baked into a *colorized* output's pixels.
-
-    Extends :func:`render_config_token` with the style's stops snapshot
-    (ADR 0023): a colorized preview or tile renders range, scale *and*
-    palette, so any of the three changing must change the URL for its
-    responses to be honestly cacheable. ``style`` is the one being rendered —
-    the default for a styleless URL — or ``None`` for a still-grayscale
-    variable, whose empty basis segment keeps the token stable until a first
-    style appears. Encoded textures deliberately keep the styleless token:
-    encoding bakes no palette in, and sharing this hash would churn every
-    cached texture on a palette edit.
+    """``style`` is the one being rendered — the default for a styleless URL —
+    or ``None`` for a still-grayscale variable, whose empty basis segment keeps
+    the token stable until a first style appears.
     """
     stops = json.dumps(style.stops, sort_keys=True) if style is not None else ""
     basis = f"{_render_range_basis(variable)}:{stops}"
@@ -320,14 +277,6 @@ def style_version_token(variable, style=None) -> str:
 
 
 def titiler_encoded_preview_url(item, variable) -> str:
-    """The value-encoded texture of ``item``'s ``variable`` band (ADR 0021).
-
-    The whole extent as one image, pixels rescaled to the variable's current
-    ``value_min``/``value_max`` — the machine texture WeatherLayers unscales
-    client-side. Derived at request time from the COG, so nothing behind this
-    URL can go stale; the ``v`` token turns render-config edits into new URLs.
-    The org comes from the item's own row, as in :func:`titiler_preview_url`.
-    """
     collection = item.collection
     params = {"time": item.time_iso}
     if item.reference_time:
@@ -344,14 +293,6 @@ def titiler_encoded_preview_url(item, variable) -> str:
 
 
 def vector_render_config_token(u_variable, v_variable) -> str:
-    """A short hash of everything baked into a two-band vector texture's pixels.
-
-    Both components are encoded over the union of their ranges, so a change to
-    *either* variable's range moves every pixel of both bands: the basis is the
-    two single-band bases in order (u, then v), and the URL it rides on is
-    ``immutable`` for exactly that reason (ADR 0021). Order matters because the
-    bands are not interchangeable.
-    """
     basis = f"{_render_range_basis(u_variable)}|{_render_range_basis(v_variable)}"
     return hashlib.sha1(basis.encode()).hexdigest()[:8]
 

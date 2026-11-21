@@ -33,7 +33,6 @@ def context_for_revival(bucket: str, file_path: str, sweep: str) -> EventContext
 
 
 def context_for_arrival(file_path: str, *, actor: str) -> EventContext:
-    """The context an arrival of ``file_path`` should be handled under."""
     adopted = _adopt_latest(file_path, actor)
     if adopted is not None:
         return adopted
@@ -80,7 +79,6 @@ def _reached_rows(file_path: str):
 
 
 def _upload_is_newer(upload, file_path: str) -> bool:
-    """Whether the upload stored this key after the latest fetch did."""
     fetched = _reached_rows(file_path).order_by("-id").first()
     fetched_at = fetched.completed_at or fetched.started_at if fetched else None
     return fetched_at is None or (upload.received_at >= fetched_at)

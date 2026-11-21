@@ -4,8 +4,6 @@ from .failures import failure_groups, failures_url, window_days
 
 
 class FailuresPanel(Component):
-    """Failed and refused transitions on the admin homepage, one line per failure group (ADR 0033)."""
-
     name = "event_failures"
     template_name = "georivaevents/failures_panel.html"
     order = 150

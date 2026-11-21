@@ -1,11 +1,5 @@
-"""The panel where a person manages their own API keys.
-
-Every lookup here is scoped by ``request.user`` and by nothing else. That is not
-the organisation scoping the rest of the admin uses, and the difference is the
-point: a key belongs to a person, not to an institution, so an org admin has no
-claim over their members' credentials and neither does the instance admin.
-Somebody else's key is reported as absent, exactly as another organisation's row
-would be.
+"""Every lookup here is scoped by ``request.user``: somebody else's key is reported
+as absent, exactly as another organisation's row would be.
 """
 
 from django.contrib import messages

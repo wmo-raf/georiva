@@ -174,7 +174,6 @@ def fingerprint(st):
 
 
 def already_sent(path, checksum):
-    """True when ``path``'s marker records this checksum."""
     return read_marker(path).get("sha256") == checksum
 
 

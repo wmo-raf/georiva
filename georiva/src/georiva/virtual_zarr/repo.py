@@ -99,10 +99,6 @@ def open_repo(
     internal: bool = True,
     create: bool = False,
 ) -> icechunk.Repository:
-    """
-    Open (or, with ``create=True``, open-or-create) the Icechunk repo at an
-    org-first prefix on the zarr bucket.
-    """
     opener = icechunk.Repository.open_or_create if create else icechunk.Repository.open
     return opener(
         _storage(repo_path),
@@ -113,9 +109,6 @@ def open_repo(
 
 def repo_exists(repo_path: str) -> bool:
     return icechunk.Repository.exists(_storage(repo_path))
-
-
-# Commit metadata — the watermark's source of truth (design decision 5)
 
 
 def commit_metadata(
@@ -142,7 +135,6 @@ def commit_metadata(
 
 
 def _tip_snapshot(repo: icechunk.Repository):
-    """Latest snapshot on ``main``, or None on an empty repo."""
     try:
         return next(iter(repo.ancestry(branch="main")))
     except StopIteration:
@@ -150,7 +142,6 @@ def _tip_snapshot(repo: icechunk.Repository):
 
 
 def latest_snapshot_id(repo: icechunk.Repository) -> str | None:
-    """Snapshot id at the tip of ``main``, or None on an empty repo."""
     snapshot = _tip_snapshot(repo)
     return snapshot.id if snapshot else None
 

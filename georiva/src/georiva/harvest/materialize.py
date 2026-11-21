@@ -544,7 +544,6 @@ def _mark_unresolved(asset, feed, reason: str) -> None:
 
 
 def _clear_unresolved(asset, feed) -> None:
-    """Forget that the row's host was refused for where it resolved."""
     _rewrite_marks(asset, feed, rewritten(drop=(UNRESOLVED_MARK,)))
 
 

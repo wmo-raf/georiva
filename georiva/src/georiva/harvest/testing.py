@@ -533,8 +533,6 @@ server.serve_forever()
 """
 
 
-# ---- a real Upstream store, on local disk ---------------------------------------------
-
 #: Where a :class:`LocalStore` says it lives unless a test says otherwise.
 LOCAL_STORE_HREF = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
 

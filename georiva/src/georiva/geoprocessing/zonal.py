@@ -33,7 +33,6 @@ EMPTY_STATS = {
 
 
 def reproject_geometry(geom: dict, dst_crs, src_crs=_CRS_4326) -> dict:
-    """Reproject a GeoJSON geometry from ``src_crs`` (default EPSG:4326) to ``dst_crs``."""
     dst = RasterioCRS.from_user_input(dst_crs)
     if dst == src_crs:
         return geom

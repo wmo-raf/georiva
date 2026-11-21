@@ -1,16 +1,3 @@
-"""
-Core building blocks for virtual Zarr (Icechunk) repos over GeoRiva COG assets.
-
-    MinioStoreConfig     — connection parameters + store factory methods
-    MinioVirtualTIFF     — VirtualTIFF subclass that correctly wires AsyncS3Store
-                           for MinIO (bypasses the broken obstore → async-tiff
-                           conversion that panics on missing aws_ prefix)
-    VirtualZarrBuilder   — scans COG headers and builds a virtual xarray
-                           Dataset (virtual chunk refs only, no pixel data)
-    write_rebuild / write_append
-                         — commit a virtual dataset into an Icechunk repo
-"""
-
 from __future__ import annotations
 
 import logging
@@ -360,9 +347,6 @@ def write_append(
     metadata: dict,
     message: str,
 ) -> str:
-    """
-    Append new timesteps along ``time`` and commit.  Returns the snapshot id.
-    """
     session = repo.writable_session("main")
     vds.vz.to_icechunk(session.store, append_dim="time", last_updated_at=last_updated_at)
     return session.commit(message, metadata=metadata)
@@ -372,7 +356,7 @@ def last_committed_time(repo) -> pd.Timestamp | None:
     """
     Last value of the committed time coordinate at the tip of ``main``.
 
-    Belt-and-braces for the append path (design decision 5): the caller
+    Belt-and-braces for the append path: the caller
     asserts every appended timestep is strictly after this, independently of
     the commit-metadata watermark.  Reads only the native time array — no
     virtual chunks are touched.

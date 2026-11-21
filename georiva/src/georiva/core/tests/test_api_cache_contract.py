@@ -55,13 +55,6 @@ class ApiCacheContractTests(TestCase):
         self.assertGreater(len(list(parameterless_paths(core_urlpatterns))), 3)
 
     def test_no_core_api_response_declares_itself_publicly_cacheable(self):
-        """The premise the whole `/api/` cache rests on.
-
-        The day a view returning tenant-scoped data gains
-        `Cache-Control: public`, nginx will begin storing it under a key that
-        carries no credential and serving it to anonymous callers. Nothing
-        downstream reports that; this does.
-        """
         for path in parameterless_paths(core_urlpatterns):
             with self.subTest(path=path):
                 response = self.client.get(path)

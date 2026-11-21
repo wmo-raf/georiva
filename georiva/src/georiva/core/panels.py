@@ -16,8 +16,6 @@ from wagtail.admin.panels import Panel
 
 
 class StylingSummaryPanel(Panel):
-    """Range + default-style swatch, read-only, linking to the Styling page."""
-
     class BoundPanel(Panel.BoundPanel):
         template_name = "core/panels/styling_summary.html"
 

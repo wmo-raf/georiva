@@ -98,8 +98,6 @@ class TileAuthView(APIView):
             slug=scope.collection,
         )
         if collections.public().exists():
-            # The fast path, and the reason it is first: a public tile is
-            # settled by one indexed query and never reads a membership row.
             return self.allow()
         if collections.visible_to(request).exists():
             return self.allow()
@@ -111,12 +109,4 @@ class TileAuthView(APIView):
 
     @staticmethod
     def deny():
-        """403, which nginx rewrites to the 404 every other plane answers.
-
-        Left as 403 rather than answered as 404 here because ``auth_request``
-        only understands 2xx, 401 and 403; any other status makes nginx fail the
-        outer request with a 500. The 404 the caller actually sees is one
-        ``error_page`` line away, and is in ``deploy/nginx/nginx.conf`` beside
-        the gate it applies to.
-        """
         return Response(status=status.HTTP_403_FORBIDDEN)

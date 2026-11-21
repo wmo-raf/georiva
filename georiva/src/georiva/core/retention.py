@@ -13,9 +13,6 @@ from datetime import datetime
 
 from georiva.core.models import Collection, Item
 
-# The rule, in two halves: what a collection says of itself, and whether a Harvest feed owns
-# it. A harvested collection is pruned only by its harvest — its Rolling window and Mirror
-# are its retention, one owner per collection's rows (ADR 0042 §14).
 _PRUNED_ATTRIBUTES = {"is_forecast": True, "retain_past_forecasts": False, "is_active": True}
 _HARVESTED = {"feed_links__data_feed__harvestfeed__isnull": False}
 
@@ -45,7 +42,6 @@ def _latest_reference_time(collection) -> datetime | None:
 
 
 def prune(collection, now: datetime) -> int:
-    """Delete the Items of ``collection`` that retention does not keep; return how many."""
     deleted, _ = Item.objects.filter(collection=collection, time__lt=now).delete()
 
     if collection.retain_latest_run_only:

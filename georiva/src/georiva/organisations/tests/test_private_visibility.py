@@ -226,8 +226,6 @@ class PrivateCollectionsOnTheStacPlaneTests(PrivateTierTestCase):
 
 
 class PrivateCollectionsOnTheEdrPlaneTests(PrivateTierTestCase):
-    """The same three tiers, over EDR."""
-
     def collection_ids(self):
         response = self.client.get(reverse("edr:collection-list"))
         self.assertEqual(response.status_code, 200)

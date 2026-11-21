@@ -366,8 +366,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
 
         self.assertTrue(self.survey().harvestable)
 
-    # Which of its arrays can become Variables (ADR 0044 §8).
-
     def test_plain_fields_are_offered_with_what_the_collection_says_of_them(self):
         said = {"title": "2 metre temperature", "unit": "degree_Celsius", "description": "Air temperature."}
         self.map_shaped(
@@ -493,8 +491,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertFalse(found.harvestable)
         self.assertIn("It has levels.", found.reason)
         self.assert_plain(found.reason)
-
-    # Where its data lives (ADR 0044 §11).
 
     def test_a_google_bucket_is_a_place_its_data_may_live_as_an_amazon_one_is(self):
         self.upstream.regions["ecmwf-forecasts"] = "eu-central-1"
@@ -676,8 +672,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.map_shaped(codecs={"valid_time": ("acme_wavelet",)})
 
         self.assertEqual(self.survey().shape, Shape.UNDECODABLE_STORE)
-
-    # Refused: it cannot be read, or cannot be told.
 
     def test_a_store_that_does_not_open_is_refused_as_any_upstream_that_needs_an_account(self):
         self.map_shaped()

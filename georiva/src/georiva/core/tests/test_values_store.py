@@ -45,8 +45,6 @@ def expected(run: int, step: int, *, edition: float = 0.0) -> np.ndarray:
 
 
 class ReadsALocalStore:
-    """A forecast store on local disk, opened at :data:`STORE` — built by the shared helper."""
-
     build = True
 
     def setUp(self):

@@ -66,10 +66,6 @@ def register_virtual_zarr_admin_urls():
 
 @hooks.register(GEORIVA_AFTER_SAVE_ASSET)
 def after_save_asset(asset, **kwargs):
-    """
-    After an Asset is confirmed written:
-      1. If COG, Mark the virtual Zarr manifest stale so the next sweep rebuilds it
-    """
 
     if asset.format == Asset.Format.COG:
         variable = asset.variable

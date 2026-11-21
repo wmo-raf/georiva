@@ -1,15 +1,3 @@
-"""The Variable style layer (ADR 0022): applied, per-variable style snapshots.
-
-Two subjects, each at the model seam:
-
-* the ``VariableStyle`` row — exactly one default per variable at the DB
-  level, slugs unique within a variable, the stops snapshot as the
-  materialized value→color contract;
-* snapshot generation — applying a ramp over a variable's range produces
-  absolute stops, in both continuous and stepped modes, and re-applying is an
-  explicit act that regenerates from the ramp.
-"""
-
 from importlib import import_module
 
 from django.core.exceptions import ValidationError
@@ -30,8 +18,6 @@ def make_ramp(hexes, *, ramp_type=ColorRamp.RampType.SEQUENTIAL, positions=None,
 
 
 class VariableStyleRowTests(TestCase):
-    """The row itself: default uniqueness, slug uniqueness, validation."""
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = make_organisation("kenya")
@@ -92,8 +78,6 @@ class VariableStyleRowTests(TestCase):
 
 
 class SnapshotGenerationTests(TestCase):
-    """Applying a ramp over a range materializes absolute value→color stops."""
-
     def test_continuous_stretches_evenly_spread_colors_over_the_range(self):
         ramp = make_ramp(["#000000", "#808080", "#ffffff"])
         self.assertEqual(
@@ -165,9 +149,6 @@ class SnapshotGenerationTests(TestCase):
 
 
 class ApplyRampTests(TestCase):
-    """Re-applying is explicit: the style regenerates from its ramp and the
-    variable's current range, discarding whatever tuning was in the snapshot."""
-
     @classmethod
     def setUpTestData(cls):
         cls.variable = make_org_tree(make_organisation("kenya"))["variable"]

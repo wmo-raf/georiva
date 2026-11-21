@@ -223,11 +223,8 @@ class HarvestFeed(DataFeed):
         verbose_name = _("Harvest feed")
         verbose_name_plural = _("Harvest feeds")
 
-    # ── Configuration, as a harvest reads it ────────────────────────────────
-
     @property
     def is_store(self) -> bool:
-        """Whether this feed points at an Upstream store rather than at items of COGs."""
         return self.upstream_shape == UpstreamShape.STORE
 
     @property
@@ -390,8 +387,6 @@ class HarvestFeed(DataFeed):
         """
         mappings = self.variable_mappings.select_related("variable")
         return {m.asset_key: m.variable for m in mappings if m.variable.collection_id == collection.pk}
-
-    # ── Runs ────────────────────────────────────────────────────────────────
 
     def run_now(self, collection=None, *, user=None, async_run: bool = True):
         """Harvest now. A harvest is not a LoaderJob: there are no files to show

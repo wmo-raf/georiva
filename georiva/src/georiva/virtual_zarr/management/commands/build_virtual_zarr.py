@@ -61,13 +61,6 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f"  [async] {label} → already building elsewhere, skipped"))
 
     def _resolve_manifests(self, options) -> list:
-        """
-        Resolve the list of VirtualZarrManifest records to build.
-
-        --all         → every existing manifest record
-        --collection  → manifests for a specific collection, auto-creating
-                        missing records for any active variables
-        """
         if options["all"] and options["collection"]:
             raise CommandError("Pass either --all or --collection, not both.")
 
@@ -119,7 +112,6 @@ class Command(BaseCommand):
         except Collection.DoesNotExist:
             raise CommandError(f"Collection not found: {collection_arg}") from None
 
-        # Active variables to consider — optionally filtered by slug
         variables_qs = collection.variables.filter(is_active=True)
         if variable_slug:
             variables_qs = variables_qs.filter(slug=variable_slug)

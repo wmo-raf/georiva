@@ -58,8 +58,6 @@ class BuildReport:
     snapshot_id: str = ""
 
 
-# Retention for design decision 4: expire snapshots older than this (the
-# latest is always kept) and garbage-collect unreachable icechunk objects.
 SNAPSHOT_RETENTION = timedelta(days=7)
 
 
@@ -302,8 +300,7 @@ def _run_build(
         report.mode = BuildMode.NO_DATA.value
         return report
 
-    # Classify against the repo's committed state (decision 5: the
-    # watermark lives in commit metadata, never the Django row)
+    # The watermark lives in the repo's commit metadata, never the Django row.
     committed = None
     if repo_exists(repo_path):
         repo = open_repo(repo_path)
@@ -458,7 +455,7 @@ def _run_append(repo, builder, plan, committed, variable_name, build_start, meta
         return None
     vds = builder.assemble(opened, variable_name)
 
-    # Belt-and-braces (decision 5): appended timesteps must be strictly
+    # Belt-and-braces: appended timesteps must be strictly
     # after the last committed time coordinate, read from the snapshot
     # itself — independent of the commit-metadata watermark.
     committed_last = last_committed_time(repo)
@@ -511,13 +508,6 @@ def dispatch_build(manifest_id: int, claimed_by: str = "dispatch", force: bool =
     queue="georiva-default",
 )
 def sweep_virtual_zarr_pending() -> None:
-    """
-    Periodic safety-net for virtual Zarr repo builds.
-
-    Runs every 5 minutes:
-      1. Reset stale BUILDING locks (crash recovery) → PENDING
-      2. Claim and dispatch every buildable manifest
-    """
     reset_count = VirtualZarrManifest.reset_stale_locks()
     if reset_count:
         logger.info("sweep_virtual_zarr_pending: reset %d stale lock(s)", reset_count)
@@ -602,7 +592,6 @@ def gc_virtual_zarr_repos(self) -> None:
 
 @app.on_after_finalize.connect
 def setup_virtual_zarr_periodic_tasks(sender, **kwargs) -> None:
-    """Register the 5-minute sweep and the daily retention pass."""
     register_periodic_tasks(
         [
             PeriodicSpec(

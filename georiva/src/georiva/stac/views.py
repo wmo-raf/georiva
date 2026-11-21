@@ -105,15 +105,11 @@ def _resolve_variable(request: Request, catalog_slug: str, collection_slug: str,
 
 
 class STACAPIView(APIView):
-    """Base view for STAC catalog/collection endpoints."""
-
     renderer_classes = [STACJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
 
 
 class STACGeoAPIView(APIView):
-    """Base view for STAC item endpoints (GeoJSON)."""
-
     renderer_classes = [GeoJSONRenderer, STACJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
 
@@ -148,12 +144,6 @@ class STACLandingPageView(STACAPIView):
 
 
 class STACConformanceView(STACAPIView):
-    """
-    STAC API Conformance Declaration
-
-    GET /stac/conformance/
-    """
-
     def get(self, request: Request) -> Response:
         return Response(
             {
@@ -171,12 +161,6 @@ class STACConformanceView(STACAPIView):
 
 
 class STACCatalogListView(STACAPIView):
-    """
-    List all Catalogs as top-level STAC Collections.
-
-    GET /stac/collections/
-    """
-
     def get(self, request: Request) -> Response:
         catalogs = _org_catalogs(request).prefetch_related(
             "collections",
@@ -250,12 +234,6 @@ class STACCollectionListView(STACAPIView):
 
 
 class STACCollectionDetailView(STACAPIView):
-    """
-    Get a variable as a STAC Collection.
-
-    GET /stac/collections/{catalog_slug}/{collection_slug}/{variable_slug}
-    """
-
     def get(
         self,
         request: Request,
@@ -304,8 +282,6 @@ class STACItemsView(STACGeoAPIView):
         bbox_param = request.query_params.get("bbox")
         token = request.query_params.get("token")
 
-        # Build query — items that have assets for this variable
-
         queryset = (
             Item.objects.filter(collection=collection)
             .select_related(
@@ -344,7 +320,6 @@ class STACItemsView(STACGeoAPIView):
         else:
             next_token = None
 
-        # Serialize — pass variable in context for asset filtering
         data = STACItemCollectionSerializer(
             {
                 "items": items,
@@ -465,7 +440,6 @@ class STACItemDetailView(STACGeoAPIView):
     def _find_item(self, collection: Collection, item_id: str) -> Item | None:
         parts = item_id.split("_")
 
-        # Base queryset — respect retention's past-item policy
         base_qs = Item.objects.filter(collection=collection)
         if retention.is_pruned(collection):
             from django.utils import timezone
@@ -546,7 +520,6 @@ class STACSearchView(STACGeoAPIView):
             .prefetch_related("assets", "assets__variable")
         )
 
-        # Resolve variable context from collections param
         variable = None
         collections_param = params.get("collections", [])
         queryset, variable = self._apply_collections_filter(request, queryset, collections_param)
@@ -823,7 +796,6 @@ class STACQueryablesView(STACAPIView):
             "additionalProperties": True,
         }
 
-        # Catalog-level: list available variable collections
         if catalog_slug and not variable_slug:
             catalog = get_org_object_or_404(
                 request,
@@ -833,7 +805,6 @@ class STACQueryablesView(STACAPIView):
             variables = _org_variables(request).filter(collection__catalog=catalog)
             queryables["properties"]["collection"]["enum"] = [v.slug for v in variables]
 
-        # Variable-level: add forecast queryables if applicable
         if catalog_slug and collection_slug and variable_slug:
             variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
             collection = variable.collection

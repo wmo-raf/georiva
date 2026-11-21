@@ -47,7 +47,6 @@ class VariableKey:
     level: int | None = None
 
     def to_filter(self) -> dict:
-        """Convert to cfgrib filter_by_keys."""
         fk: dict = {
             "shortName": self.short_name,
             "typeOfLevel": self.type_of_level,
@@ -261,14 +260,12 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             return []
 
     def _iter_variables(self, file_path: PathLike):
-        """Yield (dataset, var_name, var_dataarray) for every variable in the file."""
         file_path = Path(file_path)
         for ds in self._open_all(file_path):
             for var_name, var in ds.data_vars.items():
                 yield ds, var_name, var
 
     def _find_xr_name(self, ds: xr.Dataset, short_name: str) -> str | None:
-        """Find the xarray variable name matching a GRIB shortName."""
         for var_name in ds.data_vars:
             if var_name == short_name:
                 return var_name
@@ -277,7 +274,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         return None
 
     def _find_by_name(self, file_path: Path, variable_name: str) -> tuple[xr.Dataset | None, str | None]:
-        """Fallback: search all datasets for a variable by name or shortName."""
         for ds in self._open_all(file_path):
             if variable_name in ds.data_vars:
                 return ds, variable_name
@@ -288,7 +284,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         return None, None
 
     def _extract_level(self, var, attrs: dict) -> int | None:
-        """Extract the level value from a variable's coordinates."""
         type_of_level = attrs.get("GRIB_typeOfLevel", "")
         if type_of_level and type_of_level in var.coords:
             val = var.coords[type_of_level].values

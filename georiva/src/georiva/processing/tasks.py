@@ -3,7 +3,7 @@ Celery tasks for the derivation engine.
 
 Per-unit compute runs on the dedicated ``georiva-processing`` queue so a heavy
 backfill cannot starve live ingestion. Recovery is via the backfill sweep
-(a later slice), so retries are bounded.
+(``sweep_derivations``), so retries are bounded.
 """
 
 import logging
@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
-    """Register the periodic backfill sweep (mirror of sweep_unprocessed)."""
     from django_celery_beat.models import IntervalSchedule
 
     register_periodic_tasks(
@@ -182,7 +181,6 @@ def sweep_derivations():
     queue="georiva-default",
 )
 def run_recipe_task(recipe_type: str, selector: dict = None):
-    """Enumerate a recipe's units for a selector and fan out per-unit tasks."""
     from georiva.processing.engine import run
     from georiva.processing.registry import recipe_registry
 

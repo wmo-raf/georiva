@@ -158,9 +158,6 @@ def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...], bool]
     return store, array, pins, allow_http
 
 
-# What goes wrong, in words a map user can be shown
-
-
 class StoreError(Exception):
     """A store read that failed. ``status_code`` and ``detail`` are the response."""
 
@@ -241,7 +238,6 @@ def place_kind(prefix: str) -> str | None:
 
 
 def _container(prefix: str, region: str):
-    """The container settings and the credentials one pinned place is read with."""
     import icechunk
 
     kind = place_kind(prefix)
@@ -499,9 +495,6 @@ def _georeferenced(values: np.ndarray, latitudes: np.ndarray, longitudes: np.nda
         x_resolution=float(x_resolution),
         y_resolution=float(y_resolution),
     )
-
-
-# One open store per process, per (address, pins)
 
 
 @dataclass

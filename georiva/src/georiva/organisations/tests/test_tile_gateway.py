@@ -69,7 +69,6 @@ def vector_uri(collection_slug, org="kenya", catalog="forecast"):
 
 
 def wmts_uri(collection_slug, org="kenya", catalog="forecast", request="GetTile", layer=None, extra=""):
-    """A KVP request against the org-scoped WMTS endpoint under the proxy."""
     layer = layer if layer is not None else f"{catalog}:{collection_slug}:{collection_slug}"
     return (
         f"/titiler/{org}/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST={request}"

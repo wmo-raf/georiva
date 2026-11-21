@@ -109,12 +109,6 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> Generator[VariableInfo, None, None]:
-        """
-        Open a GeoTIFF band lazily via rioxarray.
-
-        The returned DataArray is dask-backed — no pixel data is read until
-        you call .compute() or access .values.
-        """
         file_path = Path(file_path)
         band = self._parse_band_index(variable_name)
 

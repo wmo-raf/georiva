@@ -17,10 +17,10 @@ Usage:
 import sys
 
 try:
-    import tomllib  # Python 3.11+ stdlib
+    import tomllib
 except ImportError:
     try:
-        import tomli as tomllib  # backport for Python 3.10
+        import tomli as tomllib
     except ImportError:
         print(
             "ERROR: Neither tomllib (Python 3.11+) nor tomli package is available. "
@@ -38,7 +38,7 @@ def main():
     manifest_file = sys.argv[1]
 
     try:
-        with open(manifest_file, "rb") as f:  # tomllib requires binary mode
+        with open(manifest_file, "rb") as f:
             config = tomllib.load(f)
     except FileNotFoundError:
         sys.exit(0)  # caller logs "no manifest found"

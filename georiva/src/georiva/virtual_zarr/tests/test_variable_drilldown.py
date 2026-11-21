@@ -96,8 +96,6 @@ class VariableDrilldownTests(TestCase):
         manifest.refresh_from_db()
         return manifest
 
-    # -- tenancy: fail closed ----------------------------------------------
-
     def test_another_organisations_variable_is_not_found(self):
         response = self._get(self.uganda_variable)
         self.assertEqual(response.status_code, 404)
@@ -107,8 +105,6 @@ class VariableDrilldownTests(TestCase):
         self.client.logout()
         response = self._get(variable)
         self.assertEqual(response.status_code, 302)
-
-    # -- rendering ----------------------------------------------------------
 
     def test_missing_timestamps_and_skipped_items_are_listed(self):
         variable = self._variable()
@@ -228,8 +224,6 @@ class VariableDrilldownTests(TestCase):
 
         self.assertContains(response, "2.0")  # 2.0 KB
         self.assertContains(response, "9")
-
-    # -- navigation ---------------------------------------------------------
 
     def test_tab_links_each_variable_to_its_drilldown(self):
         variable = self._variable()

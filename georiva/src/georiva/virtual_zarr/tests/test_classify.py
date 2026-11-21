@@ -1,5 +1,5 @@
 """
-Unit tests for the append/rebuild classifier (design decisions 1 + 2).
+Unit tests for the append/rebuild classifier.
 
 Watermark = arrival order (max Asset.modified at last commit).  New items
 strictly after the committed time_end append; anything earlier/overlapping

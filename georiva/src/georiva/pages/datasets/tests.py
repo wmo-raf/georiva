@@ -117,8 +117,6 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         self.assertIn(f"collection={self.collection.slug}", url)
 
     def test_texture_urls_are_injected_per_variable(self):
-        """The map reads server-built encoded-texture URLs (ADR 0021) — it
-        never rebuilds the machine-plane grammar client-side."""
         config = self._config()
         self.assertIn(self.variable.slug, config["textureUrls"])
         url = config["textureUrls"][self.variable.slug]
@@ -141,8 +139,6 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         self.assertEqual(self._config()["itemBounds"], [20.0, -12.0, 52.0, 23.0])
 
     def test_the_map_serves_the_default_style_only(self):
-        """Dataset pages stay on the default style (ADR 0023): an alternate
-        named style must not change the palette the map layer carries."""
         make_style(
             self.variable,
             "official",
@@ -209,8 +205,6 @@ class ItemDetailBoundaryAvailabilityTests(TestCase):
     def setUp(self):
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
 
-    # -- helpers -----------------------------------------------------------
-
     def _stats(self, variable, boundary, *, mean=1.0):
         from georiva.analysis.zonal_stats.models import BoundaryZonalStats
 
@@ -236,8 +230,6 @@ class ItemDetailBoundaryAvailabilityTests(TestCase):
         start = body.index('id="grItemConfig"')
         start = body.index(">", start) + 1
         return json.loads(body[start : body.index("</script>", start)])
-
-    # -- assertions --------------------------------------------------------
 
     def test_no_aggregates_means_no_boundaries_button(self):
         response = self._response()

@@ -66,7 +66,6 @@ def ingestion_dashboard_api(request):
     ):
         latest_fi_by_collection[fi["collections"]] = fi
 
-    # Build per-collection entries grouped by catalog pk.
     collections_by_catalog = defaultdict(list)
     catalog_index = {}
 

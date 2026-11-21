@@ -1,17 +1,4 @@
-"""Plugin-contributed routes under ``/api/``.
-
-The convention is the registration: a plugin publishes an ``api_urls`` module
-and it is included. That makes two things load-bearing, and both fail in ways
-nothing reports:
-
-- **core is matched first.** The resolver stops at the first match, so a plugin
-  declaring a path core already answers must lose. Were it to win, installing a
-  plugin would silently move ``/api/stac/``.
-- **a plugin that will not import must not be fatal.** The URL conf is built once
-  for the whole instance, so an exception raised while assembling it reaches
-  every request, not just the routes of the plugin that caused it.
-
-The fixtures are real packages on a real ``sys.path`` entry rather than modules
+"""The fixtures are real packages on a real ``sys.path`` entry rather than modules
 pushed into ``sys.modules``, because the behaviour under test *is* the import
 system's: telling "this plugin publishes no routes" from "this plugin publishes
 routes and is broken" is a question about the finder, and a hand-built module
@@ -44,7 +31,7 @@ def forecast(request):
 urlpatterns = [path("forecast/", forecast, name="forecast")]
 """
 
-#: The trap `_import_api_urls` exists for: an ``api_urls`` that is present and
+#: The trap `import_plugin_module` exists for: an ``api_urls`` that is present and
 #: raises ``ModuleNotFoundError`` on import, which is the same exception the
 #: import system raises for a plugin that has no ``api_urls`` at all.
 BROKEN = """
@@ -96,7 +83,6 @@ class PluginApiUrlTests(SimpleTestCase):
         importlib.invalidate_caches()
 
     def make_plugin(self, name, api_urls=None):
-        """A plugin package on the path, with or without an ``api_urls``."""
         package = self.root / name
         package.mkdir()
         (package / "__init__.py").write_text("")
@@ -143,7 +129,6 @@ class PluginApiUrlTests(SimpleTestCase):
         self.assertIn(name, logged.output[0])
 
     def test_a_broken_plugin_does_not_cost_a_working_one_its_routes(self):
-        """The blast radius. One plugin's fault is one plugin's routes."""
         broken = self.make_plugin("plugin_broken_neighbour", BROKEN)
         working = self.make_plugin("plugin_working_neighbour", WORKING)
 

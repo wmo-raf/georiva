@@ -175,9 +175,6 @@ def collection_items_list(request, collection_pk):
         action = request.POST.get("action")
 
         if action == "trigger_ingestion":
-            # TODO: wire up real Celery task, e.g.:
-            # from georiva.ingestion.tasks import run_loader_for_collection
-            # run_loader_for_collection.delay(collection.pk)
             messages.success(request, _("Ingestion queued (placeholder)."))
             return redirect(request.path)
 
@@ -187,11 +184,9 @@ def collection_items_list(request, collection_pk):
     active_variable = None
     if active_var_slug:
         active_variable = next((v for v in variable_list if v.slug == active_var_slug), None)
-        # Unrecognised slug — fall back to "All"
         if not active_variable:
             active_var_slug = ""
 
-    # Items queryset
     # Use a Subquery for asset_count rather than annotate(Count(...)).
     # annotate + COUNT triggers GROUP BY which conflicts with TimescaleModel's
     # extra fields (created, modified) on PostgreSQL.
@@ -204,7 +199,6 @@ def collection_items_list(request, collection_pk):
     items = Item.objects.filter(collection=collection).annotate(asset_count=Subquery(asset_count_sq)).order_by("-time")
 
     if active_variable:
-        # Only items that have at least one asset for this variable
         items = items.filter(assets__variable=active_variable).distinct()
 
     try:
@@ -269,7 +263,6 @@ def collection_items_list(request, collection_pk):
 
 
 def _collection_history(request, collection):
-    """Each time new data was published into the collection, and each run it closed or reopened."""
     from georiva.core.models import ProductPublished
     from georiva.events.history import build_history
     from georiva.ingestion.models import RunIngestionClosed, RunIngestionReopened
@@ -317,12 +310,10 @@ def plugin_list(request):
 
 
 def add_data_select(request):
-    """The Add Data front door: route to the setup wizard matching how the data arrives."""
     return render(
         request,
         "core/add_data.html",
         {
-            # Rendered by the slim header via wagtailadmin/generic/base.html.
             "breadcrumbs_items": [
                 {"url": reverse("wagtailadmin_home"), "label": _("Home")},
                 {"url": None, "label": _("Add Data")},

@@ -73,9 +73,6 @@ def _full_session():
     }
 
 
-# Step 1 — Catalog
-
-
 class Step1CatalogTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "a@b.com", "pw")
@@ -137,9 +134,6 @@ class Step1CatalogTests(TestCase):
         )
         self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
         self.assertEqual(self.client.session[SESSION_KEY]["catalog_id"], catalog.pk)
-
-
-# Step 2 — Config name
 
 
 class Step2ConfigNameTests(TestCase):
@@ -334,9 +328,6 @@ class ThinnedTests(SimpleTestCase):
         self.assertTrue(all(n > 1 for n in thinned.shape))
 
 
-# Step 3 — File & variable selection
-
-
 class Step3CombinedTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin3", "c@d.com", "pw")
@@ -459,9 +450,6 @@ class Step3CombinedTests(TestCase):
         response = self.client.get(STEP3_URL)
         self.assertTrue(response.context["show_filename_format"])
         self.assertContains(response, "Valid time format")
-
-
-# Step 4 — Collection setup
 
 
 class Step4CollectionsTests(TestCase):
@@ -667,9 +655,6 @@ class Step4CollectionsTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
-# Step 4 — duplicate source_name validation
-
-
 class Step4WaterFlagTests(TestCase):
     """kg m-2 is mm only of water (ADR 0046 §6): the wizard proposes the flag
     from the file's own names and the operator confirms it."""
@@ -844,9 +829,6 @@ class Step4DuplicateSourceNameTests(TestCase):
         assignments = [_assignment(variable_name="2t", collection_idx=0)]
         response = self._post(collections, assignments)
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
-
-
-# Step 5 — Review
 
 
 class Step5ReviewTests(TestCase):

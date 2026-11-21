@@ -21,7 +21,6 @@ def get_version(version):
 
 
 def get_main_version(version=None, include_patch=True):
-    """Return main version (X.Y[.Z]) from VERSION."""
     version = get_complete_version(version)
     if include_patch:
         parts = 2 if version[2] == 0 else 3
@@ -31,10 +30,6 @@ def get_main_version(version=None, include_patch=True):
 
 
 def get_complete_version(version=None):
-    """
-    Return a tuple of the Wagtail version. If version argument is non-empty,
-    check for correctness of the tuple provided.
-    """
     if version is None:
         from georiva import VERSION as version
     else:
@@ -55,9 +50,6 @@ def get_semver_version(version):
 
 
 def get_main_version_from_string(version_str):
-    """
-    Return the main version (X.Y[.Z]) from a version string.
-    """
     version = version_str.split(".")
     version_release = "final"
 
@@ -75,31 +67,23 @@ def get_main_version_from_string(version_str):
 
 
 def check_version_greater_than_current(version):
-    """
-    Check if the given version is greater than the current version.
-    """
     current_version = get_complete_version()
     current_major, current_minor, current_patch, current_release = current_version[:4]
 
     version = get_main_version_from_string(version)
     major, minor, patch, release = version
 
-    # only check for final releases
     if release != "final":
         return False
 
-    # If the major version is greater than the current major version, return True
     if major > current_major:
         return True
 
-    # If the major version is the same, proceed to check the minor version
     if major == current_major:
-        # If the minor version is greater than the current minor version, return True
         if minor > current_minor:
             return True
 
         if minor == current_minor:
-            # If the major and minor versions are the same, check the patch version
             if patch > current_patch:
                 return True
 

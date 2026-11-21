@@ -37,8 +37,6 @@ class BuildMode(Enum):
 
 @dataclass(frozen=True)
 class SourceRow:
-    """One COG asset feeding the repo: item time, chunk URL, arrival stamp."""
-
     time: datetime
     url: str
     modified: datetime
@@ -46,7 +44,7 @@ class SourceRow:
 
 @dataclass(frozen=True)
 class CommittedState:
-    """What the repo's latest commit says it contains (decision 5)."""
+    """What the repo's latest commit says it contains."""
 
     watermark: datetime
     time_end: datetime

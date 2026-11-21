@@ -1,15 +1,3 @@
-"""
-Management command to consume STAGING bucket events from Redis and register
-StagingItems (store-only path).
-
-MinIO publishes events for the georiva-staging bucket to a SEPARATE Redis list
-(MINIO_STAGING_REDIS_KEY), so the published consumer never sees — or drops —
-them. This command blocks on that list and registers one StagingItem per file.
-
-Usage:
-    python manage.py staging_event_consumer
-"""
-
 import signal
 import threading
 

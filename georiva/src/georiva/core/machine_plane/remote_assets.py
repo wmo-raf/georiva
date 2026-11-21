@@ -123,7 +123,6 @@ def store_entry(href: str, array: str, chunk_locations: dict, allow_http: bool =
 
 
 def _store_value(href: str, array: str, access: StoreAccess) -> str:
-    """A Store asset's value in the hash: its :func:`store_entry` as JSON."""
     return json.dumps(store_entry(href, array, access.chunk_locations, access.allow_http))
 
 
@@ -317,7 +316,6 @@ def publish_asset(asset) -> None:
 
 
 def withdraw_asset(asset) -> None:
-    """Drop one deleted Remote asset's timestep from its Variable's hash."""
     from georiva.core.models import Asset
 
     location = asset.location

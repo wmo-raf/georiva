@@ -24,9 +24,6 @@ class PublishingProgressTests(TestCase):
         self.assertEqual(pub.percentage, 50)
 
 
-# IngestionService.process_file() progress checkpoints
-
-
 class ProcessFileProgressTests(TestCase):
     def setUp(self):
         catalog = Catalog.objects.create(
@@ -121,9 +118,6 @@ class ProcessFileProgressTests(TestCase):
         )
 
 
-# IngestionHandler.process_timestamp() progress checkpoints
-
-
 class ProcessTimestampProgressTests(TestCase):
     def _make_handler(self):
         ctx = MagicMock()
@@ -206,9 +200,6 @@ class ProcessTimestampProgressTests(TestCase):
         state = mock_progress.increment.call_args.kwargs.get("state", "")
         self.assertIn("temperature", state)
         self.assertIn("band missing", state)
-
-
-# A failed variable's reason reaches the failure record
 
 
 class FailedVariableReasonTests(TestCase):

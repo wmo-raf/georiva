@@ -1,6 +1,3 @@
-"""Thin renderers over the coverage service (ADR-0019: monitoring lives
-where the objects live — this page hangs off the collection, not a menu)."""
-
 from django.contrib import messages
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -23,7 +20,6 @@ def _can_queue_rebuild(user) -> bool:
 
 
 def collection_virtual_zarr(request, collection_pk):
-    """The per-collection Virtual Zarr tab: one coverage row per Variable."""
     collection = get_org_object_or_404(
         request,
         Collection.objects.select_related("catalog"),
@@ -50,7 +46,6 @@ def collection_virtual_zarr(request, collection_pk):
 
 
 def variable_virtual_zarr(request, variable_pk):
-    """The per-variable drill-down: what exactly is wrong with this repo."""
     variable = get_org_object_or_404(
         request,
         Variable.objects.select_related("collection", "collection__catalog"),

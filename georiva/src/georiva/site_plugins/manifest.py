@@ -1,5 +1,3 @@
-"""Reading ``plugins.toml`` for the site installer."""
-
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
