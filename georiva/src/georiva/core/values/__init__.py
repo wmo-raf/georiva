@@ -38,6 +38,10 @@ no Variable describes (an :class:`AssetLocation`, a :class:`Stored` key, a bare
 ``in_unit=values.SOURCE_UNIT`` reads any of them as they are held, in their
 source unit. A single read can name a unit of its own —
 ``s.field(asset, in_unit="K")`` — as a recipe's inputs do (ADR 0046 §13).
+
+Which assets it can read: ``values.readable(assets)`` narrows a queryset of
+assets to those a session gives values for — COGs, local or Remote, and Store
+assets. Callers ask it rather than filter on ``format`` (#759).
 """
 
 from georiva.core.unit_utils import ConversionRefused
@@ -50,6 +54,7 @@ from .session import (
     area,
     field,
     point,
+    readable,
     session,
     window,
 )
@@ -73,6 +78,7 @@ __all__ = [
     "conversion_for",
     "field",
     "point",
+    "readable",
     "session",
     "window",
 ]
