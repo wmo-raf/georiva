@@ -302,10 +302,8 @@ def _run_build(
         report.mode = BuildMode.NO_DATA.value
         return report
 
-    # ------------------------------------------------------------------
     # Classify against the repo's committed state (decision 5: the
     # watermark lives in commit metadata, never the Django row)
-    # ------------------------------------------------------------------
     committed = None
     if repo_exists(repo_path):
         repo = open_repo(repo_path)
@@ -482,11 +480,6 @@ def _run_append(repo, builder, plan, committed, variable_name, build_start, meta
     return _Written(snapshot_id=snapshot_id, items_written=len(opened), left_out=committed.left_out)
 
 
-# =============================================================================
-# Sweep task
-# =============================================================================
-
-
 def dispatch_build(manifest_id: int, claimed_by: str = "dispatch", force: bool = False) -> bool:
     """
     Claim a manifest and queue its build; return whether it was queued.
@@ -534,11 +527,6 @@ def sweep_virtual_zarr_pending() -> None:
 
     if dispatched:
         logger.info("sweep_virtual_zarr_pending: dispatched %d build task(s)", dispatched)
-
-
-# =============================================================================
-# Retention task (design decision 4)
-# =============================================================================
 
 
 @app.task(

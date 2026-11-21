@@ -89,7 +89,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     collection = ParentalKey("georivacore.Collection", on_delete=models.CASCADE, related_name="variables")
 
-    # Identity
     slug = models.SlugField(
         max_length=100,
         help_text=(
@@ -117,7 +116,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         ),
     )
 
-    # Transform
     transform_type = models.CharField(
         max_length=30,
         choices=TransformType.choices,
@@ -195,7 +193,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         ),
     )
 
-    # Status
     is_active = models.BooleanField(
         default=True,
         help_text=(
@@ -404,7 +401,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         if style:
             return style.as_weatherlayers_palette()
 
-        # Fallback: grayscale
         return self._generate_grayscale_palette(self.value_min, self.value_max)
 
     @staticmethod

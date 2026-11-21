@@ -141,11 +141,6 @@ def get_landing_stats(context):
     }
 
 
-# -----------------------------------------------------------------------------
-# All collections
-# -----------------------------------------------------------------------------
-
-
 @register.simple_tag(takes_context=True)
 def get_all_collections(context):
     return (
@@ -156,9 +151,7 @@ def get_all_collections(context):
     )
 
 
-# -----------------------------------------------------------------------------
 # Catalog icon — maps file format to Bootstrap Icon class
-# -----------------------------------------------------------------------------
 
 FORMAT_ICONS = {
     "grib2": "bi-wind",
@@ -177,9 +170,7 @@ def get_catalog_icon(file_format):
     return FORMAT_ICONS.get(file_format, "bi-layers")
 
 
-# -----------------------------------------------------------------------------
 # Active collection count for a catalog — used in featured_catalogs.html
-# -----------------------------------------------------------------------------
 
 
 @register.simple_tag

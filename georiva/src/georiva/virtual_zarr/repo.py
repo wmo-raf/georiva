@@ -115,9 +115,7 @@ def repo_exists(repo_path: str) -> bool:
     return icechunk.Repository.exists(_storage(repo_path))
 
 
-# ---------------------------------------------------------------------------
 # Commit metadata — the watermark's source of truth (design decision 5)
-# ---------------------------------------------------------------------------
 
 
 def commit_metadata(

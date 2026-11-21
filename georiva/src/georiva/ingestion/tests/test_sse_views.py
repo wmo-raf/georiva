@@ -10,9 +10,7 @@ from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG
 User = get_user_model()
 
 
-# =============================================================================
 # Cycle 1: Unauthenticated requests are rejected
-# =============================================================================
 
 
 class SSEAuthTests(TestCase):
@@ -24,9 +22,7 @@ class SSEAuthTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
-# =============================================================================
 # Cycle 2: Ingestion snapshot shape (FileIngestion-keyed)
-# =============================================================================
 
 
 class IngestionSnapshotShapeTests(TestCase):
@@ -83,9 +79,7 @@ class IngestionSnapshotShapeTests(TestCase):
         self.assertIn("pending", statuses)
 
 
-# =============================================================================
 # Cycle 3: Authenticated connect delivers snapshot as first SSE message
-# =============================================================================
 
 
 class SSESnapshotOnConnectTests(TestCase):
@@ -133,9 +127,7 @@ class SSESnapshotOnConnectTests(TestCase):
         self.assertIsInstance(events[0]["data"], list)
 
 
-# =============================================================================
 # Cycle 4: Live Redis events are forwarded as typed SSE messages
-# =============================================================================
 
 
 class EventForwardingRuleTests(TestCase):

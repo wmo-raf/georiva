@@ -196,10 +196,6 @@ class SourceSetupService:
                 )
             return products
 
-    # -------------------------------------------------------------------------
-    # Internal helpers
-    # -------------------------------------------------------------------------
-
     @staticmethod
     def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: dict | None = None):
         defaults = {**model_cls.get_wizard_defaults(), **(extra_data or {})}

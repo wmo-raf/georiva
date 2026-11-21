@@ -32,11 +32,6 @@ GEORIVA_REFTIME_PATTERN = re.compile(r"^GR--(\d{8}T\d{4})--(.+)$")
 GEORIVA_REFTIME_FORMAT = "%Y%m%dT%H%M"
 
 
-# =============================================================================
-# Filename operations
-# =============================================================================
-
-
 def has_reference_time(filename: str) -> bool:
     """Check if a filename carries a GR-- reference time prefix."""
     return GEORIVA_REFTIME_PATTERN.match(filename) is not None
@@ -122,11 +117,6 @@ def build_filename(
     utc_time = reference_time.astimezone(pytz.utc)
     ref_str = utc_time.strftime(GEORIVA_REFTIME_FORMAT)
     return f"GR--{ref_str}--{original_filename}"
-
-
-# =============================================================================
-# Full path operations
-# =============================================================================
 
 
 def parse_path(file_path: str) -> dict:

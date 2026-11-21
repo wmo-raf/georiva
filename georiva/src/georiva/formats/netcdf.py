@@ -54,10 +54,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         except Exception:
             return False
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def list_variables(self, file_path: PathLike) -> list[dict]:
         """
         List all data variables in the NetCDF file.
@@ -128,7 +124,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
 
             var = ds[variable_name]
 
-            # Time selection (lazy)
             time_dim = self._time_dim(var)
             if timestamp is not None and time_dim:
                 sel_ts = timestamp
@@ -149,7 +144,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
             crs = self._detect_crs(ds)
             var = self._regular_grid(var, lat_name, lon_name, crs)
 
-            # Orientation check
             y_dim, x_dim = self._spatial_dims(var)
             needs_flip = False
             if y_dim and y_dim in var.coords:
@@ -228,17 +222,9 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                 metadata=var_info.metadata,
             )
 
-    # ------------------------------------------------------------------
-    # Internal: opening files
-    # ------------------------------------------------------------------
-
     def _open(self, file_path: Path) -> xr.Dataset:
         """Open a NetCDF file with lazy loading."""
         return xr.open_dataset(file_path, chunks={}, engine="netcdf4")
-
-    # ------------------------------------------------------------------
-    # Internal: time handling
-    # ------------------------------------------------------------------
 
     _TIME_NAMES = {"time", "valid_time", "t", "datetime", "xtime"}
 
@@ -274,10 +260,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                     pass
 
         return datetime.now(UTC)
-
-    # ------------------------------------------------------------------
-    # Internal: spatial helpers
-    # ------------------------------------------------------------------
 
     _Y_NAMES = {"latitude", "lat", "y"}
     _X_NAMES = {"longitude", "lon", "x"}
@@ -394,10 +376,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         if "spatial_ref" in ds.data_vars:
             return ds["spatial_ref"].attrs.get("crs_wkt", "EPSG:4326")
         return "EPSG:4326"
-
-    # ------------------------------------------------------------------
-    # Internal: data helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _apply_fill_value(data: np.ndarray, var) -> np.ndarray:

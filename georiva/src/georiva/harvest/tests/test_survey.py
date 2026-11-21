@@ -324,8 +324,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         for jargon in (*STORE_JARGON, "STAC", "S3", "COG", "API"):
             self.assertNotIn(jargon, reason if not but else reason.replace(but, ""))
 
-    # Waiting on it.
-
     def test_a_store_that_does_not_answer_in_time_is_a_wait_to_try_again_not_a_verdict(self):
         self.map_shaped()
         self.upstream.store_times_out = True
@@ -351,8 +349,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual(opening[0], 0, "said before the store is opened, not after")
         for text, _opened in said:
             self.assert_plain(text)
-
-    # Accepted.
 
     def test_a_map_shaped_store_whose_codecs_decode_is_accepted(self):
         self.map_shaped()
@@ -609,8 +605,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
 
         self.assertEqual((self.upstream.windows_asked, self.upstream.probed), ([], []))
 
-    # Refused: its shape.
-
     def test_a_series_shaped_store_is_refused_with_its_reason(self):
         self.series_shaped()
 
@@ -659,8 +653,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.map_shaped()
 
         self.assertEqual(self.survey().shape, Shape.MAP_STORE)
-
-    # Refused: what it is packed with.
 
     def test_a_store_naming_an_unknown_codec_is_refused_and_the_codec_is_named(self):
         self.map_shaped(codecs={"wind_u_10m": ("bytes", "acme_wavelet")})

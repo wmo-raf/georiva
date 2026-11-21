@@ -27,7 +27,6 @@ class AbstractCollection(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
 
-    # Spatial extent (auto-updated)
     bounds = ArrayField(
         models.FloatField(),
         size=4,
@@ -54,7 +53,6 @@ class AbstractSpatialItem(models.Model):
         help_text=_("Original source file path"),
     )
 
-    # Spatial metadata
     bounds = ArrayField(
         models.FloatField(),
         size=4,
@@ -68,14 +66,12 @@ class AbstractSpatialItem(models.Model):
         help_text=_("GeoJSON geometry for non-rectangular footprints"),
     )
 
-    # Raster dimensions
     width = models.IntegerField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)
     resolution_x = models.FloatField(null=True, blank=True)
     resolution_y = models.FloatField(null=True, blank=True)
     crs = models.CharField(max_length=50, default="EPSG:4326")
 
-    # Flexible metadata
     properties = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -109,7 +105,6 @@ class AbstractAsset(models.Model):
         JPEG = "jpeg", _("JPEG")
         JSON = "json", _("JSON")
 
-    # File location
     href = models.CharField(
         max_length=500,
         help_text=_("Storage path or URL"),
@@ -120,7 +115,6 @@ class AbstractAsset(models.Model):
         help_text=_("MIME type"),
     )
 
-    # Classification
     roles = ArrayField(
         models.CharField(max_length=20, choices=Role.choices),
         default=list,
@@ -131,7 +125,6 @@ class AbstractAsset(models.Model):
         blank=True,
     )
 
-    # File metadata
     file_size = models.BigIntegerField(null=True, blank=True)
     checksum = models.CharField(max_length=64, blank=True)
 
@@ -146,7 +139,6 @@ class AbstractAsset(models.Model):
     stats_mean = models.FloatField(null=True, blank=True)
     stats_std = models.FloatField(null=True, blank=True)
 
-    # Format-specific fields
     extra_fields = models.JSONField(default=dict, blank=True)
 
     class Meta:

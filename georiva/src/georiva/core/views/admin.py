@@ -171,9 +171,6 @@ def collection_items_list(request, collection_pk):
         pk=collection_pk,
     )
 
-    # ------------------------------------------------------------------
-    # POST actions
-    # ------------------------------------------------------------------
     if request.method == "POST":
         action = request.POST.get("action")
 
@@ -184,14 +181,8 @@ def collection_items_list(request, collection_pk):
             messages.success(request, _("Ingestion queued (placeholder)."))
             return redirect(request.path)
 
-    # ------------------------------------------------------------------
-    # Variables
-    # ------------------------------------------------------------------
     variable_list = list(collection.variables.filter(is_active=True).prefetch_related("styles"))
 
-    # ------------------------------------------------------------------
-    # Active variable tab
-    # ------------------------------------------------------------------
     active_var_slug = request.GET.get("var", "")
     active_variable = None
     if active_var_slug:
@@ -200,12 +191,10 @@ def collection_items_list(request, collection_pk):
         if not active_variable:
             active_var_slug = ""
 
-    # ------------------------------------------------------------------
     # Items queryset
     # Use a Subquery for asset_count rather than annotate(Count(...)).
     # annotate + COUNT triggers GROUP BY which conflicts with TimescaleModel's
     # extra fields (created, modified) on PostgreSQL.
-    # ------------------------------------------------------------------
     from georiva.core.models import Asset
 
     asset_count_sq = (
@@ -218,9 +207,6 @@ def collection_items_list(request, collection_pk):
         # Only items that have at least one asset for this variable
         items = items.filter(assets__variable=active_variable).distinct()
 
-    # ------------------------------------------------------------------
-    # Pagination
-    # ------------------------------------------------------------------
     try:
         page_num = int(request.GET.get("p", 1))
     except ValueError:
@@ -235,12 +221,10 @@ def collection_items_list(request, collection_pk):
 
     elided_page_range = paginator.get_elided_page_range(page_obj.number)
 
-    # ------------------------------------------------------------------
     # Attach ingestion_log to each item on this page.
     # Bulk lookup by source_file (convention: "{bucket}:{file_path}") so
     # every item — including GRIB/NetCDF items that are not the last one
     # written — gets the correct status badge.
-    # ------------------------------------------------------------------
     from django.db.models import F, Value
     from django.db.models.functions import Concat
 
@@ -261,9 +245,6 @@ def collection_items_list(request, collection_pk):
     for item in page_obj.object_list:
         item.ingestion_log = fi_by_source_file.get(item.source_file)
 
-    # ------------------------------------------------------------------
-    # Context
-    # ------------------------------------------------------------------
     context = {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},

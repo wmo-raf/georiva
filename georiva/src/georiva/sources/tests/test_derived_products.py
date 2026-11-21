@@ -255,7 +255,6 @@ class ProvisionDerivedProductsTests(TestCase):
         collection.name = "My Renamed Anomaly"
         collection.save(update_fields=["name"])
 
-        # Re-run the wizard (new config).
         self.service.provision_derived_products(self.feed, [(defn, {"min_years": "50"}, True)])
 
         product.refresh_from_db()

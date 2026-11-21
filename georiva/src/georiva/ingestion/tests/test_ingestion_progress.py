@@ -12,10 +12,6 @@ from georiva.ingestion.progress import PublishingProgress
 from georiva.ingestion.service import IngestionService
 from georiva.organisations.testing import make_organisation
 
-# =============================================================================
-# PublishingProgress unit tests
-# =============================================================================
-
 
 class PublishingProgressTests(TestCase):
     def test_is_progress_subclass(self):
@@ -28,9 +24,7 @@ class PublishingProgressTests(TestCase):
         self.assertEqual(pub.percentage, 50)
 
 
-# =============================================================================
 # IngestionService.process_file() progress checkpoints
-# =============================================================================
 
 
 class ProcessFileProgressTests(TestCase):
@@ -127,9 +121,7 @@ class ProcessFileProgressTests(TestCase):
         )
 
 
-# =============================================================================
 # IngestionHandler.process_timestamp() progress checkpoints
-# =============================================================================
 
 
 class ProcessTimestampProgressTests(TestCase):
@@ -216,9 +208,7 @@ class ProcessTimestampProgressTests(TestCase):
         self.assertIn("band missing", state)
 
 
-# =============================================================================
 # A failed variable's reason reaches the failure record
-# =============================================================================
 
 
 class FailedVariableReasonTests(TestCase):

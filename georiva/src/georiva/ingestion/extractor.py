@@ -118,10 +118,6 @@ class VariableExtractor:
             **kwargs,
         )
 
-    # =========================================================================
-    # Source Helpers
-    # =========================================================================
-
     def _get_primary_source(self, sources: list) -> "StructValue":
         """
         Get the primary source block value.
@@ -199,10 +195,6 @@ class VariableExtractor:
 
         return np.asarray(extracted.data, dtype=np.float32)
 
-    # =========================================================================
-    # Transform Implementations
-    # =========================================================================
-
     def _extract_passthrough(self, sources, file_path, timestamp, window) -> np.ndarray:
         """Direct read from primary source with no computation."""
         primary = self._get_primary_source(sources)
@@ -241,10 +233,6 @@ class VariableExtractor:
         direction = wind_from_direction(u, v)
         del u, v
         return direction
-
-    # =========================================================================
-    # Statistics
-    # =========================================================================
 
     def compute_stats(
         self,
@@ -289,7 +277,6 @@ class VariableExtractor:
                 except (NotImplementedError, ValueError):
                     pass  # fall through to full extraction
 
-            # Full extraction path
             data = self.extract(variable, file_path, timestamp, window=window_tuple)
 
             return {

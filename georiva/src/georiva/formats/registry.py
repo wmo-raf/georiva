@@ -39,7 +39,6 @@ class FormatRegistry:
         """
         cls._plugins[plugin_class.name] = plugin_class
 
-        # Register extensions
         for ext in plugin_class.extensions:
             ext_lower = ext.lower().lstrip(".")
             cls._extension_map[ext_lower] = plugin_class.name
@@ -71,7 +70,6 @@ class FormatRegistry:
 
         First tries by extension, then asks each plugin if it can handle the file.
         """
-        # Try by extension first
 
         file_path = Path(file_path)
 
@@ -79,7 +77,6 @@ class FormatRegistry:
         if plugin and plugin.can_handle(file_path):
             return plugin
 
-        # Fall back to asking each plugin
         for plugin_class in cls._plugins.values():
             plugin = plugin_class()
             if plugin.can_handle(file_path):

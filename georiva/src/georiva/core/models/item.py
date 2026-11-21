@@ -77,10 +77,6 @@ class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedMo
     def __str__(self):
         return f"{self.collection.slug} @ {self.time}"
 
-    # =========================================================================
-    # Time Properties
-    # =========================================================================
-
     @property
     def valid_time(self):
         """Alias for TimescaleModel's time field."""
@@ -104,10 +100,6 @@ class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedMo
     def is_forecast(self):
         """True if this is forecast data (has reference_time)."""
         return self.reference_time is not None
-
-    # =========================================================================
-    # Asset Access Helpers
-    # =========================================================================
 
     def get_asset(self, variable_slug: str) -> "Asset":
         """Get asset for a specific variable."""
@@ -169,7 +161,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
 
     ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
 
-    # Parent Item
     item = ParentalKey(
         Item,
         on_delete=models.CASCADE,
@@ -209,9 +200,7 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
     def __str__(self):
         return f"{self.item} / {self.variable.slug} - {self.format}"
 
-    # =========================================================================
     # Properties from Variable (convenience accessors)
-    # =========================================================================
 
     @property
     def name(self):
@@ -220,10 +209,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
     @property
     def unit(self):
         return self.variable.unit.symbol if self.variable.unit else ""
-
-    # =========================================================================
-    # Format checks
-    # =========================================================================
 
     @property
     def is_visual(self) -> bool:
@@ -247,10 +232,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
         Its queryset half is ``storage.asset_location.drawable_q``."""
         return self.location.is_drawable
 
-    # =========================================================================
-    # Extra fields accessors
-    # =========================================================================
-
     @property
     def overviews(self):
         """For COG: overview levels."""
@@ -266,9 +247,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
         """Nodata value."""
         return self.extra_fields.get("nodata")
 
-    # =========================================================================
-    # URL Generation
-    # =========================================================================
     @property
     def location(self):
         """Where this asset's bytes are: our bucket, or upstream (ADR 0043 §1)."""
@@ -287,11 +265,6 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
         from georiva.core.machine_plane import titiler_preview_url
 
         return titiler_preview_url(self.item, self.variable)
-
-
-# =============================================================================
-# Custom Manager
-# =============================================================================
 
 
 class ItemManager(models.Manager):

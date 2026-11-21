@@ -1087,10 +1087,6 @@ def data_feed_add_select(request):
     return render(request, "georivasources/data_feed_add_select.html", context)
 
 
-# =============================================================================
-# Setup Wizard (3 steps)
-# =============================================================================
-
 _WIZARD_SESSION_KEY = "georiva_setup_wizard_{model_name}"
 
 
@@ -1762,7 +1758,6 @@ def wizard_provision(request, model_name):
         messages.warning(request, _("Please complete all steps first."))
         return redirect("setup_wizard_select")
 
-    # Resolve or create Catalog
     catalog_mode = session_data.get("catalog_mode", "select")
     if catalog_mode == "create":
         catalog, _created = Catalog.objects.get_or_create(

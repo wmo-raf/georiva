@@ -285,7 +285,6 @@ class ReadinessJoinTests(_MultiInputFixture):
     def test_missing_required_input_is_not_ready(self):
         self._add_precip()
         self._add_soil()
-        # veg (required) absent
 
         result = self._run()
 

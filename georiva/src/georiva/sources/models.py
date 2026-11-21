@@ -84,7 +84,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         help_text=_("Minutes between runs (global default for all collections)"),
     )
 
-    # Run tracking
     last_run_at = models.DateTimeField(null=True, blank=True)
     last_run_status = models.CharField(
         max_length=20,
@@ -101,7 +100,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     last_run_message = models.TextField(blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
 
-    # Statistics
     total_runs = models.PositiveIntegerField(default=0)
     total_files_fetched = models.PositiveIntegerField(default=0)
     total_bytes_transferred = models.BigIntegerField(default=0)
@@ -227,10 +225,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         """
         return []
 
-    # =========================================================================
-    # Collection link helpers
-    # =========================================================================
-
     @classmethod
     def get_collection_link_model(cls):
         """Return the DataFeedCollectionLink subclass for this feed type. Default: base class."""
@@ -247,10 +241,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         see it as an editable field.
         """
         return {}
-
-    # =========================================================================
-    # Factory Methods
-    # =========================================================================
 
     def get_data_source(self, collection=None):
         """Instantiate configured data source, merging per-collection link config."""
@@ -279,10 +269,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             collection=collection,
             data_feed=self,
         )
-
-    # =========================================================================
-    # Run Management
-    # =========================================================================
 
     def _update_run_stats(self, result, collection, started_at=None):
         """Update feed-level and collection-link scheduling stats after a run.
@@ -510,10 +496,6 @@ class DataFeedCollectionLink(PolymorphicModel):
     def __str__(self):
         return f"{self.data_feed_id} → {self.collection_id}"
 
-    # -------------------------------------------------------------------------
-    # UI / form discovery
-    # -------------------------------------------------------------------------
-
     @classmethod
     def get_panels(cls) -> list:
         """
@@ -722,11 +704,6 @@ class DerivedProductOutput(models.Model):
 
     def __str__(self):
         return f"{self.product_id}:{self.role} → {self.collection_id}"
-
-
-# ---------------------------------------------------------------------------
-# Acquisition tracking models
-# ---------------------------------------------------------------------------
 
 
 class FetchRun(models.Model):
@@ -1141,11 +1118,6 @@ class FetchedFile(models.Model):
         self.failure_scope = scope or FailureScope.TRANSIENT
         self.completed_at = timezone.now()
         self.save(update_fields=["status", "error", "failure_scope", "completed_at"])
-
-
-# ---------------------------------------------------------------------------
-# Task-ferry Job model
-# ---------------------------------------------------------------------------
 
 
 class FetchRunStarted(DomainEvent):

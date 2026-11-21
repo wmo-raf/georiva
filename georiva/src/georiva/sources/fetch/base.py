@@ -16,18 +16,15 @@ class FileRequest:
     represents what we WANT to fetch - it may or may not exist yet.
     """
 
-    # Identity
     identifier: str  # Unique ID for this request
     filename: str  # Desired filename
 
-    # Temporal context
     valid_time: datetime | None = None  # What time the data represents
     reference_time: datetime | None = None  # Forecast run time (if applicable)
 
     # Source-specific parameters (e.g., CDS request params, URL template vars)
     params: dict = field(default_factory=dict)
 
-    # Metadata
     expected_size: int | None = None
     expected_format: str | None = None  # 'grib', 'netcdf', etc.
     variables: list[str] = field(default_factory=list)  # Variables in this file
@@ -106,7 +103,6 @@ class FetchResult:
     bytes_transferred: int = 0
     duration_seconds: float = 0.0
 
-    # For async/queued fetches
     job_id: str | None = None
     status: str = "pending"  # pending, queued, downloading, complete, failed
 

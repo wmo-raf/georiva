@@ -5,11 +5,6 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Result Container
-# =============================================================================
-
-
 @dataclass
 class IngestionResult:
     """

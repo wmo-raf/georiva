@@ -64,10 +64,6 @@ class TimeseriesService:
     def __init__(self, *, internal: bool = True) -> None:
         self._internal = internal
 
-    # -------------------------------------------------------------------------
-    # Public API
-    # -------------------------------------------------------------------------
-
     def point(
         self,
         variable: Variable,
@@ -191,10 +187,6 @@ class TimeseriesService:
             from_store=from_store,
             from_remote=lambda session, locations: session.area_series(locations, geometry, aggregation),
         )
-
-    # -------------------------------------------------------------------------
-    # Private helpers
-    # -------------------------------------------------------------------------
 
     def _series(self, variable, time_start, time_end, *, name, from_store, from_remote) -> pd.Series:
         """One series over the range: the virtual store's timesteps and the
@@ -387,7 +379,6 @@ class TimeseriesService:
         # Drop NaN — nodata values from masked pixels or missing timesteps
         series = series.dropna()
 
-        # Ensure the index is tz-naive UTC
         if hasattr(series.index, "tz") and series.index.tz is not None:
             series.index = series.index.tz_convert("UTC").tz_localize(None)
 

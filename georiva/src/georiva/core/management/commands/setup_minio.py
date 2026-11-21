@@ -20,7 +20,6 @@ from botocore.exceptions import ClientError
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-# Bucket-specific configuration
 BUCKET_CONFIGS = {
     "incoming": {
         "public_read": False,
@@ -143,10 +142,6 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("\nMinIO setup complete."))
 
-    # =========================================================================
-    # Bucket creation
-    # =========================================================================
-
     def _ensure_bucket(self, s3, bucket_name: str, dry_run: bool):
         try:
             s3.head_bucket(Bucket=bucket_name)
@@ -160,10 +155,6 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.SUCCESS(f"  + Created bucket: {bucket_name}"))
                 except Exception as e:
                     self.stdout.write(self.style.ERROR(f"  ✗ Failed to create {bucket_name}: {e}"))
-
-    # =========================================================================
-    # Bucket policies
-    # =========================================================================
 
     def _set_public_read_policy(self, s3, bucket_name: str, dry_run: bool):
         """Allow public read access (for assets bucket)."""
@@ -203,16 +194,11 @@ class Command(BaseCommand):
             s3.delete_bucket_policy(Bucket=bucket_name)
             self.stdout.write("  ✓ Private policy set (no public access)")
         except ClientError as e:
-            # No policy to delete is fine
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code in ("NoSuchBucketPolicy", "404"):
                 self.stdout.write("  ✓ Already private")
             else:
                 self.stdout.write(self.style.ERROR(f"  ✗ Failed to set private policy: {e}"))
-
-    # =========================================================================
-    # Lifecycle
-    # =========================================================================
 
     def _set_expiry_rule(self, s3, bucket_name: str, days: int, dry_run: bool):
         """Expire every object in the bucket ``days`` days after it was written."""
@@ -237,10 +223,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"  ✓ {days}-day expiry rule set"))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"  ✗ Failed to set expiry rule: {e}"))
-
-    # =========================================================================
-    # Redis notifications
-    # =========================================================================
 
     def _set_redis_notification(self, s3, bucket_name: str, redis_arn: str, dry_run: bool):
         """

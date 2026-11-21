@@ -75,7 +75,6 @@ class Catalog(Indexed, TimeStampedModel):
     slug = models.SlugField(max_length=100)
     description = models.TextField(blank=True)
 
-    # Provider information
     provider = models.CharField(max_length=255, blank=True)
     provider_url = models.URLField(blank=True)
     license = models.CharField(max_length=255, blank=True)
@@ -84,7 +83,6 @@ class Catalog(Indexed, TimeStampedModel):
         "georivacore.Topic", blank=True, related_name="catalogs", help_text="Thematic topics for this catalog."
     )
 
-    # Source file format
     class FileFormat(models.TextChoices):
         GRIB = "grib2", "GRIB/GRIB2"
         NETCDF = "netcdf", "NetCDF"

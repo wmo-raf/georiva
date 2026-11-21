@@ -41,10 +41,6 @@ Usage
 from django.core.management.base import BaseCommand
 from django.db import connection
 
-# ---------------------------------------------------------------------------
-# SQL
-# ---------------------------------------------------------------------------
-
 # Table names derived from Django app labels:
 #   georiva_analysis_zonal_stats  → georiva_analysis_zonal_stats_boundaryzonalstats
 #   adminboundarymanager          → adminboundarymanager_adminboundary

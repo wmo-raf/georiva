@@ -72,17 +72,14 @@ class BoundaryClipper:
         src_west, src_south, src_east, src_north = src_bounds
         clip_west, clip_south, clip_east, clip_north = self.bbox
 
-        # Check intersection
         if clip_east <= src_west or clip_west >= src_east or clip_north <= src_south or clip_south >= src_north:
             raise ValueError(f"Boundary bbox {self.bbox} does not intersect source bounds {src_bounds}")
 
-        # Compute intersection
         int_west = max(src_west, clip_west)
         int_south = max(src_south, clip_south)
         int_east = min(src_east, clip_east)
         int_north = min(src_north, clip_north)
 
-        # Pixel resolution
         res_x = (src_east - src_west) / src_width
         res_y = (src_north - src_south) / src_height
 
@@ -92,7 +89,6 @@ class BoundaryClipper:
         win_width = int(np.ceil((int_east - int_west) / res_x))
         win_height = int(np.ceil((int_north - int_south) / res_y))
 
-        # Clamp to source dimensions
         x_off = max(0, min(x_off, src_width - 1))
         y_off = max(0, min(y_off, src_height - 1))
         win_width = min(win_width, src_width - x_off)

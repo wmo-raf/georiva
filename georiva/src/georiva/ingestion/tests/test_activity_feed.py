@@ -8,9 +8,7 @@ User = get_user_model()
 ACTIVITY_URL = "/admin/ingestion/activity/"
 
 
-# =============================================================================
 # Cycle 1: Activity page renders for authenticated users
-# =============================================================================
 
 
 class ActivityPageRenderTests(TestCase):
@@ -37,13 +35,9 @@ class ActivityPageRenderTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
-# =============================================================================
 # Cycle 3: Dashboard panel has "View all" link to the activity feed
-# =============================================================================
 
-# =============================================================================
 # Cycle 1 (issue #55): Cancel wiring present in activity feed template
-# =============================================================================
 
 
 class ActivityFeedLiveArrivalTests(TestCase):

@@ -60,10 +60,6 @@ class Command(BaseCommand):
                 # Dispatching anyway would put two writers on one Icechunk repo.
                 self.stdout.write(self.style.WARNING(f"  [async] {label} → already building elsewhere, skipped"))
 
-    # -------------------------------------------------------------------------
-    # Helpers
-    # -------------------------------------------------------------------------
-
     def _resolve_manifests(self, options) -> list:
         """
         Resolve the list of VirtualZarrManifest records to build.

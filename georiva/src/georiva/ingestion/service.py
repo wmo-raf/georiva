@@ -25,11 +25,6 @@ from georiva.ingestion.result import IngestionResult
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Ingestion Service
-# =============================================================================
-
-
 class IngestionService:
     """
     Orchestrates the full ingestion pipeline for geospatial data files.
@@ -77,10 +72,6 @@ class IngestionService:
     def __init__(self):
         self.logger = logging.getLogger("georiva.ingestion")
         self._source_file_manager = SourceFileManager()
-
-    # =========================================================================
-    # Main Entry Point
-    # =========================================================================
 
     def process_file(
         self,
@@ -296,10 +287,6 @@ class IngestionService:
             result.add_error(str(e))
 
         return result
-
-    # =========================================================================
-    # Collection Resolution
-    # =========================================================================
 
     def _record_published(self, collection, source_file: str, valid_times: list) -> None:
         """One ``ProductPublished`` per file-and-collection — never one per Item.

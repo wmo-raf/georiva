@@ -60,10 +60,6 @@ from .serializers import (
     EDRCollectionSummarySerializer,
 )
 
-# =============================================================================
-# Helpers
-# =============================================================================
-
 
 def _org_collections(request: Request, queryset=None):
     """The collections this organisation will serve to this caller."""
@@ -117,21 +113,11 @@ def resolve_edr_collection(request, collection_id: str, queryset=None):
     )
 
 
-# =============================================================================
-# Base view
-# =============================================================================
-
-
 class EDRAPIView(APIView):
     """Base view for all EDR endpoints."""
 
     renderer_classes = [EDRJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
-
-
-# =============================================================================
-# Landing Page
-# =============================================================================
 
 
 class EDRLandingPageView(EDRAPIView):
@@ -188,11 +174,6 @@ class EDRLandingPageView(EDRAPIView):
         )
 
 
-# =============================================================================
-# Conformance
-# =============================================================================
-
-
 class EDRConformanceView(EDRAPIView):
     """
     EDR Conformance Declaration.
@@ -207,12 +188,9 @@ class EDRConformanceView(EDRAPIView):
         return Response(
             {
                 "conformsTo": [
-                    # OGC API Common
                     "http://www.opengis.net/spec/ogcapi-common-1/1.0/conf/core",
                     "http://www.opengis.net/spec/ogcapi-common-2/1.0/conf/collections",
-                    # OGC API EDR core
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/core",
-                    # Encoding
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/oas30",
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/html",
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/geojson",
@@ -221,11 +199,6 @@ class EDRConformanceView(EDRAPIView):
                 ]
             }
         )
-
-
-# =============================================================================
-# Collection List
-# =============================================================================
 
 
 class EDRCollectionListView(EDRAPIView):
@@ -287,11 +260,6 @@ class EDRCollectionListView(EDRAPIView):
                 "collections": collections_data,
             }
         )
-
-
-# =============================================================================
-# Collection Detail
-# =============================================================================
 
 
 class EDRCollectionDetailView(EDRAPIView):

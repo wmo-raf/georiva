@@ -47,11 +47,6 @@ def _t(hours: int) -> datetime:
     return T0 + timedelta(hours=hours)
 
 
-# ---------------------------------------------------------------------------
-# Pure functions
-# ---------------------------------------------------------------------------
-
-
 class AsUtcTests(SimpleTestCase):
     def test_naive_is_stamped_utc(self):
         naive = datetime(2026, 1, 1, 12)
@@ -118,9 +113,7 @@ class LockExpiryTests(SimpleTestCase):
         self.assertTrue(is_lock_expired(None, _t(0), self.TIMEOUT))
 
 
-# ---------------------------------------------------------------------------
 # Service over DB fixtures (no repo behind the manifests)
-# ---------------------------------------------------------------------------
 
 
 class CoverageServiceTests(TestCase):
@@ -291,9 +284,7 @@ class CoverageServiceTests(TestCase):
         self.assertEqual(report.error, "boom")
 
 
-# ---------------------------------------------------------------------------
 # Service over a real Icechunk repo (existing integration-test pattern)
-# ---------------------------------------------------------------------------
 
 
 def _purge_prefix(bucket, prefix: str) -> None:

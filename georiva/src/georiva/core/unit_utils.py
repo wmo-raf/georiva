@@ -65,9 +65,6 @@ def setup_registry(reg):
     # lets the geopotential context below bridge it to [length].
     reg.define("[specific_enthalpy] = [energy] / [mass]")
 
-    # custom contexts
-
-    # Define a context for precipitation
     precipitation = pint.Context("precipitation")
 
     # Precipitation amount

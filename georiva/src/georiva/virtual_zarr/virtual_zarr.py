@@ -32,11 +32,6 @@ from virtualizarr.manifests import ManifestStore
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class MinioStoreConfig:
     """
@@ -92,10 +87,6 @@ class MinioStoreConfig:
             public_endpoint=getattr(settings, "MINIO_PUBLIC_ENDPOINT", ""),
         )
 
-    # ------------------------------------------------------------------
-    # Store factories
-    # ------------------------------------------------------------------
-
     def _build_obstore(self) -> S3Store:
         """
         obstore S3Store for the assets bucket, pointed at the internal endpoint.
@@ -143,10 +134,6 @@ class MinioStoreConfig:
         prefix = f"{self.internal_endpoint}/{self.bucket}/"
         return ObjectStoreRegistry({prefix: store})
 
-    # ------------------------------------------------------------------
-    # URL helpers
-    # ------------------------------------------------------------------
-
     def url_for(self, path: str) -> str:
         """
         Full internal URL for a bucket-relative asset path.
@@ -171,11 +158,6 @@ class MinioStoreConfig:
             if internal_url.startswith(prefix):
                 return f"s3://{self.bucket}/{internal_url[len(prefix) :]}"
         return internal_url  # already s3:// or unrecognised
-
-
-# ---------------------------------------------------------------------------
-# VirtualTIFF parser
-# ---------------------------------------------------------------------------
 
 
 class MinioVirtualTIFF(VirtualTIFF):
@@ -213,11 +195,6 @@ class MinioVirtualTIFF(VirtualTIFF):
             ifd_layout=self.ifd_layout,
         )
         return ManifestStore(registry=registry, group=manifest_group)
-
-
-# ---------------------------------------------------------------------------
-# Builder
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -304,10 +281,6 @@ class VirtualZarrBuilder:
         logger.info("Rewriting chunk URLs to s3:// URIs…")
         return combined.vz.rename_paths(self.config.s3_uri_for)
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _assign_geo_coords(ds: xr.Dataset) -> xr.Dataset:
         """
@@ -351,11 +324,6 @@ class VirtualZarrBuilder:
         lats = origin_y - scale_y * (np.arange(ds.sizes["y"]) + 0.5)
 
         return ds.assign_coords(lat=("y", lats), lon=("x", lons)).swap_dims({"y": "lat", "x": "lon"})
-
-
-# ---------------------------------------------------------------------------
-# Icechunk writers
-# ---------------------------------------------------------------------------
 
 
 def write_rebuild(

@@ -193,9 +193,7 @@ def register_staging_file(bucket: str, key: str):
     return item
 
 
-# =============================================================================
 # Redis event loop (mirror of consumer.py, separate list)
-# =============================================================================
 
 
 def _handle_event(ev: dict):

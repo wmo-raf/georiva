@@ -35,11 +35,6 @@ from django.core.files.storage import storages
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Bucket Registry
-# =============================================================================
-
-
 class BucketType:
     """Known bucket types in GeoRiva."""
 
@@ -71,11 +66,6 @@ def get_bucket_config() -> dict[str, str]:
             BucketType.ASSETS: "georiva-assets",
         },
     )
-
-
-# =============================================================================
-# Single Bucket Handle
-# =============================================================================
 
 
 class Bucket:
@@ -382,11 +372,6 @@ class Bucket:
         saved = self.copy(src_path, dest_path)
         self.delete(src_path)
         return saved
-
-
-# =============================================================================
-# Multi-Bucket Storage Manager
-# =============================================================================
 
 
 class StorageManager:
@@ -706,9 +691,5 @@ class StorageManager:
 
         return created
 
-
-# =============================================================================
-# Singleton
-# =============================================================================
 
 storage = StorageManager()

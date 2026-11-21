@@ -121,10 +121,6 @@ def sweep_unprocessed(sync: bool = False):
 
     logger.info("Starting sweep...")
 
-    # -----------------------------------------------------------------
-    # Phase 1: Reset stale locks
-    # -----------------------------------------------------------------
-
     stale_count = FileIngestion.reset_stale_locks(sweep="unprocessed")
     if stale_count:
         logger.warning("Reset %d stale locks", stale_count)
@@ -135,9 +131,7 @@ def sweep_unprocessed(sync: bool = False):
     if exhausted_count:
         logger.warning("Failed %d pending files with no retries left", exhausted_count)
 
-    # -----------------------------------------------------------------
     # Phase 2: Scan buckets for untracked files
-    # -----------------------------------------------------------------
 
     new_files = 0
     redispatched = 0
@@ -225,10 +219,6 @@ def sweep_unprocessed(sync: bool = False):
     if redispatched:
         logger.info("Re-dispatched %d stale pending files", redispatched)
 
-    # -----------------------------------------------------------------
-    # Phase 3: Retry failed files
-    # -----------------------------------------------------------------
-
     retryable = FileIngestion.get_retryable(limit=50)
     retry_count = 0
 
@@ -249,10 +239,6 @@ def sweep_unprocessed(sync: bool = False):
             why="failed_file_retried",
         )
         retry_count += 1
-
-    # -----------------------------------------------------------------
-    # Summary
-    # -----------------------------------------------------------------
 
     # Log permanently failed files for visibility
     permanently_failed = FileIngestion.get_permanently_failed().count()

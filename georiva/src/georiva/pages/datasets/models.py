@@ -142,7 +142,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         /datasets/<catalog_slug>/<collection_slug>/items/<item_id>/  → item detail
     """
 
-    # Operator-configurable fields
     intro_text = models.TextField(
         blank=True, verbose_name="Introduction", help_text="Optional intro shown above the dataset listing."
     )
@@ -165,10 +164,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
     class Meta:
         verbose_name = "Datasets Index Page"
-
-    # -------------------------------------------------------------------------
-    # Routes
-    # -------------------------------------------------------------------------
 
     @path("")
     def index(self, request):
@@ -395,7 +390,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         # control never flashes in before JS can hide it.
         boundary_levels_active = boundary_levels_by_variable.get(active_var_slug, [])
 
-        # Previous / next item by time
         prev_item = (
             Item.objects.filter(collection=collection, time__lt=item.time).order_by("-time").values("pk").first()
         )
@@ -471,10 +465,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             },
         )
 
-    # -------------------------------------------------------------------------
-    # Helpers
-    # -------------------------------------------------------------------------
-
     def _apply_date_filter(self, qs, date_str: str):
         """
         Apply a date filter to an Item queryset, interpreting date_str
@@ -496,7 +486,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             parsed = parse_date(parts[0] + "-" + parts[1] + "-" + parts[2])
             if parsed:
                 if "T" in date_str:
-                    # Has hour component
                     hour = int(date_str.split("T")[1].split(":")[0])
                     return qs.filter(time__date=parsed, time__hour=hour)
                 return qs.filter(time__date=parsed)
@@ -504,14 +493,12 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             pass
         return qs
 
-    # -------------------------------------------------------------------------
     # Tenant rows
     #
     # A portal is one organisation's, and so is everything it lists. Each route
     # above reaches its catalogs, collections and items through one of these
     # four, which take the organisation from the request Host — never from a
     # path segment, because there is none (#271).
-    # -------------------------------------------------------------------------
 
     def _org_catalog(self, request, catalog_slug):
         """An active catalog of this host's organisation, or 404."""

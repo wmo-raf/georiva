@@ -15,10 +15,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
     bulk_create(update_conflicts=True).
     """
 
-    # -------------------------------------------------------------------------
-    # Identity
-    # -------------------------------------------------------------------------
-
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
     item = models.ForeignKey(
@@ -41,10 +37,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
         help_text=_("Administrative boundary region."),
     )
 
-    # -------------------------------------------------------------------------
-    # Statistics
-    # -------------------------------------------------------------------------
-
     mean = models.FloatField(null=True, blank=True)
     min = models.FloatField(null=True, blank=True)
     max = models.FloatField(null=True, blank=True)
@@ -55,10 +47,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
         blank=True,
         help_text=_("Number of valid (non-NaN) pixels within the boundary."),
     )
-
-    # -------------------------------------------------------------------------
-    # Meta
-    # -------------------------------------------------------------------------
 
     class Meta:
         # TimescaleModel provides the 'time' field (= valid_time).
@@ -88,10 +76,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
 
     def __str__(self):
         return f"{self.variable.slug} @ {self.boundary} [{self.time}]"
-
-    # -------------------------------------------------------------------------
-    # Convenience accessors
-    # -------------------------------------------------------------------------
 
     @property
     def valid_time(self):

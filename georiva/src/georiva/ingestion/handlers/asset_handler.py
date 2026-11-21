@@ -48,10 +48,6 @@ class AssetHandler:
         self.extractor = extractor
         self.materializer = AssetMaterializer(writer)
 
-    # =========================================================================
-    # Public entry point
-    # =========================================================================
-
     def process_variable(
         self,
         *,
@@ -101,10 +97,6 @@ class AssetHandler:
         del final_data
 
         return assets
-
-    # =========================================================================
-    # Extraction
-    # =========================================================================
 
     def _extract(
         self,

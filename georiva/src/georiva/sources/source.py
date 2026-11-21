@@ -107,9 +107,7 @@ class BaseDataSource(ABC):
         """Default implementation - subclasses should override for accuracy."""
         return None
 
-    # =========================================================================
     # Time-window helpers (optional, generic)
-    # =========================================================================
 
     def get_default_start_date(self, *, collection=None) -> datetime:
         """
@@ -192,10 +190,6 @@ class BaseDataSource(ABC):
             **kwargs,
         )
 
-    # =========================================================================
-    # Utility Methods
-    # =========================================================================
-
     def _round_to_cycle(self, dt: datetime, cycle_hours: list[int]) -> datetime:
         """
         Round datetime to nearest forecast cycle.
@@ -210,7 +204,6 @@ class BaseDataSource(ABC):
             if dt.hour >= cycle:
                 return dt.replace(hour=cycle, minute=0, second=0, microsecond=0)
 
-        # Previous day's last cycle
         prev_day = dt - timedelta(days=1)
         return prev_day.replace(hour=cycle_hours[-1], minute=0, second=0, microsecond=0)
 

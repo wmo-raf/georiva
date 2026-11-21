@@ -168,7 +168,6 @@ class ItemLineageTests(TestCase):
         t = datetime(2020, 1, 1, tzinfo=UTC)
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
 
-        # The produced (derived) item.
         out_col = Collection.objects.create(catalog=catalog, slug="anomaly", name="Anomaly")
         derived = Item.objects.create(collection=out_col, time=t)
 

@@ -11,11 +11,6 @@ from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Collection list API
-# =============================================================================
-
-
 def ingestion_dashboard_api(request):
     """
     Returns collections grouped under their parent Catalog with health roll-ups.
@@ -119,11 +114,6 @@ def ingestion_dashboard_api(request):
 
     result.sort(key=lambda c: c["slug"])
     return JsonResponse({"catalogs": result})
-
-
-# =============================================================================
-# Drawer detail APIs
-# =============================================================================
 
 
 def collection_ingestion_jobs_api(request, collection_id):
@@ -333,11 +323,6 @@ def upload_session_status_api(request, session_id):
             ],
         }
     )
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
 
 
 def _build_sparkline(logs, today):

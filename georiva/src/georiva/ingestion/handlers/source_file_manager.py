@@ -27,10 +27,6 @@ class SourceFileManager:
     Handles the lifecycle of the raw source file during ingestion.
     """
 
-    # =========================================================================
-    # Download
-    # =========================================================================
-
     @contextmanager
     def download_to_temp(self, origin: "Bucket", file_path: str):
         """
@@ -50,10 +46,6 @@ class SourceFileManager:
                     dst.write(chunk)
 
             yield tmp_path
-
-    # =========================================================================
-    # Archive
-    # =========================================================================
 
     def archive(self, origin: "Bucket", file_path: str) -> str | None:
         """
@@ -79,10 +71,6 @@ class SourceFileManager:
                 e,
             )
             return None
-
-    # =========================================================================
-    # Cleanup
-    # =========================================================================
 
     def cleanup(
         self,

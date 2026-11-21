@@ -92,10 +92,6 @@ logger = logging.getLogger(__name__)
 #: The branch a store is read at: its tip, not a snapshot a harvest saw (ADR 0044 §10).
 BRANCH = "main"
 
-# ---------------------------------------------------------------------------
-# What a request asks for
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class StoreSlice:
@@ -162,9 +158,7 @@ def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...], bool]
     return store, array, pins, allow_http
 
 
-# ---------------------------------------------------------------------------
 # What goes wrong, in words a map user can be shown
-# ---------------------------------------------------------------------------
 
 
 class StoreError(Exception):
@@ -219,10 +213,6 @@ NOT_PINNED = (
     "Re-check the upstream to confirm where its data lives."
 )
 
-
-# ---------------------------------------------------------------------------
-# Where a store's data may be read
-# ---------------------------------------------------------------------------
 
 #: An S3 bucket's name, and a Google bucket's (dots and underscores allowed).
 #: Spelled to match ``georiva/harvest/asset_hosts.py``.
@@ -311,11 +301,6 @@ def open_repository(repository_storage, chunk_locations: tuple[tuple[str, str], 
         config=config,
         authorize_virtual_chunk_access=icechunk.containers_credentials(credentials) if credentials else None,
     )
-
-
-# ---------------------------------------------------------------------------
-# A store kept open
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -516,9 +501,7 @@ def _georeferenced(values: np.ndarray, latitudes: np.ndarray, longitudes: np.nda
     )
 
 
-# ---------------------------------------------------------------------------
 # One open store per process, per (address, pins)
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -855,11 +838,6 @@ def _bounded(call: Callable):
         raise StoreUnreachable("The upstream store could not be opened or read.") from exc
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-
-
-# ---------------------------------------------------------------------------
-# What the COG reader is handed
-# ---------------------------------------------------------------------------
 
 
 @contextlib.contextmanager

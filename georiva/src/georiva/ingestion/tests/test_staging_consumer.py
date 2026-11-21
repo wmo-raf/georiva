@@ -77,7 +77,6 @@ class RegisterStagingFileTests(TestCase):
         self.assertEqual(StagingItem.objects.count(), 1)
         self.assertEqual(StagingAsset.objects.count(), 1)
 
-        # Range extent, no single datetime.
         self.assertIsNone(item.datetime)
         self.assertEqual(item.start_datetime, datetime(2020, 1, 1, tzinfo=UTC))
         self.assertEqual(item.end_datetime, datetime(2020, 1, 5, tzinfo=UTC))

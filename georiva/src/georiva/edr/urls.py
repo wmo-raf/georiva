@@ -11,7 +11,6 @@ urlpatterns = [
     # Landing page + conformance
     path("", views.EDRLandingPageView.as_view(), name="landing"),
     path("conformance/", views.EDRConformanceView.as_view(), name="conformance"),
-    # Collections
     path("collections/", views.EDRCollectionListView.as_view(), name="collection-list"),
     # ``{catalog}.{collection}``, or a bare slug that redirects to it (ADR 0045).
     path("collections/<edrid:collection_id>/", views.EDRCollectionDetailView.as_view(), name="collection-detail"),

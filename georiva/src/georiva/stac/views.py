@@ -62,10 +62,6 @@ from .serializers import (
     STACVariableCollectionSerializer,
 )
 
-# =============================================================================
-# Helpers
-# =============================================================================
-
 
 def _org_catalogs(request: Request):
     """The active catalogs of the organisation this host serves."""
@@ -108,11 +104,6 @@ def _resolve_variable(request: Request, catalog_slug: str, collection_slug: str,
     )
 
 
-# =============================================================================
-# Base Views
-# =============================================================================
-
-
 class STACAPIView(APIView):
     """Base view for STAC catalog/collection endpoints."""
 
@@ -125,11 +116,6 @@ class STACGeoAPIView(APIView):
 
     renderer_classes = [GeoJSONRenderer, STACJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
-
-
-# =============================================================================
-# Root & Conformance
-# =============================================================================
 
 
 class STACLandingPageView(STACAPIView):
@@ -184,11 +170,6 @@ class STACConformanceView(STACAPIView):
         )
 
 
-# =============================================================================
-# Catalog Views
-# =============================================================================
-
-
 class STACCatalogListView(STACAPIView):
     """
     List all Catalogs as top-level STAC Collections.
@@ -229,11 +210,6 @@ class STACCatalogDetailView(STACAPIView):
         data = STACCatalogAsCollectionSerializer(catalog, context={"request": request}).data
 
         return Response(data)
-
-
-# =============================================================================
-# Variable Collection Views
-# =============================================================================
 
 
 class STACCollectionListView(STACAPIView):
@@ -294,11 +270,6 @@ class STACCollectionDetailView(STACAPIView):
         return Response(data)
 
 
-# =============================================================================
-# Item Views
-# =============================================================================
-
-
 class STACItemsView(STACGeoAPIView):
     """
     List Items in a variable collection.
@@ -328,7 +299,6 @@ class STACItemsView(STACGeoAPIView):
         variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
         collection = variable.collection
 
-        # Parse query parameters
         limit = self._parse_limit(request)
         datetime_param = request.query_params.get("datetime")
         bbox_param = request.query_params.get("bbox")
@@ -354,7 +324,6 @@ class STACItemsView(STACGeoAPIView):
 
                 queryset = queryset.filter(time__gte=timezone.now())
 
-        # Apply filters
         if datetime_param:
             queryset = self._apply_datetime_filter(queryset, datetime_param)
 
@@ -364,12 +333,10 @@ class STACItemsView(STACGeoAPIView):
         if token:
             queryset = self._apply_pagination_token(queryset, token)
 
-        # Order and execute
         queryset = queryset.order_by("-time")
         total_count = queryset.count()
         items = list(queryset[: limit + 1])
 
-        # Determine pagination
         has_next = len(items) > limit
         if has_next:
             items = items[:limit]
@@ -535,11 +502,6 @@ class STACItemDetailView(STACGeoAPIView):
         return None
 
 
-# =============================================================================
-# Search
-# =============================================================================
-
-
 class STACSearchView(STACGeoAPIView):
     """
     STAC Item Search
@@ -589,32 +551,25 @@ class STACSearchView(STACGeoAPIView):
         collections_param = params.get("collections", [])
         queryset, variable = self._apply_collections_filter(request, queryset, collections_param)
 
-        # Filter by item IDs
         queryset = self._apply_ids_filter(queryset, params.get("ids", []))
 
-        # Filter by datetime
         datetime_param = params.get("datetime")
         if datetime_param:
             queryset = self._apply_datetime_filter(queryset, datetime_param)
 
-        # Filter by bbox
         queryset = self._apply_bbox_filter(queryset, params.get("bbox"))
 
-        # Filter by intersects geometry
         queryset = self._apply_intersects_filter(queryset, params.get("intersects"))
 
-        # Pagination
         limit = self._parse_limit(params.get("limit", self.DEFAULT_LIMIT))
         token = params.get("token")
         if token:
             queryset = self._apply_pagination_token(queryset, token)
 
-        # Order and execute
         queryset = queryset.order_by("-time")
         total_count = queryset.count()
         items = list(queryset[: limit + 1])
 
-        # Determine pagination
         has_next = len(items) > limit
         if has_next:
             items = items[:limit]
@@ -622,7 +577,6 @@ class STACSearchView(STACGeoAPIView):
         else:
             next_token = None
 
-        # Serialize
         data = STACItemCollectionSerializer(
             {
                 "items": items,
@@ -821,11 +775,6 @@ class STACSearchView(STACGeoAPIView):
             return None
 
 
-# =============================================================================
-# Queryables
-# =============================================================================
-
-
 class STACQueryablesView(STACAPIView):
     """
     STAC Queryables (for CQL2 filter extension)
@@ -889,7 +838,6 @@ class STACQueryablesView(STACAPIView):
             variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
             collection = variable.collection
 
-            # Variable info
             queryables["properties"]["georiva:variable"] = {
                 "title": variable.name,
                 "type": "string",
@@ -902,7 +850,6 @@ class STACQueryablesView(STACAPIView):
                     "const": variable.units,
                 }
 
-            # Forecast queryables
             has_forecasts = collection.items.filter(reference_time__isnull=False).exists()
 
             if has_forecasts:

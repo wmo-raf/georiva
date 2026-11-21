@@ -73,9 +73,7 @@ def _full_session():
     }
 
 
-# =============================================================================
 # Step 1 — Catalog
-# =============================================================================
 
 
 class Step1CatalogTests(TestCase):
@@ -141,9 +139,7 @@ class Step1CatalogTests(TestCase):
         self.assertEqual(self.client.session[SESSION_KEY]["catalog_id"], catalog.pk)
 
 
-# =============================================================================
 # Step 2 — Config name
-# =============================================================================
 
 
 class Step2ConfigNameTests(TestCase):
@@ -216,11 +212,6 @@ class Step2ConfigNameTests(TestCase):
         response = self.client.post(STEP2_URL, {"feed_name": "Surface variables"})
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("feed_name", self.client.session[SESSION_KEY])
-
-
-# =============================================================================
-# Upload sample AJAX endpoint
-# =============================================================================
 
 
 class UploadSampleAjaxTests(TestCase):
@@ -343,9 +334,7 @@ class ThinnedTests(SimpleTestCase):
         self.assertTrue(all(n > 1 for n in thinned.shape))
 
 
-# =============================================================================
 # Step 3 — File & variable selection
-# =============================================================================
 
 
 class Step3CombinedTests(TestCase):
@@ -472,9 +461,7 @@ class Step3CombinedTests(TestCase):
         self.assertContains(response, "Valid time format")
 
 
-# =============================================================================
 # Step 4 — Collection setup
-# =============================================================================
 
 
 class Step4CollectionsTests(TestCase):
@@ -680,9 +667,7 @@ class Step4CollectionsTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
-# =============================================================================
 # Step 4 — duplicate source_name validation
-# =============================================================================
 
 
 class Step4WaterFlagTests(TestCase):
@@ -861,9 +846,7 @@ class Step4DuplicateSourceNameTests(TestCase):
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
 
 
-# =============================================================================
 # Step 5 — Review
-# =============================================================================
 
 
 class Step5ReviewTests(TestCase):
@@ -883,11 +866,6 @@ class Step5ReviewTests(TestCase):
     def test_step5_without_assignments_redirects_to_step4(self):
         _seed_session(self.client, {"catalog_mode": "create", "feed_name": "X"})
         self.assertRedirects(self.client.get(STEP5_URL), STEP4_URL, fetch_redirect_response=False)
-
-
-# =============================================================================
-# Provision
-# =============================================================================
 
 
 class ProvisionTests(TestCase):

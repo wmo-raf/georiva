@@ -14,14 +14,12 @@ BASE_DIR = os.path.dirname(PROJECT_DIR)
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 env = environ.Env(
-    # set casting, default value
     DEBUG=(bool, False),
 )
 
 dev_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(BASE_DIR))), ".env")
 
 if os.path.isfile(dev_env_path):
-    # reading .env file
     environ.Env.read_env(dev_env_path)
 
 DEBUG = env("DEBUG", False)
@@ -62,9 +60,7 @@ INSTALLED_APPS = [
     "wagtailiconchooser",
     "wagtailfontawesomesvg",
     "wagtail_color_panel",
-    # third-party utilities
     "task_ferry",
-    # georiva
     "georiva.events",
     "georiva.core",
     "georiva.staging",
@@ -83,7 +79,6 @@ INSTALLED_APPS = [
     "georiva.harvest",
     "georiva.organisations",
     "georiva.accounts",
-    # pages
     "georiva.pages.home",
     "georiva.pages.datasets",
 ]
@@ -276,13 +271,10 @@ STATIC_URL = "/static/"
 MEDIA_ROOT = env.str("MEDIA_ROOT", default=os.path.join(BASE_DIR, "media"))
 MEDIA_URL = "/media/"
 
-# Storage backend selection
 GEORIVA_STORAGE_BACKEND = env("GEORIVA_STORAGE_BACKEND", default="local")
 
-# Local storage settings
 GEORIVA_STORAGE_ROOT = env("GEORIVA_STORAGE_ROOT", default=os.path.join(BASE_DIR, "georiva_data"))
 
-# S3/MinIO settings
 AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default=None)
 AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default=None)
 AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="georiva")
@@ -305,9 +297,6 @@ MINIO_STAGING_REDIS_KEY = env("MINIO_STAGING_REDIS_KEY", default="georiva:minio:
 MINIO_PUBLIC_ENDPOINT = env.str("MINIO_PUBLIC_ENDPOINT", default="localhost:9000")
 MINIO_PUBLIC_ENDPOINT_USE_SSL = env.bool("MINIO_PUBLIC_ENDPOINT_USE_SSL", default=False)
 
-# =============================================================================
-# Bucket Configuration
-# =============================================================================
 
 GEORIVA_BUCKETS = {
     "incoming": {
@@ -349,17 +338,11 @@ GEORIVA_BUCKETS = {
 GEORIVA_ASSETS_BUCKET = GEORIVA_BUCKETS.get("assets", {}).get("name")
 GEORIVA_PUBLICATIONS_BUCKET = GEORIVA_BUCKETS.get("publications", {}).get("name")
 
-# =============================================================================
-# Zarr Analysis-Ready Store
-# =============================================================================
 
 GEORIVA_ZARR_BUCKET = GEORIVA_BUCKETS.get("zarr", {}).get("name")
 GEORIVA_ZARR_TIME_CHUNK = env.int("GEORIVA_ZARR_TIME_CHUNK", default=1)
 GEORIVA_ZARR_ENABLED = env.bool("GEORIVA_ZARR_ENABLED", default=True)
 
-# =============================================================================
-# Storage Backends
-# =============================================================================
 
 # Common S3/MinIO options (shared across all buckets)
 _S3_OPTIONS = {
@@ -480,7 +463,6 @@ if "." in GEORIVA_BASE_DOMAIN:
 # middleware rather than by the URL resolver.
 CSRF_FAILURE_VIEW = "georiva.config.views.csrf_failure"
 
-# Wagtail settings
 
 WAGTAIL_SITE_NAME = "GeoRiva"
 
@@ -584,9 +566,6 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
 
 CELERY_BEAT_SCHEDULE = {}
 
-# ---------------------------------------------------------------------------
-# django-task-ferry
-# ---------------------------------------------------------------------------
 TASK_FERRY = {
     "EXECUTOR": "task_ferry.executors.celery.CeleryExecutor",
     "CELERY_QUEUE": "georiva-ingestion",

@@ -43,10 +43,6 @@ from .ids import edr_collection_href, edr_collection_id
 DEFAULT_RUNS_LIMIT = 5
 MAX_RUNS_LIMIT = 20
 
-# =============================================================================
-# Base URL mixin
-# =============================================================================
-
 
 class EDRBaseURLMixin:
     """Provide EDR base URL from request context."""
@@ -62,9 +58,7 @@ class EDRBaseURLMixin:
         return get_base_stac_api_url(request)
 
 
-# =============================================================================
 # Parameter serializer — one Variable → one parameter_names entry
-# =============================================================================
 
 
 class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
@@ -134,11 +128,6 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
         data["x-georiva"] = x_georiva
 
         return data
-
-
-# =============================================================================
-# Collection detail serializer
-# =============================================================================
 
 
 class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
@@ -428,9 +417,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         return {k: v for k, v in meta.items() if v is not None}
 
 
-# =============================================================================
 # Collection list serializer — summary shape for /collections/
-# =============================================================================
 
 
 class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):

@@ -493,7 +493,6 @@ class ForwardInvalidationTests(TestCase):
         t = datetime(2020, 1, 1, tzinfo=UTC)
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
 
-        # A: staging input.
         scol = StagingCollection.objects.create(catalog=catalog, slug="a", name="a")
         self.A = StagingItem.objects.create(collection=scol, datetime=t)
 
@@ -521,7 +520,6 @@ class ForwardInvalidationTests(TestCase):
             input_hash="hb",
         )
 
-        # C: product derived from B.
         ccol = Collection.objects.create(catalog=catalog, slug="cc", name="cc")
         self.C = Item.objects.create(collection=ccol, time=t)
         DerivationRun.objects.create(

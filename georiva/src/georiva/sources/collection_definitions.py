@@ -149,9 +149,7 @@ class CollectionDefinition:
         raise KeyError(f"No variable '{key}' in CollectionDefinition '{self.key}'")
 
 
-# =============================================================================
 # Developer-friendly dict → CollectionDefinition parser
-# =============================================================================
 
 
 def parse_collection_defs(raw: dict) -> list["CollectionDefinition"]:
@@ -232,7 +230,6 @@ def _parse_variable(v: dict) -> CollectionVariable:
             palette_stops=_freeze_palette_stops(v.get("palette_stops")),
         )
 
-    # Vector-derived variable
     components = {k: _parse_source_key(s) for k, s in v["components"].items()}
     return CollectionVariable(
         key=key,

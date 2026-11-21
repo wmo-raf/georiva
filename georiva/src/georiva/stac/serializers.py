@@ -138,18 +138,12 @@ class STACAssetSerializer(serializers.Serializer):
                 }
             data["raster:bands"] = [band]
 
-        # File extension
         if instance.file_size:
             data["file:size"] = instance.file_size
         if instance.checksum:
             data["file:checksum"] = instance.checksum
 
         return {k: v for k, v in data.items() if v is not None}
-
-
-# =============================================================================
-# Item Serializer
-# =============================================================================
 
 
 class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
@@ -249,13 +243,11 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
             "published": created,
         }
 
-        # Forecast extension
         if obj.is_forecast:
             props["forecast:reference_datetime"] = obj.reference_time.isoformat()
             if obj.horizon_hours is not None:
                 props["forecast:horizon"] = f"PT{int(obj.horizon_hours)}H"
 
-        # Projection extension
         if obj.width and obj.height:
             props["proj:shape"] = [obj.height, obj.width]
         if obj.crs:
@@ -271,7 +263,6 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
             if renders:
                 props["renders"] = renders
 
-        # Merge custom properties
         if obj.properties:
             props.update(obj.properties)
 
@@ -430,11 +421,6 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         return f"{collection_slug}/{variable_slug}"
 
 
-# =============================================================================
-# Variable as STAC Collection
-# =============================================================================
-
-
 class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin):
     """
     Serializes a GeoRiva (Collection, Variable) pair as a STAC Collection.
@@ -538,7 +524,6 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         if collection.crs:
             summaries["proj:epsg"] = [self._parse_epsg(collection.crs)]
 
-        # Forecast metadata
         if collection.is_forecast:
             summaries["forecast:is_forecast"] = True
             if collection.forecast_horizon_hours:
@@ -558,7 +543,6 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         """Declare expected assets for this variable."""
         item_assets = {}
 
-        # Data asset (COG)
         item_assets[f"{obj.slug}_cog"] = {
             "title": f"{obj.name} (COG)",
             "description": f"{obj.name} Cloud-Optimized GeoTIFF",
@@ -629,9 +613,7 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         return keywords
 
 
-# =============================================================================
 # Catalog as STAC Collection (top-level)
-# =============================================================================
 
 
 class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin):
@@ -750,7 +732,6 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
                     }
                 )
 
-        # Provider/license link
         if obj.provider_url:
             links.append(
                 {
@@ -780,11 +761,6 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
         if obj.provider:
             keywords.append(obj.provider.lower().replace(" ", "-"))
         return keywords
-
-
-# =============================================================================
-# Root Catalog
-# =============================================================================
 
 
 class STACRootCatalogSerializer(serializers.Serializer, STACBaseURLMixin):
@@ -842,7 +818,6 @@ class STACRootCatalogSerializer(serializers.Serializer, STACBaseURLMixin):
             },
         ]
 
-        # Child links to each Catalog
         for catalog in obj.get("catalogs", []):
             if catalog.is_active:
                 links.append(
@@ -855,11 +830,6 @@ class STACRootCatalogSerializer(serializers.Serializer, STACBaseURLMixin):
                 )
 
         return links
-
-
-# =============================================================================
-# List serializers
-# =============================================================================
 
 
 class STACCatalogListSerializer(serializers.Serializer, STACBaseURLMixin):
@@ -907,11 +877,6 @@ class STACVariableCollectionListSerializer(serializers.Serializer, STACBaseURLMi
         ]
 
 
-# =============================================================================
-# Item Collection (FeatureCollection)
-# =============================================================================
-
-
 class STACItemCollectionSerializer(serializers.Serializer):
     """
     Serializes a list of Items to STAC ItemCollection (FeatureCollection).
@@ -947,7 +912,6 @@ class STACItemCollectionSerializer(serializers.Serializer):
                 }
             )
 
-            # Collection link
             variable = self.context.get("variable")
             collection = obj.get("collection")
             if collection and variable:
@@ -961,7 +925,6 @@ class STACItemCollectionSerializer(serializers.Serializer):
                     }
                 )
 
-            # Pagination
             if obj.get("next_token"):
                 next_url = self._build_pagination_url(current_url, obj["next_token"])
                 links.append(

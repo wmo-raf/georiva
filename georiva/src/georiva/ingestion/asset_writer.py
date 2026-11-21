@@ -40,10 +40,6 @@ class AssetWriter:
         self.bucket = bucket
         self.logger = logging.getLogger("georiva.writer")
 
-    # =========================================================================
-    # Public Interface
-    # =========================================================================
-
     def write_cog(
         self,
         data: np.ndarray,
@@ -153,10 +149,6 @@ class AssetWriter:
                 Path(tmp_path).unlink(missing_ok=True)
             if cog_path:
                 Path(cog_path).unlink(missing_ok=True)
-
-    # =========================================================================
-    # Private Helpers
-    # =========================================================================
 
     def _blocksize(self, width: int, height: int) -> int:
         """

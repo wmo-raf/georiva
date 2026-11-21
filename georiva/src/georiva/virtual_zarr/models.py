@@ -45,9 +45,7 @@ class VirtualZarrManifest(TimeStampedModel):
     #: already claimed, and NO_DATA is terminal until data arrives.
     BUILDABLE_STATUSES = (Status.PENDING, Status.STALE, Status.FAILED)
 
-    # -------------------------------------------------------------------------
     # Identity — one manifest per variable
-    # -------------------------------------------------------------------------
 
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
@@ -56,10 +54,6 @@ class VirtualZarrManifest(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="virtual_zarr_manifest",
     )
-
-    # -------------------------------------------------------------------------
-    # Storage
-    # -------------------------------------------------------------------------
 
     repo_path = models.CharField(
         max_length=500,
@@ -70,9 +64,7 @@ class VirtualZarrManifest(TimeStampedModel):
         ),
     )
 
-    # -------------------------------------------------------------------------
     # Coverage (derived cache — populated on successful build)
-    # -------------------------------------------------------------------------
 
     time_start = models.DateTimeField(null=True, blank=True, editable=False)
     time_end = models.DateTimeField(null=True, blank=True, editable=False)
@@ -100,10 +92,8 @@ class VirtualZarrManifest(TimeStampedModel):
         ),
     )
 
-    # -------------------------------------------------------------------------
     # Repo storage stats (derived cache — refreshed after builds and GC runs,
     # never computed during a page view)
-    # -------------------------------------------------------------------------
 
     repo_size_bytes = models.BigIntegerField(
         default=0,
@@ -115,10 +105,6 @@ class VirtualZarrManifest(TimeStampedModel):
         editable=False,
         help_text="Object count under the repo prefix at the last refresh.",
     )
-
-    # -------------------------------------------------------------------------
-    # State machine
-    # -------------------------------------------------------------------------
 
     status = models.CharField(
         max_length=20,
@@ -145,18 +131,10 @@ class VirtualZarrManifest(TimeStampedModel):
         col = self.variable.collection
         return f"{col.catalog.slug}/{col.slug}/{self.variable.slug} [{self.status}]"
 
-    # -------------------------------------------------------------------------
-    # Collection convenience property
-    # -------------------------------------------------------------------------
-
     @property
     def collection(self):
         """Convenience accessor — always self.variable.collection."""
         return self.variable.collection
-
-    # -------------------------------------------------------------------------
-    # Derived path
-    # -------------------------------------------------------------------------
 
     @classmethod
     def make_repo_path(cls, variable: "Variable") -> str:
@@ -173,10 +151,6 @@ class VirtualZarrManifest(TimeStampedModel):
         if self.repo_path:
             return self.repo_path
         return self.make_repo_path(self.variable)
-
-    # -------------------------------------------------------------------------
-    # State transitions
-    # -------------------------------------------------------------------------
 
     def refresh_build_lock(self, worker_id: str = "") -> None:
         """
@@ -289,10 +263,6 @@ class VirtualZarrManifest(TimeStampedModel):
         )
         return bool(updated)
 
-    # -------------------------------------------------------------------------
-    # Bulk helpers
-    # -------------------------------------------------------------------------
-
     @classmethod
     def get_buildable(cls):
         """
@@ -366,10 +336,6 @@ class VirtualZarrManifest(TimeStampedModel):
             locked_by="",
         )
 
-    # -------------------------------------------------------------------------
-    # Repo stats refresh
-    # -------------------------------------------------------------------------
-
     def refresh_repo_stats(self) -> None:
         """
         Recount the repo prefix on the zarr bucket and persist the size and
@@ -388,10 +354,6 @@ class VirtualZarrManifest(TimeStampedModel):
             repo_size_bytes=sum(e.get("size") or 0 for e in entries),
             repo_object_count=len(entries),
         )
-
-    # -------------------------------------------------------------------------
-    # Dataset access
-    # -------------------------------------------------------------------------
 
     # `chunks={}` is not the mutable-default bug B006 catches: it is never
     # mutated, only handed to xr.open_zarr, and to xarray `{}` and `None` mean

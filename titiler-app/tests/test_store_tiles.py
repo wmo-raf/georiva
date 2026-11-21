@@ -1165,9 +1165,7 @@ class TestDecodedFieldsAreKept:
         assert store_reader._fields.capacity == config.STORE_FIELD_CACHE_BYTES
 
 
-# ---------------------------------------------------------------------------
 # Each worker opens the published stores at start (#684)
-# ---------------------------------------------------------------------------
 
 #: Another Variable of the same collection, read from the same store.
 OTHER_HASH = f"georiva:remote-assets:{ORG}:{CATALOG}:{COLLECTION}:wind"
@@ -1335,9 +1333,7 @@ class TestStoresAreWarmedAtStart:
         assert warm.STORE_WARM is config.STORE_WARM
 
 
-# ---------------------------------------------------------------------------
 # A running worker follows what Django publishes (#706)
-# ---------------------------------------------------------------------------
 
 
 def eventually(holds, timeout: float = 10.0) -> None:

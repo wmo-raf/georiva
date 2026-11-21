@@ -28,11 +28,6 @@ logger = logging.getLogger(__name__)
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 
-# ---------------------------------------------------------------------------
-# Django fallback
-# ---------------------------------------------------------------------------
-
-
 def _fetch_config_from_django(
     org: str,
     catalog: str,
@@ -103,11 +98,6 @@ def django_client() -> httpx.AsyncClient:
         base_url=DJANGO_BASE_URL,
         timeout=httpx.Timeout(30.0, connect=5.0),
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def build_cog_url(
@@ -254,11 +244,6 @@ def parse_iso_datetime(value: str, param_name: str) -> datetime:
             status_code=400,
             detail=f"Invalid {param_name} — expected ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)",
         ) from None
-
-
-# ---------------------------------------------------------------------------
-# FastAPI dependencies
-# ---------------------------------------------------------------------------
 
 
 def SemanticTileConfig(

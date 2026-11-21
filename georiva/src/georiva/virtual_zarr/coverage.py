@@ -29,11 +29,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Pure functions
-# ---------------------------------------------------------------------------
-
-
 def as_utc(ts: datetime) -> datetime:
     """
     Normalise to tz-aware UTC.
@@ -95,11 +90,6 @@ def is_lock_expired(
     if locked_at is None:
         return True
     return as_utc(locked_at) < as_utc(now) - timeout
-
-
-# ---------------------------------------------------------------------------
-# The structured report
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -177,11 +167,6 @@ class VariableCoverage:
         if hours:
             return f"{hours}h {minutes:02d}m"
         return f"{minutes}m"
-
-
-# ---------------------------------------------------------------------------
-# The service
-# ---------------------------------------------------------------------------
 
 
 def collection_coverage(collection, *, now=None) -> list[VariableCoverage]:
@@ -295,9 +280,7 @@ def _one_variable(variable, manifest, catalog: _CatalogState, now) -> VariableCo
     )
 
 
-# ---------------------------------------------------------------------------
 # The per-variable detail (drill-down page / future status API)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)

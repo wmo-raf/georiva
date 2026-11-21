@@ -19,9 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Core computation — Django adapter over geoprocessing.zonal
-# ---------------------------------------------------------------------------
 
 
 def compute_stats_from_array(
@@ -87,11 +85,6 @@ def read_band(location: AssetLocation) -> Band:
 def compute_stats_from_band(band: Band, boundaries: list[AdminBoundary]) -> list[dict]:
     """Zonal statistics of every boundary against one band read by :func:`read_band`."""
     return compute_stats_from_array(band.data, band.transform, band.crs, boundaries)
-
-
-# ---------------------------------------------------------------------------
-# Persistence
-# ---------------------------------------------------------------------------
 
 
 def persist_stats(
@@ -170,11 +163,6 @@ def persist_stats(
     return len(objects)
 
 
-# ---------------------------------------------------------------------------
-# Boundary resolution
-# ---------------------------------------------------------------------------
-
-
 def get_boundaries_for_collection(collection) -> dict[int, list[AdminBoundary]]:
     """
     Return AdminBoundary objects grouped by level for a collection.
@@ -190,9 +178,7 @@ def get_boundaries_for_collection(collection) -> dict[int, list[AdminBoundary]]:
     return {level: list(AdminBoundary.objects.filter(level=level)) for level in levels}
 
 
-# ---------------------------------------------------------------------------
 # Retention — one rule, read by the pruner and the recovery sweep
-# ---------------------------------------------------------------------------
 
 
 def retained_items_q(collection, now, latest_reference_time, prefix: str = "item__"):
@@ -218,9 +204,7 @@ def retained_items_q(collection, now, latest_reference_time, prefix: str = "item
     return kept or None
 
 
-# ---------------------------------------------------------------------------
 # Availability — what a viewer can actually be shown
-# ---------------------------------------------------------------------------
 
 
 def available_levels_by_variable(item, collection) -> dict[str, list[int]]:

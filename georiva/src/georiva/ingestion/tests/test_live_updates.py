@@ -32,9 +32,7 @@ class IngestionEventsTestCase(TestCase):
         return json.loads(msg["data"])
 
 
-# =============================================================================
 # Cycle 1: publish_update() delivers to the channel
-# =============================================================================
 
 
 class PublishEventTests(IngestionEventsTestCase):
@@ -49,9 +47,7 @@ class PublishEventTests(IngestionEventsTestCase):
         self.assertEqual(event["value"], 42)
 
 
-# =============================================================================
 # Cycle 2: FileIngestion creation publishes file_ingestion.created
-# =============================================================================
 
 
 class FileIngestionCreatedEventTests(IngestionEventsTestCase):
@@ -78,9 +74,7 @@ class FileIngestionCreatedEventTests(IngestionEventsTestCase):
         self.assertNotEqual(event["type"], "file_ingestion.status_changed")
 
 
-# =============================================================================
 # Cycle 3: FileIngestion status changes publish file_ingestion.status_changed
-# =============================================================================
 
 
 class FileIngestionStatusEventTests(IngestionEventsTestCase):
@@ -100,9 +94,7 @@ class FileIngestionStatusEventTests(IngestionEventsTestCase):
         self.assertEqual(event["status"], "processing")
 
 
-# =============================================================================
 # Cycle 4: FileIngestionJob state changes publish an event
-# =============================================================================
 
 
 class FileIngestionJobStateEventTests(IngestionEventsTestCase):
@@ -138,9 +130,7 @@ class FileIngestionJobStateEventTests(IngestionEventsTestCase):
         self.assertIsNone(event)
 
 
-# =============================================================================
 # Cycle 5: PublishingProgress._publish() emits a job.progress_updated event
-# =============================================================================
 
 
 class PublishingProgressEventTests(IngestionEventsTestCase):

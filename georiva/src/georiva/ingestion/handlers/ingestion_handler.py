@@ -43,10 +43,6 @@ class IngestionHandler:
         self.item_handler = ItemHandler()
         self.asset_handler = AssetHandler(ctx.writer, ctx.extractor)
 
-    # =========================================================================
-    # Public entry point
-    # =========================================================================
-
     def process_timestamp(
         self,
         *,

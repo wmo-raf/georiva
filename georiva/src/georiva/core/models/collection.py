@@ -212,13 +212,11 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
     # Identity (slug, name, description), spatial extent (bounds, crs)
     # are inherited from AbstractCollection.
 
-    # Temporal extent (auto-updated)
     time_resolution = models.CharField(max_length=20, choices=TimeResolution.choices, blank=True)
     time_start = models.DateTimeField(null=True, blank=True, editable=False)
     time_end = models.DateTimeField(null=True, blank=True, editable=False)
     item_count = models.PositiveIntegerField(default=0, editable=False)
 
-    # Status
     is_active = models.BooleanField(default=True)
     visibility = models.CharField(
         max_length=10,

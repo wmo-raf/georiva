@@ -420,7 +420,6 @@ class UpsertVariableStyleSeedTests(TestCase):
                 {"value": 500.0, "color": "#ffffff"},
             ],
         )
-        # Range is derived from the stops.
         self.assertEqual(variable.value_min, 0.0)
         self.assertEqual(variable.value_max, 500.0)
 

@@ -77,10 +77,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         except Exception:
             return False
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def list_variables(self, file_path: PathLike) -> list[dict]:
         """
         List all variables in the GRIB file.
@@ -176,7 +172,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         try:
             var = ds[xr_name]
 
-            # Time selection
             time_dim = self._time_dim(var)
             if timestamp is not None and time_dim:
                 var = var.sel({time_dim: timestamp}, method="nearest")
@@ -191,7 +186,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             if lon_axis is not None:
                 var = recentre_longitudes(var, lon_axis)
 
-            # Orientation check
             y_dim, x_dim = self._spatial_dims(var)
             needs_flip = False
             if y_dim and y_dim in var.coords:
@@ -231,10 +225,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             )
         finally:
             ds.close()
-
-    # ------------------------------------------------------------------
-    # Internal: opening GRIB files
-    # ------------------------------------------------------------------
 
     def _open(self, file_path: Path, filter_by_keys: dict) -> xr.Dataset | None:
         """Open a single GRIB view. Returns None if no data matches."""
@@ -277,10 +267,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             for var_name, var in ds.data_vars.items():
                 yield ds, var_name, var
 
-    # ------------------------------------------------------------------
-    # Internal: variable lookup
-    # ------------------------------------------------------------------
-
     def _find_xr_name(self, ds: xr.Dataset, short_name: str) -> str | None:
         """Find the xarray variable name matching a GRIB shortName."""
         for var_name in ds.data_vars:
@@ -309,10 +295,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             if np.isscalar(val) or val.ndim == 0:
                 return int(val)
         return None
-
-    # ------------------------------------------------------------------
-    # Internal: time handling
-    # ------------------------------------------------------------------
 
     _TIME_DIMS = ("time", "valid_time", "forecast_time")
 
@@ -347,10 +329,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 if isinstance(t, np.datetime64):
                     return pd.Timestamp(t).to_pydatetime()
         return datetime.now(UTC)
-
-    # ------------------------------------------------------------------
-    # Internal: spatial helpers
-    # ------------------------------------------------------------------
 
     _Y_NAMES = {"latitude", "lat", "y"}
     _X_NAMES = {"longitude", "lon", "x"}

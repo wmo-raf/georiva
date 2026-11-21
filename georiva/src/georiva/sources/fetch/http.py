@@ -70,7 +70,6 @@ class HTTPFetchStrategy(BaseFetchStrategy):
         """Create HTTP session with retry configuration."""
         self._session = requests.Session()
 
-        # Configure retries
         retry_strategy = Retry(
             total=self.max_retries,
             backoff_factor=self.backoff_factor,
@@ -90,7 +89,6 @@ class HTTPFetchStrategy(BaseFetchStrategy):
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
 
-        # Set headers
         self._session.headers.update(
             {
                 "User-Agent": self.user_agent,
@@ -98,7 +96,6 @@ class HTTPFetchStrategy(BaseFetchStrategy):
             }
         )
 
-        # SSL verification
         self._session.verify = self.verify_ssl
 
         self.logger.debug("HTTP session initialized")
@@ -127,27 +124,22 @@ class HTTPFetchStrategy(BaseFetchStrategy):
         deadline = self.clock() + self.max_file_seconds
 
         try:
-            # Ensure parent directory exists
             local_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Make request with streaming
             response = self._session.get(
                 url,
                 stream=True,
                 timeout=(self.connect_timeout, self.timeout),
             )
 
-            # Handle HTTP errors
             if response.status_code >= 400:
                 scope, retry_after = _classify_status(response)
                 result.retry_after = retry_after
                 return result.fail(f"HTTP {response.status_code} ({response.reason}): {url}", scope)
 
-            # Get expected size
             content_length = response.headers.get("content-length")
             expected_size = int(content_length) if content_length else None
 
-            # Download with progress
             bytes_downloaded = 0
             last_log_time = start_time
 
@@ -170,16 +162,13 @@ class HTTPFetchStrategy(BaseFetchStrategy):
                             )
                             last_log_time = now
 
-            # Verify size
             if expected_size and bytes_downloaded != expected_size:
-                # Clean up partial file
                 if local_path.exists():
                     local_path.unlink()
                 return result.fail(
                     f"Size mismatch: expected {expected_size}, got {bytes_downloaded}", FailureScope.FILE
                 )
 
-            # Success
             result.success = True
             result.status = "complete"
             result.bytes_transferred = bytes_downloaded

@@ -121,10 +121,6 @@ class PublicationSink:
     def __repr__(self):
         return f"PublicationSink({self.root!r})"
 
-    # =========================================================================
-    # Identity
-    # =========================================================================
-
     @property
     def bucket(self):
         """Lazy so constructing a sink needs no storage backend."""
@@ -177,10 +173,6 @@ class PublicationSink:
     def is_marker(self, relpath: str) -> bool:
         """Whether this path is one of the publication's completion markers."""
         return any(fnmatch.fnmatch(relpath, pattern) for pattern in self.marker_patterns)
-
-    # =========================================================================
-    # Writing
-    # =========================================================================
 
     def write(self, relpath: str, content: bytes) -> str:
         """Stage one object. Refuses completion markers.
@@ -269,10 +261,6 @@ class PublicationSink:
                 f"derived and polled by name, so a rename loses the object."
             )
         return saved
-
-    # =========================================================================
-    # Reading and pruning
-    # =========================================================================
 
     def exists(self, relpath: str) -> bool:
         return self.bucket.exists(self.key(relpath))

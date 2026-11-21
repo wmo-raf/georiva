@@ -53,9 +53,7 @@ def _collection_prefix(collection) -> str:
     return f"{collection.catalog.storage_prefix}/{collection.slug}/"
 
 
-# ---------------------------------------------------------------------------
 # Route 1 — the declared expected set (DataFeed)
-# ---------------------------------------------------------------------------
 
 
 def declared_expected_paths(collection, reference_time) -> set[str]:
@@ -127,9 +125,7 @@ def close_if_declared_set_complete(run) -> bool:
     return run.close(RunIngestion.Closer.DECLARED_SET)
 
 
-# ---------------------------------------------------------------------------
 # Route 1b — a push feed's declared file count (ADR 0034)
-# ---------------------------------------------------------------------------
 
 
 def close_if_files_per_run_reached(run) -> bool:
@@ -173,9 +169,7 @@ def close_if_files_per_run_reached(run) -> bool:
     return run.close(RunIngestion.Closer.DECLARED_SET)
 
 
-# ---------------------------------------------------------------------------
 # Route 2 — an upload session completing
-# ---------------------------------------------------------------------------
 
 
 def close_if_upload_batches_complete(run) -> bool:
@@ -236,9 +230,7 @@ def close_if_upload_batches_complete(run) -> bool:
     return run.close(RunIngestion.Closer.UPLOAD_SESSION)
 
 
-# ---------------------------------------------------------------------------
 # Route 3 — quiet period (MinIO drop, sweep, and anything else)
-# ---------------------------------------------------------------------------
 
 
 def has_files_in_flight(collection) -> bool:
