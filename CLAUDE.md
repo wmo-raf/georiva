@@ -103,7 +103,7 @@ georiva/src/georiva/          # Main Django application
 │   ├── registry.py           # RecipeRegistry (decorator-based registration)
 │   └── recipes/              # climatology.py, promotion.py
 ├── geoprocessing/            # Pure compute library — no Django, no storage, no request layer
-│                             #   algebra.py, calendar.py, regrid.py, temporal.py, zonal.py
+│                             #   algebra.py, calendar.py, regrid.py, temporal.py, wind.py, zonal.py
 ├── organisations/            # Multi-tenancy (ADR 0011–0018)
 │   ├── ownership.py          # scope_rows / belongs_to_active_org — the tenancy choke point
 │   ├── access.py             # may_see_private, require_active_org
