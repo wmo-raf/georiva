@@ -220,7 +220,6 @@ class Layout:
         return sum(self.counts.values())
 
     def repeat(self, key):
-        """The repeat named ``key``, or ``None``."""
         return next((row.repeat for row in self.rows if row.repeat and row.repeat.key == key), None)
 
     def drawn(self):
@@ -443,8 +442,6 @@ def build_layout(entries, *, target=None, focus=None, open_repeat=None) -> Layou
         ],
         None,
     )
-    # A repeat stands in for its members on the rail: it hangs from what caused the
-    # first of them, and what they caused outside it hangs from the repeat (#498).
     for repeat in repeats:
         cause = next((m.caused_by_id for m in repeat.members if m.caused_by_id not in repeat_of), None)
         node = add(_Node(repeat=repeat), node_of.get(cause))

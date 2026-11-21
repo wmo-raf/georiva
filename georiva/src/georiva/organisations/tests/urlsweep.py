@@ -10,7 +10,6 @@ from django.urls import URLPattern, URLResolver
 
 
 def flatten_url_patterns(patterns, prefix=""):
-    """Yield ``(pattern, prefix)`` for every leaf URL under ``patterns``."""
     for entry in patterns:
         if isinstance(entry, URLResolver):
             yield from flatten_url_patterns(entry.url_patterns, prefix + str(entry.pattern))

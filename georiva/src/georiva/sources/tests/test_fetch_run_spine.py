@@ -43,8 +43,6 @@ class RunTrackedTests(TestCase):
     def _run(self, walk, **kwargs):
         return run_tracked(walk, result=RunResult(), data_feed=self.feed, collection=self.collection, **kwargs)
 
-    # ── clean finish ────────────────────────────────────────────────────────
-
     def test_the_loop_runs_inside_a_running_run_that_has_started(self):
         seen = {}
 
@@ -95,8 +93,6 @@ class RunTrackedTests(TestCase):
         self.assertEqual(self.link.last_run_at, run.started_at)
         self.assertEqual((self.feed.last_run_status, self.feed.total_runs), ("success", 1))
         self.assertIsNotNone(self.feed.last_success_at)
-
-    # ── a stop on a source failure ──────────────────────────────────────────
 
     def _stop(self, fetch_run):
         raise RunStopped(UNREACHABLE)
@@ -155,8 +151,6 @@ class RunTrackedTests(TestCase):
         self.assertEqual(retry.correlation_id, earlier.correlation_id)
         self.assertEqual(retry.retry_due_at, retry.finished_at + timedelta(minutes=15))
 
-    # ── an escaping exception ───────────────────────────────────────────────
-
     def _crash(self, fetch_run):
         raise ValueError("boom")
 
@@ -181,8 +175,6 @@ class RunTrackedTests(TestCase):
         finished = FetchRunFinished.objects.get()
         self.assertEqual((finished.outcome, finished.error), ("failed", "Stopped: ValueError: boom"))
         self.assertEqual(finished.caused_by_id, FetchRunStarted.objects.get().pk)
-
-    # ── what the loop reports of itself ─────────────────────────────────────
 
     def test_settle_runs_once_the_loop_has_ended_and_is_told_why(self):
         calls = []
@@ -214,8 +206,6 @@ class RunTrackedTests(TestCase):
         self.assertEqual(seen, [None])
         self.assertIsNotNone(result.finished_at)
         self.assertFalse(FetchRun.objects.exists())
-
-    # ── one run of the feed at a time (#683) ────────────────────────────────
 
     def test_an_exclusive_run_does_not_begin_while_another_of_the_feed_is_running(self):
         running = FetchRun.objects.create(data_feed=self.feed, status=FetchRun.Status.RUNNING)

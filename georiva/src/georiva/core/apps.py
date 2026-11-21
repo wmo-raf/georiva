@@ -44,8 +44,7 @@ def on_style_change(sender, instance, **kwargs):
 
     Styles are variable-owned rows, so no fan-out is needed — and because the
     stops snapshot lives on this very row, an edit made anywhere (admin,
-    shell, API) lands here, closing the old gap where stop edits outside
-    Wagtail never re-warmed. Warming writes the per-style keys and the
+    shell, API) lands here. Warming writes the per-style keys and the
     styleless alias together (ADR 0023), which is also what rewrites the alias
     on a default flip: ``promote_to_default`` saves the promoted row, and this
     handler re-derives the alias from whoever is default now. On delete the
@@ -77,7 +76,7 @@ def on_style_delete(sender, instance, **kwargs):
 
 def on_variable_delete(sender, instance, **kwargs):
     """A deleted variable's render config must not outlive it until the next
-    sweep — the old missing-delete-signal gap."""
+    sweep."""
     from georiva.core.machine_plane.palette_cache import prune_variable
     from georiva.core.machine_plane.remote_assets import withdraw_variable
 
@@ -161,12 +160,10 @@ def reindex_catalog_for_collection(sender, instance, **kwargs):
 
 
 def data_feed_collection_link_saved(sender, instance, **kwargs):
-    """Fired when a DataFeedCollectionLink is created or updated."""
     _sync_keep_for_collection(instance.collection)
 
 
 def data_feed_collection_link_deleted(sender, instance, **kwargs):
-    """Fired when a DataFeedCollectionLink is deleted."""
     _sync_keep_for_collection(instance.collection)
 
 
@@ -179,7 +176,7 @@ def disable_admin_copy():
     own users and sites, and any plugin viewset, rather than each one remembering
     to opt out. Page copy is a separate implementation and is not touched.
 
-    Copy stays off until a working one exists. A viewset that opts back in must
+    A viewset that opts back in must
     detach the row (clear its pk, re-parent modelcluster children, vary unique
     fields) before saving, and ``core/tests/test_admin_copy_disabled.py`` will
     need its exemption updated to match.
@@ -207,8 +204,6 @@ class CoreConfig(AppConfig):
         post_save.connect(update_collection_data_feed_periodic_task, sender=Collection)
         post_save.connect(collection_post_save, sender=Collection)
 
-        # Keep the parent catalog's search index fresh as collections change,
-        # so the admin header search can match a catalog by collection name.
         post_save.connect(reindex_catalog_for_collection, sender=Collection)
         post_delete.connect(reindex_catalog_for_collection, sender=Collection)
 

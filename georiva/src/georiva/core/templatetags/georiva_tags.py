@@ -32,12 +32,10 @@ def require_request(context):
 
 
 def org_catalogs(context):
-    """The active catalogs of the organisation this portal serves."""
     return scoped_queryset(require_request(context), Catalog.objects.filter(is_active=True))
 
 
 def org_collections(context):
-    """The active collections of the organisation this portal serves."""
     return scoped_queryset(require_request(context), Collection.objects.filter(is_active=True))
 
 
@@ -65,7 +63,6 @@ def datasets_index_url(context):
 
 @register.filter(is_safe=True)
 def to_json(value):
-    """Convert a Python object to JSON string."""
     if value is None:
         return ""
     return json.dumps(value)
@@ -88,7 +85,6 @@ def get_item(dictionary, key):
 
 @register.simple_tag(takes_context=True)
 def get_latest_collections(context, limit=6):
-    """Latest active collections ordered by most recently updated item."""
     return (
         org_collections(context)
         .select_related("catalog")
@@ -99,7 +95,6 @@ def get_latest_collections(context, limit=6):
 
 @register.simple_tag(takes_context=True)
 def get_latest_catalogs(context, limit=6):
-    """Active catalogs ordered by most recently updated item across their collections."""
     from django.db.models import Max
 
     return (
@@ -120,12 +115,9 @@ def get_active_topics(context):
     return topics_of(org_catalogs(context))
 
 
-# Landing page stats — used in stats_bar.html
 @register.simple_tag(takes_context=True)
 def get_landing_stats(context):
-    """
-    Returns a dict of live stats from Django ORM for the stats bar.
-    Called once per page render — cheap queries.
+    """Called once per page render — cheap queries.
 
     Counts this organisation's holdings: a portal that boasts the instance's
     totals is quoting its neighbours' numbers.
@@ -141,11 +133,6 @@ def get_landing_stats(context):
     }
 
 
-# -----------------------------------------------------------------------------
-# All collections
-# -----------------------------------------------------------------------------
-
-
 @register.simple_tag(takes_context=True)
 def get_all_collections(context):
     return (
@@ -155,10 +142,6 @@ def get_all_collections(context):
         .order_by("catalog__name", "sort_order", "name")
     )
 
-
-# -----------------------------------------------------------------------------
-# Catalog icon — maps file format to Bootstrap Icon class
-# -----------------------------------------------------------------------------
 
 FORMAT_ICONS = {
     "grib2": "bi-wind",
@@ -170,49 +153,33 @@ FORMAT_ICONS = {
 
 @register.simple_tag
 def get_catalog_icon(file_format):
-    """
-    Returns a Bootstrap Icon class string for the given file format.
-    Falls back to a generic layers icon.
-    """
+    """Falls back to a generic layers icon."""
     return FORMAT_ICONS.get(file_format, "bi-layers")
-
-
-# -----------------------------------------------------------------------------
-# Active collection count for a catalog — used in featured_catalogs.html
-# -----------------------------------------------------------------------------
 
 
 @register.simple_tag
 def active_collection_count(catalog):
-    """Returns the number of active collections in a catalog."""
     return catalog.collections.filter(is_active=True).count()
 
 
 @register.simple_tag(takes_context=True)
 def get_active_time_resolutions(context):
-    """Only resolutions used by at least one of this organisation's collections."""
     from georiva.core.models import Collection
 
     active_values = (
         org_collections(context).exclude(time_resolution="").values_list("time_resolution", flat=True).distinct()
     )
-    # Return as (value, label) tuples preserving TimeResolution order
     choices = dict(Collection.TimeResolution.choices)
     return [(value, choices[value]) for value in Collection.TimeResolution.values if value in active_values]
 
 
 @register.simple_tag(takes_context=False)
 def query_params(filters, **kwargs):
+    """Drops empty values and always resets page to 1 when a filter changes
+    (unless page is explicitly passed).
     """
-    Build a query string from the current filters dict,
-    overriding with any kwargs passed in.
-    Drops empty values and always resets page to 1 when
-    a filter changes (unless page is explicitly passed).
-    """
-
     params = {k: v for k, v in filters.items() if v}
     params.update({k: v for k, v in kwargs.items() if v != ""})
-    # reset to page 1 when any filter other than page changes
     if "page" not in kwargs:
         params.pop("page", None)
     return urlencode(params)
@@ -251,10 +218,7 @@ def query_string_drop(context, *keys):
 
 @register.simple_tag(name="titiler_preview_url")
 def titiler_preview_url_tag(item, variable_slug):
-    """
-    Build a TiTiler preview.webp URL for a given item and variable.
-
-    Catalog, collection and organisation all come from the item rather than from
+    """Catalog, collection and organisation all come from the item rather than from
     the template's context variables: a page that had picked up one of the three
     from somewhere else could address one organisation's catalog under another's
     org segment, and the thumbnail would quietly render the wrong tenant's data.

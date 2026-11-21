@@ -33,7 +33,6 @@ class ResolveDeclaredInputsTests(TestCase):
 
         # Staging tier: a raw rainfall series.
         self.staging_col = StagingCollection.objects.create(catalog=self.catalog, slug="rainfall", name="Rainfall")
-        # Published tier: a normals product.
         self.pub_col = Collection.objects.create(catalog=self.catalog, slug="rainfall-normals", name="Normals")
         self.pub_var = Variable.objects.create(
             collection=self.pub_col,

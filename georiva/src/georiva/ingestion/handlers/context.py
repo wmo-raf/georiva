@@ -20,20 +20,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class IngestionContext:
-    """
-    Immutable bag of shared objects for one file ingestion run.
-
-    All handlers receive a single IngestionContext instance instead of
-    individual constructor/method arguments for plugin, clipper, writer, etc.
-    """
-
-    # --- Processing objects (constructed once per file) ----------------------
     plugin: object
     clipper: BoundaryClipper
     writer: AssetWriter
     extractor: VariableExtractor
 
-    # --- Run metadata --------------------------------------------------------
     origin_bucket: str
     reference_time: datetime | None = None
     ingestion_log: FileIngestion | None = None

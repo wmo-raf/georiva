@@ -15,10 +15,6 @@ class RunIngestionViewSet(OrgScopedViewSetMixin, SnippetViewSet):
 
 register_snippet(RunIngestionViewSet)
 
-# No menu item: the Ingestion Activity page is reached through the homepage
-# activity panel, and acquisition monitoring lives on each feed's dashboard
-# (ADR 0019).
-
 
 @hooks.register("register_admin_urls")
 def register_ingestion_dashboard_urls():

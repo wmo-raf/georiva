@@ -65,15 +65,6 @@ class VariableSourceStreamBlock(StreamBlock):
 
 
 class Variable(TimeStampedModel, ClusterableModel, Orderable):
-    """
-    A user-facing variable
-
-    Examples:
-        - temperature_2m (passthrough from TMP_2m)
-        - wind_speed (derived from UGRD + VGRD)
-        - ndvi (derived from B04 + B08)
-    """
-
     class TransformType(models.TextChoices):
         PASSTHROUGH = "passthrough", "Passthrough (direct read)"
         VECTOR_MAGNITUDE = "vector_magnitude", "Vector Magnitude (√(u² + v²))"
@@ -89,7 +80,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     collection = ParentalKey("georivacore.Collection", on_delete=models.CASCADE, related_name="variables")
 
-    # Identity
     slug = models.SlugField(
         max_length=100,
         help_text=(
@@ -117,7 +107,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         ),
     )
 
-    # Transform
     transform_type = models.CharField(
         max_length=30,
         choices=TransformType.choices,
@@ -149,9 +138,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         help_text="The unit this variable is served in. Changing it rewrites no data.",
     )
 
-    # The positive affine conversion source_unit → unit (ADR 0046 §5): served =
-    # raw·scale + offset. Recomputed on every save, so readers outside Django —
-    # Martin's SQL, tile-config's clients — convert by arithmetic alone.
     scale = models.FloatField(default=1.0, editable=False)
     offset = models.FloatField(default=0.0, editable=False)
     water = models.BooleanField(
@@ -195,7 +181,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         ),
     )
 
-    # Status
     is_active = models.BooleanField(
         default=True,
         help_text=(
@@ -221,8 +206,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         FieldPanel("source_unit"),
         FieldPanel("unit"),
         FieldPanel("water"),
-        # Range and styling are read-only here (issue #323): the Styling
-        # surface is the one place that tunes them (ADR 0022).
         StylingSummaryPanel(heading="Styling"),
         FieldPanel("transform_type"),
         FieldPanel("sources"),
@@ -291,7 +274,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     @property
     def served_conversion(self) -> Conversion:
-        """The conversion into the served unit as stored (``scale``, ``offset``)."""
         return Conversion(self.scale, self.offset, self.unit.symbol if self.unit_id else "")
 
     def save(self, *args, **kwargs):
@@ -381,7 +363,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     @cached_property
     def sources_param_list(self):
-        """Return a list of source variable names for this variable."""
         return [block.value["source_name"] for block in self.sources]
 
     @property
@@ -399,25 +380,14 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     @property
     def weather_layers_palette(self):
-        """The default style's snapshot for WeatherLayers, with grayscale fallback."""
         style = self.default_style
         if style:
             return style.as_weatherlayers_palette()
 
-        # Fallback: grayscale
         return self._generate_grayscale_palette(self.value_min, self.value_max)
 
     @staticmethod
     def _generate_grayscale_palette(min_val: float, max_val: float, steps: int = 11, inverted: bool = False) -> list:
-        """
-        Generate grayscale palette with positions matching data value range.
-
-        Args:
-            min_val: Minimum data value
-            max_val: Maximum data value
-            steps: Number of color stops
-            inverted: If True, goes white→black instead of black→white
-        """
         palette = []
         val_range = max_val - min_val
 
@@ -436,8 +406,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         like every number stored about values (ADR 0046 §3)."""
         return self.value_min, self.value_max
 
-    # -------- served numbers (ADR 0046 §2, §15) --------
-
     def served(self, value):
         """A stored (source-unit) number in the served unit; ``None`` stays ``None``.
 
@@ -453,17 +421,10 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
 
     @property
     def served_range(self) -> tuple:
-        """:attr:`value_range` in the served unit."""
         return self.served(self.value_min), self.served(self.value_max)
 
     def served_palette(self, palette: list) -> list:
-        """``[[value, color], ...]`` stops with each value in the served unit."""
         return [[self.served(value), color] for value, color in palette]
-
-    # -------- the form boundary (ADR 0046 §3) --------
-    #
-    # Operators type and read ranges and stops in the served unit; they are
-    # stored in the source unit. Forms convert both ways through these.
 
     def stored(self, value):
         """A served-unit number as stored (in the source unit); ``None`` stays ``None``.
@@ -474,11 +435,9 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         return self.served_conversion.inverse(value)
 
     def served_stops(self, stops: list) -> list:
-        """``[{"value", "color"}, ...]`` stops with each value in the served unit."""
         return [{**stop, "value": self.served(stop["value"])} for stop in stops]
 
     def stored_stops(self, stops: list) -> list:
-        """Served-unit ``[{"value", "color"}, ...]`` stops as stored."""
         return [{**stop, "value": self.stored(stop["value"])} for stop in stops]
 
     def refresh_conversion(self):
@@ -494,6 +453,5 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         self.scale, self.offset = conversion.scale, conversion.offset
 
     def set_served_range(self, value_min, value_max):
-        """Set the range from served-unit numbers, stored in the source unit."""
         self.refresh_conversion()
         self.value_min, self.value_max = self.stored(value_min), self.stored(value_max)

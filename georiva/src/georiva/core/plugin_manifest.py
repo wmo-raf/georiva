@@ -69,6 +69,5 @@ def parse_requires_env(manifest):
 
 
 def missing_required_env(entries, environ=None):
-    """The required entries whose variable is unset or empty."""
     environ = os.environ if environ is None else environ
     return [e for e in entries if e["required"] and not environ.get(e["name"], "").strip()]

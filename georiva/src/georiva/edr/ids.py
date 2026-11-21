@@ -15,7 +15,6 @@ SEPARATOR = "."
 
 
 def edr_collection_id(collection) -> str:
-    """The id EDR serves ``collection`` under."""
     return f"{collection.catalog.slug}{SEPARATOR}{collection.slug}"
 
 
@@ -25,7 +24,6 @@ def edr_collection_href(base_url: str, collection) -> str:
 
 
 def edr_collection_path(collection) -> str:
-    """The host-relative path of ``collection``'s EDR document."""
     return reverse("edr:collection-detail", args=[edr_collection_id(collection)])
 
 

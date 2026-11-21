@@ -76,8 +76,6 @@ def served_statistics(statistics: dict, config: dict) -> dict:
 
 
 class ServedPoint(Point):
-    """A point read, its values in the served unit, which it names."""
-
     unit: str | None = None
 
 

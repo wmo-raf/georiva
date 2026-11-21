@@ -27,7 +27,6 @@ CAPABILITIES_KVP = {"SERVICE": "WMTS", "REQUEST": "GetCapabilities"}
 
 
 def capabilities_kvp(**overrides):
-    """``CAPABILITIES_KVP`` with parameters replaced, or removed via ``NAME=None``."""
     return overriding(CAPABILITIES_KVP, **overrides)
 
 

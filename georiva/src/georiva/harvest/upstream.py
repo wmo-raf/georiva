@@ -303,9 +303,6 @@ class UpstreamCatalogClient(Protocol):
         One sample per field, by path. Never raises."""
 
 
-# ── STAC JSON → what a harvest reads ────────────────────────────────────────
-
-
 def _parse_time(value) -> datetime | None:
     if not value or not isinstance(value, str):
         return None
@@ -508,8 +505,6 @@ def parse_item(payload: dict, *, base_url: str = "") -> UpstreamItem:
     )
 
 
-# ── Opening one file ────────────────────────────────────────────────────────
-
 #: Seconds one request of a probe may take. A probe runs inside a web request.
 PROBE_TIMEOUT = 10
 
@@ -573,8 +568,6 @@ def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIME
     except (RasterioError, OSError, ValueError) as exc:
         return AssetProbe(readable=False, problem=str(exc)[:300] or type(exc).__name__)
 
-
-# ── Opening one store ───────────────────────────────────────────────────────
 
 #: Seconds opening a store and reading its arrays' metadata may take in all. A
 #: cold open was measured at several seconds, and one probe in three lost its connection.
@@ -693,8 +686,6 @@ def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
         pool.shutdown(wait=False, cancel_futures=True)
 
 
-# ── Reading one field of a store ────────────────────────────────────────────
-
 #: Seconds reading a sample of every chosen field may take in all. Opening was
 #: measured at up to ~17 s cold, and one field at 0.4–3.4 s.
 SAMPLE_TIMEOUT = 60
@@ -704,8 +695,6 @@ RUNS_IN_REACH = 8
 
 #: How many of an analysis store's newest time steps are asked whether they hold data.
 TIMES_IN_REACH = 64
-
-#: An address in what the store's library says of a read it would not make.
 
 
 def open_repository(storage, chunk_locations: Mapping[str, str]):
@@ -883,8 +872,6 @@ def sample_store(
         field_.path: read_by_now.get(field_.path) or FieldSample(readable=False, problem=problem) for field_ in fields
     }
 
-
-# ── Which steps a store holds ───────────────────────────────────────────────
 
 #: Seconds listing a window's Held steps may take in all. It runs in a task,
 #: not a request: opening was measured at up to ~17 s cold and an array's first
@@ -1093,9 +1080,6 @@ def list_held_steps(
         raise UpstreamUnreachable("upstream store could not be opened and listed") from exc
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-
-
-# ── The real client ─────────────────────────────────────────────────────────
 
 
 def _rfc3339(when: datetime) -> str:

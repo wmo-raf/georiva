@@ -40,7 +40,6 @@ UGANDA_ONLY_SLUG = "uganda-only"
 
 
 def build_uganda_only_tree(organisation):
-    """A second Uganda catalog under a slug Kenya does not have."""
     catalog = Catalog.objects.create(
         organisation=organisation,
         name="Uganda Only",
@@ -68,7 +67,6 @@ def build_uganda_only_tree(organisation):
 
 
 def _datasets_index(organisation):
-    """The datasets portal page provisioning put under ``organisation``'s root."""
     from georiva.pages.datasets.models import DatasetsIndexPage
 
     return DatasetsIndexPage.objects.descendant_of(organisation.site.root_page).get()
@@ -88,8 +86,6 @@ class CrossOrgPublicApiTests(TestCase):
 
     def setUp(self):
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
-
-    # -- STAC --------------------------------------------------------------
 
     def test_stac_root_is_this_organisations_catalog(self):
         response = self.client.get(reverse("stac:landing"))
@@ -169,8 +165,6 @@ class CrossOrgPublicApiTests(TestCase):
         url = reverse("stac:catalog-queryables", args=[UGANDA_ONLY_SLUG])
         self.assertEqual(self.client.get(url).status_code, 404)
 
-    # -- EDR ---------------------------------------------------------------
-
     def test_edr_collection_listing_names_only_this_organisation(self):
         response = self.client.get(reverse("edr:collection-list"))
         self.assertEqual(response.status_code, 200)
@@ -195,8 +189,6 @@ class CrossOrgPublicApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Uganda")
 
-    # -- analysis ----------------------------------------------------------
-
     def test_timeseries_refuses_another_organisations_variable(self):
         response = self.client.get(
             reverse("timeseries:point"),
@@ -208,8 +200,6 @@ class CrossOrgPublicApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("variable", response.json())
-
-    # -- datasets ----------------------------------------------------------
 
     def test_dataset_dates_for_another_organisations_collection_are_not_found(self):
         url = reverse(
@@ -224,8 +214,6 @@ class CrossOrgPublicApiTests(TestCase):
             args=[SHARED_SLUG, SHARED_SLUG],
         )
         self.assertEqual(self.client.get(url).status_code, 200)
-
-    # -- dataset pages -----------------------------------------------------
 
     def test_each_portals_dataset_index_lists_only_its_own_catalogs(self):
         """`/api/datasets/` is site-native because the page tree is (#271).
@@ -251,8 +239,6 @@ class CrossOrgPublicApiTests(TestCase):
                 )
                 self.assertIn(own, response.content)
                 self.assertNotIn(other, response.content)
-
-    # -- jobs --------------------------------------------------------------
 
     def test_a_job_is_reachable_from_any_organisations_host(self):
         """The capability is the job id and the session — not the hostname.

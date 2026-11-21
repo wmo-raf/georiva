@@ -135,8 +135,6 @@ class JobCrashLockReleaseTests(TestCase):
 
 
 class FileIngestionSummaryFieldTests(TestCase):
-    """Processing summary fields are stored and readable."""
-
     def test_summary_fields_persist(self):
         from datetime import datetime
 

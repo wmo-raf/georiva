@@ -1,7 +1,3 @@
-"""
-ItemHandler — get-or-create an Item record and keep its spatial fields current.
-"""
-
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
@@ -85,7 +81,6 @@ class ItemHandler:
         return item, created
 
     def increment_collection_item_count(self, collection: Collection) -> None:
-        """Atomically increment Collection.item_count after a new Item is created."""
         Collection.objects.filter(pk=collection.pk).update(item_count=F("item_count") + 1)
 
     def delete_orphan(self, item: Item) -> None:

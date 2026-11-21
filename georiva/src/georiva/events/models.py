@@ -19,8 +19,7 @@ from django.db import models
 from django.utils import timezone
 
 
-class AppendOnlyError(RuntimeError):
-    """Something tried to change or remove a Domain event."""
+class AppendOnlyError(RuntimeError): ...
 
 
 class OutcomeClass(models.TextChoices):
@@ -95,7 +94,7 @@ class DomainEvent(AppendOnlyModel):
         "organisations.Organisation",
         null=True,
         blank=True,
-        on_delete=models.PROTECT,  # the design's only PROTECT: an audit trail never loses its owner
+        on_delete=models.PROTECT,
         related_name="+",
         help_text="Null means unattributed: visible to the instance administrator only.",
     )
@@ -157,12 +156,7 @@ class DomainEvent(AppendOnlyModel):
 
 
 class EventIndex(AppendOnlyModel):
-    """One row per Domain event, written by ``record()`` in the event's transaction.
-
-    The Timeline and failures panel read this one table and fetch details per
-    type, so there is no cross-table UNION whose shape would depend on which
-    plugins are installed.
-    """
+    """One row per Domain event, written by ``record()`` in the event's transaction."""
 
     ORGANISATION_LOOKUP = "organisation"
 

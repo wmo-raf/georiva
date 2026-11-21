@@ -219,7 +219,6 @@ class PushFeedEditForm(forms.ModelForm):
 
 
 def _variable_rows(feed):
-    """The feed's variables as the shared variable table wants them."""
     from georiva.core.models import Asset
 
     variables = list(

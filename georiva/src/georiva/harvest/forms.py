@@ -93,8 +93,6 @@ class HarvestFeedForm(DataFeedForm):
                 keys.append((mapped, mapped))
         return keys
 
-    # ── Fields ──────────────────────────────────────────────────────────────
-
     def clean_catalog(self):
         """A catalog has one feed (ADR 0034). Its push feed is refused by the model."""
         catalog = self.cleaned_data.get("catalog")
@@ -108,8 +106,6 @@ class HarvestFeedForm(DataFeedForm):
                 % {"name": other.name},
             )
         return catalog
-
-    # ── The feed as a whole ─────────────────────────────────────────────────
 
     def clean(self):
         cleaned = super().clean()

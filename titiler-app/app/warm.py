@@ -158,7 +158,6 @@ def listen(stopping: threading.Event) -> None:
 
 
 def _heard(subscription, timeout: float) -> bool:
-    """Whether an announcement arrives within ``timeout`` seconds."""
     message = subscription.get_message(ignore_subscribe_messages=True, timeout=timeout)
     if message is None or message.get("type") != "message":
         return False

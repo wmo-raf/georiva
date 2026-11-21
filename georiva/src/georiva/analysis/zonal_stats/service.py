@@ -19,11 +19,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Core computation — Django adapter over geoprocessing.zonal
-# ---------------------------------------------------------------------------
-
-
 def compute_stats_from_array(
     data: np.ndarray,
     transform,
@@ -89,11 +84,6 @@ def compute_stats_from_band(band: Band, boundaries: list[AdminBoundary]) -> list
     return compute_stats_from_array(band.data, band.transform, band.crs, boundaries)
 
 
-# ---------------------------------------------------------------------------
-# Persistence
-# ---------------------------------------------------------------------------
-
-
 def persist_stats(
     item: Item,
     variable: Variable,
@@ -108,8 +98,7 @@ def persist_stats(
     overwrite : bool
         False (default) — bulk_create with update_conflicts=True using the
         unique constraint (time, item, variable, boundary).
-        True — update_or_create per row (slower but works without the
-        unique constraint if it hasn't been migrated yet).
+        True — update_or_create per row (slower).
 
     Returns the number of rows written.
     """
@@ -170,11 +159,6 @@ def persist_stats(
     return len(objects)
 
 
-# ---------------------------------------------------------------------------
-# Boundary resolution
-# ---------------------------------------------------------------------------
-
-
 def get_boundaries_for_collection(collection) -> dict[int, list[AdminBoundary]]:
     """
     Return AdminBoundary objects grouped by level for a collection.
@@ -188,11 +172,6 @@ def get_boundaries_for_collection(collection) -> dict[int, list[AdminBoundary]]:
     from adminboundarymanager.models import AdminBoundary
 
     return {level: list(AdminBoundary.objects.filter(level=level)) for level in levels}
-
-
-# ---------------------------------------------------------------------------
-# Retention — one rule, read by the pruner and the recovery sweep
-# ---------------------------------------------------------------------------
 
 
 def retained_items_q(collection, now, latest_reference_time, prefix: str = "item__"):
@@ -216,11 +195,6 @@ def retained_items_q(collection, now, latest_reference_time, prefix: str = "item
     if collection.retain_latest_run_only and latest_reference_time:
         kept &= Q(**{f"{prefix}reference_time": latest_reference_time})
     return kept or None
-
-
-# ---------------------------------------------------------------------------
-# Availability — what a viewer can actually be shown
-# ---------------------------------------------------------------------------
 
 
 def available_levels_by_variable(item, collection) -> dict[str, list[int]]:

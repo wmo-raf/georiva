@@ -14,8 +14,6 @@ def history_panel_css():
 def register_event_urls():
     from .views import failures, timeline, unattributed_events
 
-    # No menu entry for the Timeline: it is reached by link, from a History row.
-    # Nor for Failures: it is reached from the dashboard's failures panel (ADR 0033).
     return [
         path("events/failures/", failures, name="events_failures"),
         path("events/unattributed/", unattributed_events, name="events_unattributed"),
@@ -37,7 +35,6 @@ def register_unattributed_events_menu_item():
 
 @hooks.register("construct_homepage_panels")
 def add_failures_panel(request, panels):
-    """Failed and refused transitions, org-wide — the one deliberate exception to ADR 0019."""
     from .panels import FailuresPanel
 
     panels.append(FailuresPanel())

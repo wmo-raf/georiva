@@ -118,7 +118,6 @@ def _claimed_catalog_message(catalog):
 
 
 def _catalog_format_from_session(request, session):
-    """Return the file_format string for the catalog chosen in step 1."""
     if session.get("catalog_mode") == "create":
         return session.get("new_catalog_format") or ""
     catalog = _session_catalog(request, session)
@@ -126,7 +125,6 @@ def _catalog_format_from_session(request, session):
 
 
 def _catalog_name_from_session(request, session):
-    """Return the catalog display name from the session."""
     if session.get("catalog_mode") == "create":
         return session.get("new_catalog_name") or ""
     catalog = _session_catalog(request, session)
@@ -134,7 +132,6 @@ def _catalog_name_from_session(request, session):
 
 
 def _show_filename_format(catalog_format: str) -> bool:
-    """Return True only if the format plugin requires time extracted from the filename."""
     plugin = format_registry.get(catalog_format)
     if plugin is None:
         return True  # unknown format — show the field to be safe
@@ -147,11 +144,6 @@ def _session(request):
 
 def _save_session(request, data):
     request.session[_WIZARD_SESSION_KEY] = data
-
-
-# =============================================================================
-# Step 1 — Catalog
-# =============================================================================
 
 
 def upload_wizard_step1(request):
@@ -230,11 +222,6 @@ def upload_wizard_step1(request):
     )
 
 
-# =============================================================================
-# Step 2 — Config name
-# =============================================================================
-
-
 def upload_wizard_step2(request):
     session = _session(request)
     if not session.get("catalog_mode"):
@@ -302,11 +289,6 @@ def upload_wizard_step2(request):
             **_wizard_chrome(2),
         },
     )
-
-
-# =============================================================================
-# AJAX — sample file upload → variables JSON
-# =============================================================================
 
 
 def _nice_bounds(vmin: float, vmax: float) -> tuple[float, float]:
@@ -446,11 +428,6 @@ def upload_wizard_upload_sample(request):
             os.unlink(tmp_path)
 
 
-# =============================================================================
-# Step 3 — File, Format & variable selection
-# =============================================================================
-
-
 def upload_wizard_step3(request):
     from georiva.ingestion.models import PushFeed
 
@@ -560,11 +537,6 @@ def upload_wizard_step3(request):
             **_wizard_chrome(3),
         },
     )
-
-
-# =============================================================================
-# Step 4 — Collection setup
-# =============================================================================
 
 
 def upload_wizard_step4(request):
@@ -759,7 +731,6 @@ def upload_wizard_step4(request):
                         % {"coll": collections[idx].get("name", coll_slug), "slug": a["variable_name"]}
                     )
 
-        # Also check against the Variables the catalog already has.
         catalog_id = session.get("catalog_id")
         if catalog_id:
             from georiva.core.models import Variable
@@ -788,11 +759,6 @@ def upload_wizard_step4(request):
         json.dumps(session.get("collections", [])),
         json.dumps(session.get("assignments", [])),
     )
-
-
-# =============================================================================
-# Step 5 — Review
-# =============================================================================
 
 
 def upload_wizard_step5(request):
@@ -829,11 +795,6 @@ def upload_wizard_step5(request):
             **_wizard_chrome(5),
         },
     )
-
-
-# =============================================================================
-# Provision — create DB records
-# =============================================================================
 
 
 def _incoming_symbol(assignment: dict) -> str:

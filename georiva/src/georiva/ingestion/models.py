@@ -77,8 +77,6 @@ def organisation_id_for_key(file_path: str):
 
 @register_snippet
 class FileIngestion(models.Model):
-    """Per-file record of processing a single file from MinIO into STAC items and assets."""
-
     # Written before its collections are known, so there is no FK chain to an
     # organisation to follow. Its owner is the first segment of ``file_path`` —
     # the org slug, by the storage grammar — and the one listing that shows these
@@ -91,10 +89,6 @@ class FileIngestion(models.Model):
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
 
-    # =========================================================================
-    # Identity — unique per file
-    # =========================================================================
-
     bucket = models.CharField(
         max_length=50,
         help_text="Origin bucket type: 'incoming' or 'sources'",
@@ -104,10 +98,6 @@ class FileIngestion(models.Model):
         help_text="Path relative to bucket root: {catalog}/{collection}/{filename}",
     )
 
-    # =========================================================================
-    # State
-    # =========================================================================
-
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -115,7 +105,6 @@ class FileIngestion(models.Model):
         db_index=True,
     )
 
-    # Lock management
     locked_at = models.DateTimeField(null=True, blank=True)
     locked_by = models.CharField(
         max_length=100,
@@ -124,10 +113,6 @@ class FileIngestion(models.Model):
         help_text="Worker ID that holds the lock",
     )
     retry_count = models.IntegerField(default=0)
-
-    # =========================================================================
-    # Result
-    # =========================================================================
 
     completed_at = models.DateTimeField(null=True, blank=True)
     archive_path = models.CharField(max_length=500, blank=True, default="")
@@ -144,11 +129,9 @@ class FileIngestion(models.Model):
         ),
     )
 
-    # =========================================================================
     # Collections M2M — populated after _resolve_collections() succeeds,
     # before per-collection processing begins. Authoritative record of which
     # collections a file touched or attempted to touch.
-    # =========================================================================
 
     collections = models.ManyToManyField(
         "georivacore.Collection",
@@ -156,16 +139,8 @@ class FileIngestion(models.Model):
         related_name="file_ingestions",
     )
 
-    # =========================================================================
-    # Metadata
-    # =========================================================================
-
     reference_time = models.DateTimeField(null=True, blank=True)
     file_size = models.BigIntegerField(null=True, blank=True)
-
-    # =========================================================================
-    # Timestamps
-    # =========================================================================
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -177,10 +152,6 @@ class FileIngestion(models.Model):
     valid_time_start = models.DateTimeField(null=True)
     valid_time_end = models.DateTimeField(null=True)
     timestep_count = models.IntegerField(null=True)
-
-    # =========================================================================
-    # Configuration
-    # =========================================================================
 
     MAX_RETRIES = 3
     RETRIES_EXHAUSTED = "Gave up after {max} attempts without finishing"
@@ -209,13 +180,8 @@ class FileIngestion(models.Model):
     def __str__(self):
         return f"{self.bucket}:{self.file_path} [{self.status}]"
 
-    # =========================================================================
-    # Properties
-    # =========================================================================
-
     @property
     def is_stale(self) -> bool:
-        """A lock is stale if processing exceeds LOCK_TIMEOUT."""
         if self.status != self.Status.PROCESSING:
             return False
         if not self.locked_at:
@@ -224,28 +190,16 @@ class FileIngestion(models.Model):
 
     @property
     def can_retry(self) -> bool:
-        """Check if file hasn't exceeded max retries."""
         return self.retry_count < self.MAX_RETRIES
 
     @property
     def duration_seconds(self) -> float | None:
-        """Processing duration if completed."""
         if self.completed_at and self.locked_at:
             return (self.completed_at - self.locked_at).total_seconds()
         return None
 
-    # =========================================================================
-    # Lock acquisition
-    # =========================================================================
-
     @classmethod
     def register(cls, bucket: str, file_path: str, **kwargs) -> tuple["FileIngestion", bool]:
-        """
-        Register a file in the log. Returns (log, created).
-
-        If the file is already registered, returns the existing record.
-        Extra kwargs are passed to defaults (reference_time, etc).
-        """
         defaults = {
             "status": cls.Status.PENDING,
         }
@@ -307,10 +261,6 @@ class FileIngestion(models.Model):
 
         return updated > 0
 
-    # =========================================================================
-    # State transitions
-    # =========================================================================
-
     @classmethod
     def mark_completed(
         cls,
@@ -325,12 +275,6 @@ class FileIngestion(models.Model):
         timestep_count: int = None,
         read_version: str = "",
     ):
-        """Mark a file as successfully processed.
-
-        The sole writer of COMPLETED, which is why the model-run hook hangs here
-        rather than off a ``post_save`` receiver: this is a bulk ``update()`` and
-        emits no ``post_save`` at all.
-        """
         completed_at = dj_timezone.now()
         with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
             with transaction.atomic():
@@ -470,18 +414,12 @@ class FileIngestion(models.Model):
             error=log.error,
         )
 
-    # =========================================================================
-    # Queries
-    # =========================================================================
-
     @classmethod
     def is_known(cls, bucket: str, file_path: str) -> bool:
-        """Check if a file is already registered (any status)."""
         return cls.objects.filter(bucket=bucket, file_path=file_path).exists()
 
     @classmethod
     def is_done(cls, bucket: str, file_path: str) -> bool:
-        """Check if a file has been successfully processed."""
         return cls.objects.filter(
             bucket=bucket,
             file_path=file_path,
@@ -557,7 +495,6 @@ class FileIngestion(models.Model):
 
     @classmethod
     def is_stale_pending(cls, bucket, file_path) -> bool:
-        """True when the file is pending and has sat past PENDING_TIMEOUT."""
         cutoff = dj_timezone.now() - cls.PENDING_TIMEOUT
         return cls.objects.filter(
             bucket=bucket, file_path=file_path, status=cls.Status.PENDING, updated_at__lt=cutoff
@@ -565,7 +502,6 @@ class FileIngestion(models.Model):
 
     @classmethod
     def get_retryable(cls, limit: int = 50):
-        """Get failed files that can be retried."""
         return cls.objects.filter(
             status=cls.Status.FAILED,
             retry_count__lt=cls.MAX_RETRIES,
@@ -573,7 +509,6 @@ class FileIngestion(models.Model):
 
     @classmethod
     def get_permanently_failed(cls):
-        """Get files that have exceeded max retries."""
         return cls.objects.filter(
             status=cls.Status.FAILED,
             retry_count__gte=cls.MAX_RETRIES,
@@ -654,11 +589,6 @@ class FileIngestion(models.Model):
         return updated > 0
 
 
-# ---------------------------------------------------------------------------
-# Model-run tracking
-# ---------------------------------------------------------------------------
-
-
 class RunIngestion(models.Model):
     """One model run arriving into one collection.
 
@@ -703,10 +633,6 @@ class RunIngestion(models.Model):
         #: for every mapped Variable (ADR 0044 §6).
         STORE_HELD = "store_held", "Store holds every expected step"
 
-    # =========================================================================
-    # Identity
-    # =========================================================================
-
     collection = models.ForeignKey(
         "georivacore.Collection",
         on_delete=models.CASCADE,
@@ -716,10 +642,6 @@ class RunIngestion(models.Model):
         help_text="The model run this row tracks. Never null: a collection without "
         "reference times has no run boundary to track.",
     )
-
-    # =========================================================================
-    # State
-    # =========================================================================
 
     status = models.CharField(
         max_length=20,
@@ -737,10 +659,6 @@ class RunIngestion(models.Model):
         blank=True,
         default="",
     )
-
-    # =========================================================================
-    # Evidence
-    # =========================================================================
 
     file_count = models.IntegerField(
         default=0,
@@ -767,10 +685,6 @@ class RunIngestion(models.Model):
         help_text="When the most recent file completed into this run. The clock the quiet-period closer reads.",
     )
 
-    # =========================================================================
-    # Timestamps
-    # =========================================================================
-
     opened_at = models.DateTimeField(auto_now_add=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -794,10 +708,6 @@ class RunIngestion(models.Model):
         stamp = self.reference_time.strftime("%Y-%m-%dT%H:%MZ")
         return f"{self.collection.slug} @ {stamp} [{self.status}]"
 
-    # =========================================================================
-    # Properties
-    # =========================================================================
-
     @property
     def is_open(self) -> bool:
         return self.status == self.Status.OPEN
@@ -820,10 +730,6 @@ class RunIngestion(models.Model):
         older run would outrank a newer one.
         """
         return int(self.reference_time.timestamp()) * 100 + self.revision
-
-    # =========================================================================
-    # Transitions
-    # =========================================================================
 
     @classmethod
     def record_file(cls, collection, reference_time, completed_at=None):
@@ -1000,10 +906,6 @@ class RunIngestion(models.Model):
                 transaction.on_commit(partial(_emit_run_closed, self, event))
         return True
 
-    # =========================================================================
-    # Queries
-    # =========================================================================
-
     @classmethod
     def _completed_file_count(cls, collection, reference_time) -> int:
         return (
@@ -1018,7 +920,6 @@ class RunIngestion(models.Model):
 
     @classmethod
     def latest_closed(cls, collection):
-        """The most recent closed run for a collection, or None."""
         return cls.objects.filter(collection=collection, status=cls.Status.CLOSED).order_by("-reference_time").first()
 
 
@@ -1115,8 +1016,6 @@ class FileIngestionFinished(DomainEvent):
 
 
 class RunIngestionClosed(DomainEvent):
-    """A model run finished arriving into a collection (ADR 0026, ADR 0030)."""
-
     label = "Run closed"
 
     run = models.ForeignKey(RunIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
@@ -1163,11 +1062,6 @@ class RunIngestionReopened(DomainEvent):
 
     def summary(self):
         return f"Reopened by a late file; now revision {self.revision}"
-
-
-# ---------------------------------------------------------------------------
-# Push feeds (ADR 0034)
-# ---------------------------------------------------------------------------
 
 
 class PushFeed(models.Model):
@@ -1363,7 +1257,6 @@ class UploadSession(models.Model):
             self.mark_failed()
 
     def _check_auto_complete(self):
-        """Auto-complete when all deliveries have reached a terminal state."""
         if self.status != self.Status.ACTIVE:
             return
         terminal = {Delivery.Status.ACCEPTED}
@@ -1714,8 +1607,6 @@ class PushSender(models.Model):
 
 
 class _PushSenderEvent(DomainEvent):
-    """The shared snapshot of an event about a machine sender."""
-
     push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     feed_name = models.CharField(max_length=255)
     sender_label = models.CharField(max_length=100)
@@ -1736,8 +1627,6 @@ class _PushSenderEvent(DomainEvent):
 
 
 class PushSenderAdded(_PushSenderEvent):
-    """A machine sender was added to a push feed."""
-
     label = "Sender added"
     verb = "added"
 
@@ -1755,10 +1644,6 @@ class PushSenderRevoked(_PushSenderEvent):
     label = "Sender revoked"
     verb = "revoked"
 
-
-# ---------------------------------------------------------------------------
-# Task-ferry Job models
-# ---------------------------------------------------------------------------
 
 from task_ferry.models import Job  # noqa: E402
 
@@ -1780,7 +1665,7 @@ class FileIngestionJob(Job):
     """
 
     # Machine-written job/telemetry record — kept out of Wagtail's reference
-    # index (see core/test_reference_index_exclusion.py).
+    # index (see core/tests/test_reference_index_exclusion.py).
     wagtail_reference_index_ignore = True
 
     file_path = models.CharField(

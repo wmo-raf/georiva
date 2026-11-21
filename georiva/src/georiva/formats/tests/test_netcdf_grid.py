@@ -42,8 +42,6 @@ class NetCDFGridTests(SimpleTestCase):
     def _metadata(self, path: Path) -> dict:
         return self.plugin.get_metadata_for_variable(path, "t2m", timestamp=TIME)
 
-    # ── accepted ──────────────────────────────────────────────────────────
-
     def test_regular_grid_is_placed(self):
         path = self._rectilinear(np.arange(-10, 10.01, 0.5), np.arange(20, 40.01, 0.5))
 
@@ -68,8 +66,6 @@ class NetCDFGridTests(SimpleTestCase):
         meta = self._metadata(path)
 
         self.assertEqual(meta["bounds"], (19.75, -10.25, 40.25, 10.25))
-
-    # ── refused ───────────────────────────────────────────────────────────
 
     def test_curvilinear_lat_lon_is_refused(self):
         y, x = np.arange(20), np.arange(30)
@@ -172,8 +168,6 @@ class NetCDFGridTests(SimpleTestCase):
 
         self.assertEqual(meta["bounds"], (-500.0, -500.0, 29500.0, 19500.0))
         self.assertEqual(meta["crs"], "EPSG:3857")
-
-    # ── 0..360 longitudes ─────────────────────────────────────────────────
 
     def test_global_0_to_360_grid_is_recentred_on_greenwich(self):
         lons = np.arange(0, 360, 1.0)

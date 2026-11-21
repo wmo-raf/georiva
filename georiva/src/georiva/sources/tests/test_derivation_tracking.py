@@ -227,7 +227,6 @@ class RunListViewTests(TestCase):
         completed_tag = unit_hash({"n": 1})[:8]
         failed_tag = unit_hash({"n": 2})[:8]
 
-        # Default (no filter) shows both.
         both = self.client.get(self._url())
         self.assertContains(both, completed_tag)
         self.assertContains(both, failed_tag)

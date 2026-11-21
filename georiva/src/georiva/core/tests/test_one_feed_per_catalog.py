@@ -1,5 +1,3 @@
-"""ADR 0034: every catalog has at most one feed, pull or push."""
-
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 

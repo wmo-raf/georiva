@@ -65,7 +65,6 @@ class OrgScopedQuerysetReportMixin:
 
 
 def _members_of_host(request, users):
-    """``users`` limited to members of the organisation serving ``request``."""
     members = OrganisationMembership.objects.filter(organisation=require_active_org(request))
     return users.filter(pk__in=members.values("user"))
 
@@ -226,7 +225,6 @@ def _as_wagtail_serves_it(view):
 
 
 def report_urlpatterns(admin_prefix):
-    """The claims — each report and its results-only twin — under ``admin_prefix``."""
     return [
         path(
             f"{admin_prefix}reports/{route}{path_suffix}",

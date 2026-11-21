@@ -224,8 +224,14 @@ lint:
     uvx {{ ruff }} format --check .
     bash -n deploy/*.sh
     uvx --from {{ shellcheck }} shellcheck deploy/*.sh
+    python3 scripts/comment_ratchet.py
 
 # What to run before committing: sorts imports, applies safe fixes, formats.
 format:
     uvx {{ ruff }} check --fix .
     uvx {{ ruff }} format .
+    python3 scripts/comment_ratchet.py --update
+
+# Lower the comment baseline after deleting comments (`just format` does this too)
+comment-ratchet-update:
+    python3 scripts/comment_ratchet.py --update

@@ -40,7 +40,6 @@ AREA = {
 
 
 def grid(base: float) -> numpy.ndarray:
-    """Every cell holds ``base`` plus its column index."""
     return (base + numpy.tile(numpy.arange(SIZE, dtype="float32"), (SIZE, 1))).astype("float32")
 
 

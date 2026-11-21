@@ -1,10 +1,3 @@
-"""
-GeoRiva STAC API OpenAPI Schema
-
-Generates OpenAPI 3.0 specification for the STAC API.
-Access via: GET /stac/api
-"""
-
 from rest_framework.decorators import api_view
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -13,7 +6,6 @@ from georiva.core.utils import get_base_stac_api_url
 
 
 def get_openapi_schema(request: Request) -> dict:
-    """Generate OpenAPI 3.0 schema for STAC API."""
 
     base_url = get_base_stac_api_url(request)
 
@@ -398,6 +390,5 @@ def get_openapi_schema(request: Request) -> dict:
 
 @api_view(["GET"])
 def openapi_view(request: Request) -> Response:
-    """Serve OpenAPI schema."""
     schema = get_openapi_schema(request)
     return Response(schema, content_type="application/vnd.oai.openapi+json;version=3.0")

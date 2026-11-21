@@ -77,7 +77,6 @@ def retry_fetched_file(self, fetched_file_id):
 
 @app.on_after_finalize.connect
 def setup_scheduled_product_beat(sender, **kwargs):
-    """Register the periodic scheduled-product beat (mirror of the derivation sweep)."""
     register_periodic_tasks(
         [
             PeriodicSpec(
@@ -94,7 +93,6 @@ def setup_scheduled_product_beat(sender, **kwargs):
 
 @app.on_after_finalize.connect
 def setup_stale_fetch_run_sweep_beat(sender, **kwargs):
-    """Register the recovery sweep (mirror of the scheduled-product beat)."""
     register_periodic_tasks(
         [
             PeriodicSpec(

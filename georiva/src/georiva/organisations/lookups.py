@@ -103,14 +103,12 @@ def via_content_object(content_type_field, object_id_field):
 
 
 def related_path(declared):
-    """The path in a :func:`via_related` declaration, or ``None``."""
     if isinstance(declared, str) and declared.startswith(VIA_RELATED_PREFIX):
         return declared[len(VIA_RELATED_PREFIX) :]
     return None
 
 
 def content_object_fields(declared):
-    """The ``(content_type_field, object_id_field)`` pair, or ``None``."""
     if isinstance(declared, str) and declared.startswith(VIA_CONTENT_OBJECT_PREFIX):
         content_type_field, _, object_id_field = declared[len(VIA_CONTENT_OBJECT_PREFIX) :].partition(":")
         return content_type_field, object_id_field

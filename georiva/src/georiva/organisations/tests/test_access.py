@@ -46,8 +46,6 @@ class AccessHelperTests(TestCase):
         request.active_org_role = role
         return request
 
-    # -- the declared route ------------------------------------------------
-
     def test_organisation_lookup_is_read_from_the_model(self):
         self.assertEqual(access.organisation_lookup(Catalog), "organisation")
         self.assertEqual(access.organisation_lookup(Collection), "catalog__organisation")
@@ -67,8 +65,6 @@ class AccessHelperTests(TestCase):
         feed = DataFeed.objects.create(name="Orphan")
         self.assertIsNone(access.organisation_of(feed))
 
-    # -- scoped_queryset ---------------------------------------------------
-
     def test_scoped_queryset_keeps_only_the_requests_organisation(self):
         request = self._request(self.kenya)
         rows = access.scoped_queryset(request, Catalog.objects.all())
@@ -86,8 +82,6 @@ class AccessHelperTests(TestCase):
         request = self._request(self.kenya, user=make_user("root", superuser=True))
         rows = access.scoped_queryset(request, Catalog.objects.all())
         self.assertEqual(list(rows), [self.kenya_catalog])
-
-    # -- object resolution -------------------------------------------------
 
     def test_get_org_object_or_404_resolves_within_the_organisation(self):
         request = self._request(self.kenya)
@@ -112,8 +106,6 @@ class AccessHelperTests(TestCase):
     def test_require_org_object_returns_an_owned_row(self):
         request = self._request(self.kenya)
         self.assertEqual(access.require_org_object(request, self.kenya_catalog), self.kenya_catalog)
-
-    # -- role gates --------------------------------------------------------
 
     def test_require_org_member_rejects_a_non_member(self):
         request = self._request(self.kenya, user=make_user("stranger"), role=None)

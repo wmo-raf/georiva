@@ -155,12 +155,7 @@ def repository_storage(href: str, *, allow_http: bool = False, timeout: str = RE
     return icechunk.http_storage(href, opts=options)
 
 
-# ---- what a session holds open ------------------------------------------------------
-
-
 class OpenStores:
-    """The stores one session opened, and the fields it decoded from them."""
-
     def __init__(self):
         self._lock = threading.Lock()
         self._stores: dict[tuple, _OpenStore] = {}
@@ -173,13 +168,11 @@ class OpenStores:
 
     @property
     def held_fields(self) -> int:
-        """How many decoded fields are held."""
         with self._lock:
             return len(self._fields)
 
     @property
     def held_field_bytes(self) -> int:
-        """The memory the held fields' values take."""
         with self._lock:
             return sum(source.nbytes for source in self._fields.values())
 
@@ -283,9 +276,6 @@ class _OpenStore:
             raise StoreUnreadable(f"The upstream array “{path}” is not one map per time step.")
         measured = [self._coordinate(path, str(name)) for name in names]
         return array, _axes([str(name) for name in names], measured), measured
-
-
-# ---- a decoded field as a raster -------------------------------------------------------
 
 
 class _ArraySource:

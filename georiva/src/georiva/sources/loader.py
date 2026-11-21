@@ -1,9 +1,3 @@
-"""
-GeoRiva Loader
-
-Orchestrates data loading by using DataSource.
-"""
-
 import logging
 import shutil
 import tempfile
@@ -33,9 +27,6 @@ class CandidateFile:
 
 @dataclass
 class LoaderRunResult(RunResult):
-    """Result of a complete loader run."""
-
-    # Counts
     files_requested: int = 0
     files_fetched: int = 0
     files_skipped: int = 0
@@ -43,11 +34,9 @@ class LoaderRunResult(RunResult):
     files_queued: int = 0  # For async sources (CDS API)
     bytes_transferred: int = 0
 
-    # Details
     fetch_results: list = field(default_factory=list)
     stored_paths: list[str] = field(default_factory=list)  # storage paths of successfully fetched files
 
-    # Context
     run_time: datetime | None = None  # For forecasts: which model run
 
     @property
@@ -169,11 +158,11 @@ class Loader:
 
     def __init__(
         self,
-        data_source,  # DataSource protocol
-        collection,  # GeoRiva collection model
+        data_source,
+        collection,
         *,
         data_feed=None,
-        on_file_fetched: Callable | None = None,  # Callback after each file
+        on_file_fetched: Callable | None = None,
         resumed_from=None,  # FetchRun this run retries; its failed requests are the plan
         clock: Callable[[], float] = time.monotonic,  # Seam for the run time limit
     ):
@@ -188,9 +177,6 @@ class Loader:
         self.logger = logging.getLogger(f"georiva.loader.{data_source.name.replace(' ', '_').lower()}")
         self._temp_dir: str | None = None
 
-    # =========================================================================
-    # Target tier routing
-    # =========================================================================
     @property
     def _tier_bucket_type(self) -> str:
         """
@@ -214,10 +200,6 @@ class Loader:
     @property
     def _tier_bucket(self):
         return storage.bucket(self._tier_bucket_type)
-
-    # =========================================================================
-    # Main Run Method
-    # =========================================================================
 
     @staticmethod
     def _request_payload(request):
@@ -397,7 +379,6 @@ class Loader:
             self.logger.warning("No file requests generated")
             return
 
-        # Extract run time from first request (for forecasts)
         if requests[0].reference_time:
             result.run_time = requests[0].reference_time
             self.logger.info(f"Processing forecast run: {result.run_time.isoformat()}")
@@ -472,7 +453,6 @@ class Loader:
 
         self.logger.info(f"{len(to_fetch)} to fetch, {result.files_skipped} skipped")
 
-        # Fetch files
         for i, (request, ff) in enumerate(to_fetch, 1):
             # Checked between files only: a file in progress has its own limit.
             if self.clock() - run_started >= run_max_seconds:
@@ -497,7 +477,6 @@ class Loader:
                 result.bytes_transferred += fetch_result.bytes_transferred
                 result.stored_paths.append(self._get_storage_path(request))
 
-                # Callback
                 if self.on_file_fetched:
                     try:
                         self.on_file_fetched(request, fetch_result)
@@ -551,12 +530,7 @@ class Loader:
                 completed_at=timezone.now(),
             )
 
-    # =========================================================================
-    # File Operations
-    # =========================================================================
-
     def _already_exists(self, request) -> bool:
-        """Check if file already exists in storage for this collection."""
         storage_path = self._get_storage_path(request)
         return self._tier_bucket.exists(storage_path)
 
@@ -583,7 +557,6 @@ class Loader:
         catalog_prefix = self.collection.catalog.storage_prefix
         collection_slug = self.collection.slug
 
-        # ── 1. FileIngestion check ─────────────────────────────────────────────
         log_path = (
             FileIngestion.objects.filter(
                 bucket=self._tier_bucket_type,
@@ -601,7 +574,6 @@ class Loader:
         if log_path:
             return log_path
 
-        # ── 2. Direct storage check on sibling collections ────────────────────
         # Handles files that exist in MinIO but have no FileIngestion entry
         # (dropped event, manual upload, consumer restart, etc.).
         if self.data_feed:
@@ -616,16 +588,13 @@ class Loader:
         return None
 
     def _fetch_and_store(self, request):
-        """Fetch a file and store it."""
 
         start_time = time.time()
         temp_path = self._get_temp_path(request.filename)
 
         try:
-            # Fetch to temp location
             fetch_result = self.fetch_strategy.fetch(request, temp_path)
 
-            # Handle async/queued results
             if fetch_result.status == "queued":
                 self.logger.info(f"Request queued: {request.filename}")
                 return fetch_result
@@ -633,11 +602,9 @@ class Loader:
             if not fetch_result.success:
                 return fetch_result
 
-            # Validate downloaded file
             if not self._validate_file(temp_path, request):
                 return fetch_result.fail("File validation failed", FailureScope.FILE)
 
-            # post process file
             processed_path, new_filename = self.data_source.post_process_fetched_file(request, temp_path)
             filename_to_store = new_filename or request.filename
             request.filename = filename_to_store
@@ -666,7 +633,6 @@ class Loader:
             )
 
         finally:
-            # Clean up temp file
             if temp_path.exists():
                 try:
                     temp_path.unlink()
@@ -676,28 +642,21 @@ class Loader:
         return fetch_result
 
     def _validate_file(self, local_path: Path, request) -> bool:
-        """Validate downloaded file."""
         if not local_path.exists():
             self.logger.error(f"File does not exist: {local_path}")
             return False
 
         size = local_path.stat().st_size
 
-        # Check minimum size (files should be at least a few KB)
         if size < 1000:
             self.logger.error(f"File too small ({size} bytes): {local_path}")
             return False
 
-        # Check expected size if provided
         if request.expected_size and abs(size - request.expected_size) > 100:
             self.logger.warning(f"Size mismatch: expected {request.expected_size}, got {size}")
-            # Don't fail on size mismatch, just warn
 
         return True
 
-    # =========================================================================
-    # Storage Operations
-    # =========================================================================
     def _get_storage_path(self, request) -> str:
         """
         Build storage path in georiva-sources bucket.
@@ -724,32 +683,21 @@ class Loader:
         return f"{self.collection.catalog.storage_prefix}/{self.collection.slug}/{filename}"
 
     def _store_file(self, local_path: Path, storage_path: str):
-        """Store file in permanent storage for this feed's target tier."""
         with open(local_path, "rb") as f:
             self._tier_bucket.save(storage_path, f)
 
-    # =========================================================================
-    # Temp Directory Management
-    # =========================================================================
-
     def _get_temp_path(self, filename: str) -> Path:
-        """Get a temporary file path."""
         if self._temp_dir is None:
             self._temp_dir = tempfile.mkdtemp(prefix="georiva_loader_", dir=settings.GEORIVA_TEMP_DIR)
         return Path(self._temp_dir) / filename
 
     def _cleanup_temp(self):
-        """Clean up temporary directory."""
         if self._temp_dir and Path(self._temp_dir).exists():
             try:
                 shutil.rmtree(self._temp_dir)
             except Exception as e:
                 self.logger.warning(f"Failed to clean temp dir: {e}")
             self._temp_dir = None
-
-    # =========================================================================
-    # Context Manager Support
-    # =========================================================================
 
     def __enter__(self):
         self.fetch_strategy.connect()

@@ -68,7 +68,6 @@ class OrganisationAdminAccessTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
     def test_the_two_organisation_surfaces_sit_in_one_submenu(self):
-        """Neither is a top-level sidebar item; both hang off "Organisations"."""
         self._login("root", superuser=True)
         response = self.client.get(reverse("wagtailadmin_home"), headers=HOST)
         request = response.wsgi_request

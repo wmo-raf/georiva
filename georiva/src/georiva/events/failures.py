@@ -1,17 +1,3 @@
-"""Recent failed and refused transitions for the active organisation (ADR 0030, ADR 0033).
-
-The one deliberate org-wide listing in the design — an explicit exception to the
-decision that retired the Monitoring menu (ADR 0019), justified by silent-failure
-detection: a failure has to reach someone who does not already know which object
-to open. It reads the index table's outcome class, so it needs no per-type query
-to *find* failures; details are then fetched once per type that actually appears.
-
-The dashboard shows one line per *failure group* — event type plus the event's
-``failure_group_key`` (a feed, a collection, a derived product) — so a feed that
-fails every twenty minutes is one line, not a page. The Failures page behind it
-lists the events themselves.
-"""
-
 from dataclasses import dataclass
 from datetime import timedelta
 from urllib.parse import urlencode

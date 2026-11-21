@@ -102,11 +102,6 @@ def _dims(dims: tuple[int, ...]) -> str:
     return "×".join(str(d) for d in dims)
 
 
-# ---------------------------------------------------------------------------
-# The record — on every commit, and cached on the manifest
-# ---------------------------------------------------------------------------
-
-
 def left_out_to_json(left_out: Sequence[LeftOut]) -> list[dict]:
     return [{"reason": entry.reason, "count": entry.count} for entry in left_out]
 
@@ -121,13 +116,7 @@ def left_out_count(left_out: Sequence[LeftOut]) -> int:
 
 
 def describe_left_out(left_out: Sequence[LeftOut]) -> str:
-    """Every reason in one line, for a log or a hover."""
     return "; ".join(f"{entry.count} × {entry.reason}" for entry in left_out)
-
-
-# ---------------------------------------------------------------------------
-# Extractors
-# ---------------------------------------------------------------------------
 
 
 def _serialise_codecs(codecs) -> tuple[str, ...]:

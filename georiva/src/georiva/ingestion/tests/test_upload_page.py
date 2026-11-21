@@ -109,10 +109,6 @@ class UploadPageRenderTests(TestCase):
     def test_unknown_config_returns_404(self):
         self.assertEqual(self.client.get(PAGE_URL.format(99999)).status_code, 404)
 
-    # ------------------------------------------------------------------
-    # Cycle 1: progress log structure
-    # ------------------------------------------------------------------
-
     def test_page_has_progress_log_container(self):
         _, _, config, _ = _geotiff_setup()
         response = self.client.get(PAGE_URL.format(config.pk))
@@ -494,11 +490,6 @@ class UploadSubmitTests(TestCase):
         self.assertTrue(FileIngestionJob.objects.filter(pk=job_id).exists())
 
 
-# =============================================================================
-# Multi-file batch upload
-# =============================================================================
-
-
 @patch("georiva.ingestion.tasks.process_incoming_file")
 @patch("georiva.core.storage.StorageManager.incoming", new_callable=PropertyMock)
 class UploadSubmitMultiFileTests(TestCase):
@@ -769,11 +760,6 @@ class DirectDropTimeValidationTests(TestCase):
 
         mock_storage.move_between.assert_called_once()
         mock_task.delay.assert_not_called()
-
-
-# =============================================================================
-# process_incoming_file task — job_id wiring
-# =============================================================================
 
 
 @patch("task_ferry.handler.JobHandler.run")

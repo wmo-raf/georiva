@@ -52,10 +52,6 @@ core_urlpatterns = [
     # technique as page search above; the menu already hides them, but the URL is
     # what has to refuse.
     *report_urlpatterns(ADMIN_PREFIX),
-    # The org-hopper's per-request half (#270). Routed here rather than through
-    # `register_admin_urls` because that hook wraps its URLs in
-    # `require_admin_access`, whose login redirect the login page's own copy of
-    # this script tag would follow into HTML. See ADR 0017.
     path(
         f"{ADMIN_PREFIX}org-hopper.js",
         org_hopper_script,
@@ -77,28 +73,16 @@ if settings.DEBUG:
     from django.conf.urls.static import static
     from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 
-    # Serve static and media files from development server
     core_urlpatterns += staticfiles_urlpatterns()
     core_urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-#: For anything not caught by a more specific rule, hand over to Wagtail's page
-#: serving mechanism. This is last, and everything above it is reached first.
 page_tree_urlpatterns = [
     path("", include(wagtail_urls)),
-    # Alternatively, if you want Wagtail pages to be served from a subpath
-    # of your site, rather than the site root:
-    #    path("pages/", include(wagtail_urls)),
 ]
 
 
 def build_urlpatterns():
-    """The instance's URL conf, in the order that is load-bearing.
-
-    Plugin-contributed page routes go between the two lists above (ADR 0039).
-    After core's, for the reason ADR 0028 appends a plugin's API routes: a plugin
-    must not be able to take a path core already answers. Before the page tree's
-    catch-all, because Wagtail's resolver answers for every path under it and
-    would otherwise swallow a mount the operator put at the site root.
+    """The instance's URL conf, in the order ADR 0039 sets.
 
     A function so that a test can assemble the real composition with a plugin
     discovered, rather than restate it and assert against the copy.

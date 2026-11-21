@@ -1,14 +1,6 @@
-"""
-Request and response serializers for the timeseries API.
-"""
-
 from __future__ import annotations
 
 from rest_framework import serializers
-
-# ---------------------------------------------------------------------------
-# Shared fields
-# ---------------------------------------------------------------------------
 
 
 class VariablePathField(serializers.CharField):
@@ -72,11 +64,6 @@ class VariablePathField(serializers.CharField):
             raise serializers.ValidationError(f"Variable not found or inactive: {value!r}") from None
 
 
-# ---------------------------------------------------------------------------
-# Request serializers
-# ---------------------------------------------------------------------------
-
-
 class PointRequestSerializer(serializers.Serializer):
     variable = VariablePathField(help_text="catalog_slug/collection_slug/variable_slug")
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
@@ -124,7 +111,7 @@ class AreaRequestSerializer(serializers.Serializer):
             if not geom.is_valid:
                 raise serializers.ValidationError(f"Invalid geometry: {explain_validity(geom)}")
         except ImportError:
-            pass  # shapely not installed — skip deep validation
+            pass
 
         return value
 
@@ -134,11 +121,6 @@ class AreaRequestSerializer(serializers.Serializer):
         if start and end and start >= end:
             raise serializers.ValidationError("time_start must be before time_end.")
         return attrs
-
-
-# ---------------------------------------------------------------------------
-# Response serializers
-# ---------------------------------------------------------------------------
 
 
 class TimeseriesValueSerializer(serializers.Serializer):

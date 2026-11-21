@@ -8,11 +8,6 @@ User = get_user_model()
 ACTIVITY_URL = "/admin/ingestion/activity/"
 
 
-# =============================================================================
-# Cycle 1: Activity page renders for authenticated users
-# =============================================================================
-
-
 class ActivityPageRenderTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_af", "af@test.com", "pw")
@@ -35,15 +30,6 @@ class ActivityPageRenderTests(TestCase):
         self.client.logout()
         response = self.client.get(ACTIVITY_URL, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
         self.assertEqual(response.status_code, 403)
-
-
-# =============================================================================
-# Cycle 3: Dashboard panel has "View all" link to the activity feed
-# =============================================================================
-
-# =============================================================================
-# Cycle 1 (issue #55): Cancel wiring present in activity feed template
-# =============================================================================
 
 
 class ActivityFeedLiveArrivalTests(TestCase):

@@ -125,7 +125,6 @@ def rotate_sender(sender, user=None, admin=None):
 
 
 def revoke_sender(sender, user=None, admin=None):
-    """Remove the sender's MinIO user and its row."""
     admin = admin or get_admin()
     _remove_user(admin, sender.access_key, strict=True)
     with transaction.atomic():

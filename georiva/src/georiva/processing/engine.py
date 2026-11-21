@@ -105,7 +105,6 @@ def _register_item(out_item, recipe: BaseRecipe, input_hash: str):
         },
     )
 
-    # Overwrite-in-place: refresh spatial metadata + derivation provenance.
     item.bounds = bounds if bounds is not None else item.bounds
     item.crs = out_item.crs or item.crs
     item.width = out_item.width if out_item.width is not None else item.width
@@ -194,11 +193,9 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
 
 
 def _write_links(item, resolved, recipe: BaseRecipe, input_hash: str):
-    """Record DerivationLink edges from the new Item to each input item."""
     from georiva.core.models import Item as PublishedItem
     from georiva.staging.models import DerivationLink, StagingItem
 
-    # Replace this item's lineage (overwrite-in-place semantics).
     DerivationLink.objects.filter(derived_item=item).delete()
 
     seen = set()
@@ -308,8 +305,6 @@ def _transform(recipe: BaseRecipe, unit: ProductionUnit, resolved) -> list:
 
     undeclared = sorted(role for role in resolved if not recipe.input_units.get(role))
     if undeclared:
-        # Never the served unit as a fallback: it is a display choice anybody
-        # may change, and this output is written down for good.
         raise values.ConversionRefused(
             f"Recipe {recipe.type} declares no unit to read input(s) "
             f"{', '.join(repr(role) for role in undeclared)} in; name each in its input_units (ADR 0046 §13)."
@@ -399,15 +394,11 @@ def _run_unit(
 
         ihash = compute_input_hash(resolved, recipe.version)
 
-        # Readiness comes before ``outputs``: a recipe maps a unit onto its
-        # output item *from* its inputs, which a deleted input no longer offers.
         logger.info("[unit %s] %s step 2/6 — readiness check…", pos, tag)
         if not recipe.readiness(unit, resolved):
             missing = [ri.name for ri in resolved.values() if ri.required and not ri.present]
             if run.produced_item_id is not None:
                 if run.input_hash == ihash:
-                    # Nothing it was built from has changed; a readiness that
-                    # turned false on its own (a count, a window) withdraws nothing.
                     event = run.mark_skipped(input_hash=ihash)
                     _log_progress(origin, unit_total)
                     return UnitResult(status="skipped", input_hash=ihash, event_id=event.pk)

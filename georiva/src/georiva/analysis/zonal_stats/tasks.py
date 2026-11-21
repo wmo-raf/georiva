@@ -14,10 +14,6 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=3,
     acks_late=True,
-    # Deferrable bookkeeping: an ingested COG is already servable without its
-    # zonal statistics — tiles, STAC and EDR all answer without them — and one
-    # large fetch fans this out per asset.  Keeping it off georiva-ingestion
-    # stops that fan-out delaying the next file to be extracted (#398).
     # Idempotent — persist_stats upserts on its unique constraint — so it is
     # safe on a multi-slot worker.  A dropped run is re-issued by
     # sweep_missing_boundary_stats (#402) and, for a harvested asset of any
@@ -385,8 +381,6 @@ def sweep_missing_boundary_stats() -> None:
         if not levels:
             continue
 
-        # COGs only, which leaves Store assets out: zonal statistics are not
-        # computed over an upstream store (ADR 0044, out of scope).
         assets = Asset.objects.filter(
             item__collection=collection,
             format=Asset.Format.COG,

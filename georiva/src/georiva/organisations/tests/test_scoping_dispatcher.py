@@ -167,14 +167,11 @@ class DispatcherTests(TestCase):
                 self.assertEqual(belongs_to_active_org(request, row), row.pk in expected_pks)
 
     def start_workflow(self, page):
-        """Put ``page`` into moderation and hand back its workflow state."""
         task = GroupApprovalTask.objects.create(name=f"Moderate {page.slug}")
         workflow = Workflow.objects.create(name=f"Moderation {page.slug}")
         WorkflowTask.objects.create(workflow=workflow, task=task, sort_order=0)
         page.save_revision(user=self.user)
         return workflow.start(page, self.user)
-
-    # -- pages, by tree position -------------------------------------------
 
     def test_pages_are_narrowed_to_the_active_organisations_tree(self):
         self.assert_scopes_to(
@@ -189,8 +186,6 @@ class DispatcherTests(TestCase):
             [self.uganda_page],
             request=self.request(self.uganda),
         )
-
-    # -- via_related -------------------------------------------------------
 
     def test_page_log_entries_follow_their_page(self):
         mine = log(instance=self.kenya_page, action="wagtail.edit", user=self.user)
@@ -218,8 +213,6 @@ class DispatcherTests(TestCase):
         mine = FeaturedCatalog.objects.create(page=self.kenya_page, catalog=self.kenya_catalog, sort_order=0)
         theirs = FeaturedCatalog.objects.create(page=self.uganda_page, catalog=self.uganda_catalog, sort_order=0)
         self.assert_scopes_to(FeaturedCatalog.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine])
-
-    # -- via_content_object ------------------------------------------------
 
     def test_workflow_states_follow_the_object_under_moderation(self):
         mine = self.start_workflow(self.kenya_page)
@@ -302,8 +295,6 @@ class DispatcherTests(TestCase):
             self.assertEqual(list(scope_rows(self.request(), queryset)), [])
             self.assertFalse(belongs_to_active_org(self.request(), orphan))
 
-    # -- the kinds that were already there ---------------------------------
-
     def test_an_orm_path_still_reaches_access(self):
         from georiva.core.models import Catalog
 
@@ -317,8 +308,6 @@ class DispatcherTests(TestCase):
 
         Topic.objects.create(name="Rainfall", slug="rainfall")
         self.assertEqual(list(scope_rows(self.request(), Topic.objects.all())), list(Topic.objects.all()))
-
-    # -- refusals ----------------------------------------------------------
 
     def test_a_model_with_no_route_is_refused_by_both_entry_points(self):
         from georiva.accounts.models import ApiKey
@@ -361,8 +350,6 @@ class DispatcherTests(TestCase):
         with declaring(Catalog, via_related("collections")), declaring(Collection, via_related("catalog")):
             with self.assertRaises(ImproperlyConfigured):
                 list(scope_rows(self.request(), Catalog.objects.all()))
-
-    # -- the enforcing form ------------------------------------------------
 
     def test_require_refuses_another_organisations_row(self):
         from django.http import Http404

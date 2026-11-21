@@ -78,10 +78,6 @@ def register_staging_file(bucket: str, key: str):
     """
     Register a single raw file in the STAGING bucket as one StagingItem +
     one source asset. Returns the StagingItem, or None if the file is skipped.
-
-    The authoritative time and calendar are NOT trusted from these fields —
-    they are approximate Gregorian index bounds. The real time is read from
-    file content at derivation time.
     """
     from georiva.formats.base import UnsupportedGridError
     from georiva.formats.registry import format_registry
@@ -135,9 +131,6 @@ def register_staging_file(bucket: str, key: str):
 
     dt, start_dt, end_dt = _temporal_extent(timestamps)
 
-    # Pin the published-tier core Collection (same catalog + slug) so the
-    # arriving-input trigger can carry a collection_id (ADR-0010 §3). Nullable:
-    # if the core Collection isn't provisioned yet, registration still proceeds.
     from georiva.core.models import Collection
 
     core_collection = Collection.objects.filter(catalog=catalog, slug=collection_slug).first()
@@ -193,11 +186,6 @@ def register_staging_file(bucket: str, key: str):
     return item
 
 
-# =============================================================================
-# Redis event loop (mirror of consumer.py, separate list)
-# =============================================================================
-
-
 def _handle_event(ev: dict):
     bucket_name = ev.get("s3", {}).get("bucket", {}).get("name", "")
     key_raw = ev.get("s3", {}).get("object", {}).get("key", "")
@@ -209,7 +197,6 @@ def _handle_event(ev: dict):
     if Path(key).name.startswith("."):  # .keep, hidden files
         return
 
-    # Only act on the STAGING bucket.
     staging_name = storage.bucket(BucketType.STAGING).bucket_name
     if bucket_name != staging_name:
         return
@@ -267,7 +254,6 @@ def _consume_loop(stop_event=None):
 
 
 def run_staging_consumer(stop_event=None):
-    """Block on the staging Redis list and register StagingItems."""
     logger.info("Staging consumer started, listening on key: %s", STAGING_REDIS_KEY)
 
     while not (stop_event is not None and stop_event.is_set()):

@@ -31,8 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ManifestNotReady(Exception):
-    """Raised when the VirtualZarrManifest for a variable is not READY."""
+class ManifestNotReady(Exception): ...
 
 
 class RemoteRangeTooLarge(Exception):
@@ -63,10 +62,6 @@ class TimeseriesService:
 
     def __init__(self, *, internal: bool = True) -> None:
         self._internal = internal
-
-    # -------------------------------------------------------------------------
-    # Public API
-    # -------------------------------------------------------------------------
 
     def point(
         self,
@@ -192,10 +187,6 @@ class TimeseriesService:
             from_remote=lambda session, locations: session.area_series(locations, geometry, aggregation),
         )
 
-    # -------------------------------------------------------------------------
-    # Private helpers
-    # -------------------------------------------------------------------------
-
     def _series(self, variable, time_start, time_end, *, name, from_store, from_remote) -> pd.Series:
         """One series over the range: the virtual store's timesteps and the
         Remote assets', joined in time order, all read in one reading session
@@ -314,7 +305,6 @@ class TimeseriesService:
         return session.virtual_dataset(manifest, internal=self._internal)
 
     def _filter_time(self, da, time_start, time_end):
-        """Apply an optional time range slice to a DataArray."""
         if time_start is None and time_end is None:
             return da
 
@@ -365,7 +355,6 @@ class TimeseriesService:
             return da.where(mask == 0)
 
         except ImportError:
-            # regionmask not installed — fall back to bbox only with a warning.
             logger.warning(
                 "regionmask not installed — polygon masking skipped. "
                 "Install regionmask for precise polygon masking: "
@@ -387,7 +376,6 @@ class TimeseriesService:
         # Drop NaN — nodata values from masked pixels or missing timesteps
         series = series.dropna()
 
-        # Ensure the index is tz-naive UTC
         if hasattr(series.index, "tz") and series.index.tz is not None:
             series.index = series.index.tz_convert("UTC").tz_localize(None)
 

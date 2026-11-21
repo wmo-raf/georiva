@@ -106,11 +106,6 @@ def log(msg):
     print(f"[{stamp}] {msg}", flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-
 def load_config(path, remote, environ=None):
     """The sender's settings: the block's ``[remote]`` section, then GEORIVA_PUSH_* overrides."""
     environ = os.environ if environ is None else environ
@@ -151,11 +146,6 @@ def load_config(path, remote, environ=None):
     }
 
 
-# ---------------------------------------------------------------------------
-# Markers
-# ---------------------------------------------------------------------------
-
-
 def sha256_of(path):
     digest = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -184,7 +174,6 @@ def fingerprint(st):
 
 
 def already_sent(path, checksum):
-    """True when ``path``'s marker records this checksum."""
     return read_marker(path).get("sha256") == checksum
 
 
@@ -244,11 +233,6 @@ def file_lock(path, block=True):
         yield held
 
 
-# ---------------------------------------------------------------------------
-# Signature Version 4
-# ---------------------------------------------------------------------------
-
-
 def _hmac(key, msg):
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
@@ -284,11 +268,6 @@ def host_header(scheme, netloc):
     """The Host header http.client will send: the port is dropped when it is the scheme's default."""
     default = ":443" if scheme == "https" else ":80"
     return netloc[: -len(default)] if netloc.endswith(default) else netloc
-
-
-# ---------------------------------------------------------------------------
-# Sending
-# ---------------------------------------------------------------------------
 
 
 def object_key(cfg, path):
@@ -432,11 +411,6 @@ def _send_locked(cfg, path, force, put, sleep, delays):
     return False
 
 
-# ---------------------------------------------------------------------------
-# Folder mode
-# ---------------------------------------------------------------------------
-
-
 def data_files(directory):
     """``(path, stat)`` for the files a pass considers, oldest first.
 
@@ -515,11 +489,6 @@ def prune(directory, keep):
         except FileNotFoundError:
             pass
         log(f"Removed {os.path.basename(path)} (sent, beyond the newest {keep})")
-
-
-# ---------------------------------------------------------------------------
-# Command line
-# ---------------------------------------------------------------------------
 
 
 def main(argv=None):

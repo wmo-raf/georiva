@@ -1,5 +1,3 @@
-"""The reading session and the one-call helpers built on it (ADR 0046 §10, §12)."""
-
 from __future__ import annotations
 
 import math
@@ -93,7 +91,6 @@ class Session:
 
     @property
     def open_stores(self) -> int:
-        """How many Upstream stores this session holds open."""
         return len(self._stores)
 
     @property
@@ -104,14 +101,11 @@ class Session:
 
     @property
     def held_field_bytes(self) -> int:
-        """The memory this session's held Store fields take."""
         return self._stores.held_field_bytes
 
     def close(self) -> None:
         self._open = False
         self._stores.close()
-
-    # ---- reads ---------------------------------------------------------------
 
     def field(self, asset, *, in_unit=_SESSION) -> Field:
         """The asset's whole field. ``in_unit``, on this or any read, names a unit
@@ -186,8 +180,6 @@ class Session:
             dataset = dataset.assign({name: to.apply(dataset[name])})
         return dataset
 
-    # ---- helpers -------------------------------------------------------------
-
     def _each(self, assets: Sequence, read) -> list[float]:
         from concurrent.futures import ThreadPoolExecutor
 
@@ -201,7 +193,6 @@ class Session:
             return list(pool.map(read, assets))
 
     def _conversion(self, asset, in_unit=_SESSION) -> Conversion:
-        """How ``asset``'s raw values become values in the unit this read is in."""
         self._check_open()
         conversions = self._conversions
         if in_unit is not _SESSION and in_unit != self.in_unit:
@@ -266,9 +257,6 @@ def readable(assets: QuerySet) -> QuerySet:
     from georiva.core.models import Asset  # late: the models import the storage seam
 
     return assets.filter(Q(format=Asset.Format.COG) | store_q())
-
-
-# ---- reading one open raster ------------------------------------------------------
 
 
 def _location(asset):

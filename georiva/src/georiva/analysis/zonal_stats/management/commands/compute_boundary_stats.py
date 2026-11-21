@@ -154,10 +154,6 @@ class Command(BaseCommand):
         action = "written" if options["sync"] else "dispatched"
         self.stdout.write(self.style.SUCCESS(f"\nDone. {total_written} row(s) {action}."))
 
-    # -------------------------------------------------------------------------
-    # Helpers
-    # -------------------------------------------------------------------------
-
     def _resolve_collections(self, options):
         from georiva.core.models import Collection
 

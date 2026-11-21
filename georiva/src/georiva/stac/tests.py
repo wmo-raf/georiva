@@ -1,8 +1,3 @@
-"""
-STAC serving must expose only `public` collections — `internal` derivation
-intermediates are read by the engine but never served.
-"""
-
 from datetime import UTC, datetime
 
 from django.test import TestCase

@@ -54,7 +54,6 @@ def get_palette_cache_key(
 
 
 def _ensure_rgba(color: list) -> list:
-    """Ensure color has 4 components [r, g, b, a]."""
     if len(color) == 3:
         return color + [255]
     return list(color[:4])

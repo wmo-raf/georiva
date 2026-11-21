@@ -166,8 +166,6 @@ class SourceUnitMigrationTests(VariableUnitsFixture, TestCase):
 
 
 class AdminFixture(VariableUnitsFixture):
-    """An organisation admin signed in, editing ``collection``."""
-
     def setUp(self):
         user = grant_everything(make_user("amina"))
         OrganisationMembership.objects.create(

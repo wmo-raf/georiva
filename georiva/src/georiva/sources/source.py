@@ -10,8 +10,6 @@ from georiva.sources.fetch.base import BaseFetchStrategy, FileRequest
 
 
 class DataSourceType(str, Enum):
-    """Categories of data sources."""
-
     FORECAST = "forecast"  # NWP models (GFS, ECMWF, etc.)
     REANALYSIS = "reanalysis"  # ERA5, MERRA-2
     SATELLITE = "satellite"  # MSG, GOES, Sentinel
@@ -33,14 +31,10 @@ class DataSource(Protocol):
     """
 
     @property
-    def name(self) -> str:
-        """Human-readable name."""
-        ...
+    def name(self) -> str: ...
 
     @property
-    def source_type(self) -> DataSourceType:
-        """Type of data source."""
-        ...
+    def source_type(self) -> DataSourceType: ...
 
     def generate_requests(
         self, start_time: datetime, end_time: datetime, variables: list[str] | None = None, **kwargs
@@ -64,12 +58,6 @@ class DataSource(Protocol):
 
 
 class BaseDataSource(ABC):
-    """
-    Abstract base class for data sources.
-
-    Provides common functionality for discovering and requesting data.
-    """
-
     type: str = ""  # 'ecmwf-aifs', 'gfs', 'chirps'
     label: str = ""  # 'ECMWF AIFS', 'NOAA GFS', 'CHIRPS'
 
@@ -107,10 +95,6 @@ class BaseDataSource(ABC):
         """Default implementation - subclasses should override for accuracy."""
         return None
 
-    # =========================================================================
-    # Time-window helpers (optional, generic)
-    # =========================================================================
-
     def get_default_start_date(self, *, collection=None) -> datetime:
         """
         Default backfill start date.
@@ -120,7 +104,6 @@ class BaseDataSource(ABC):
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def get_default_end_date(self, *, collection=None) -> datetime:
-        """Default end date (usually now)."""
         return datetime.now(UTC)
 
     def get_latest_from_db(self, *, collection=None) -> datetime | None:
@@ -192,10 +175,6 @@ class BaseDataSource(ABC):
             **kwargs,
         )
 
-    # =========================================================================
-    # Utility Methods
-    # =========================================================================
-
     def _round_to_cycle(self, dt: datetime, cycle_hours: list[int]) -> datetime:
         """
         Round datetime to nearest forecast cycle.
@@ -210,12 +189,10 @@ class BaseDataSource(ABC):
             if dt.hour >= cycle:
                 return dt.replace(hour=cycle, minute=0, second=0, microsecond=0)
 
-        # Previous day's last cycle
         prev_day = dt - timedelta(days=1)
         return prev_day.replace(hour=cycle_hours[-1], minute=0, second=0, microsecond=0)
 
     def _generate_forecast_hours(self, max_hour: int, step: int = 1, start_hour: int = 0) -> list[int]:
-        """Generate list of forecast hours."""
         return list(range(start_hour, max_hour + 1, step))
 
     def post_process_fetched_file(self, request, local_path: Path) -> tuple[Path, str | None]:

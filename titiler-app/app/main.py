@@ -34,9 +34,6 @@ from app.wmts import router as wmts_router
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# TilerFactory
-# ---------------------------------------------------------------------------
 
 #: Every tile route opens with the organisation. This service has no way to work
 #: one out — it is dialled through nginx on whatever host the portal runs on and
@@ -52,10 +49,6 @@ cog = ServedTilerFactory(
     process_dependency=SemanticRescale,
     router_prefix=TILE_ROUTE_PREFIX,
 )
-
-# ---------------------------------------------------------------------------
-# Application
-# ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
@@ -147,11 +140,6 @@ app.include_router(wmts_router)
 app.include_router(wmts_rest_router, prefix=TILE_ROUTE_PREFIX)
 
 
-# ---------------------------------------------------------------------------
-# Encoded texture (ADR 0021)
-# ---------------------------------------------------------------------------
-
-
 @app.get(TILE_ROUTE_PREFIX + "/encoded-preview.png")
 def encoded_preview(
     src_path: str = Depends(SemanticPathParams),
@@ -195,11 +183,6 @@ def encoded_preview(
             "X-Image-Bounds": ",".join(str(b) for b in img.bounds) if img.bounds else "",
         },
     )
-
-
-# ---------------------------------------------------------------------------
-# Two-band vector texture (#593)
-# ---------------------------------------------------------------------------
 
 
 @app.get("/{org_slug}/{catalog_slug}/{collection_slug}/vector-preview.png")

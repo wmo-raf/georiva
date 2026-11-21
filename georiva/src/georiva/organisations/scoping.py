@@ -71,8 +71,6 @@ class OrgScopedViewMixin:
             return queryset
         return scope_rows(self.request, queryset)
 
-    # -- listings ----------------------------------------------------------
-
     def get_base_queryset(self):
         return self.scope(super().get_base_queryset())
 
@@ -92,8 +90,6 @@ class OrgScopedViewMixin:
                 f"get_base_queryset() for OrgScopedViewMixin to scope; its rows are unfiltered."
             )
         return queryset
-
-    # -- single-object views -----------------------------------------------
 
     def get_base_object_queryset(self):
         return self.scope(super().get_base_object_queryset())
@@ -115,8 +111,6 @@ class OrgScopedViewMixin:
     def require_object(self, obj):
         """The check a resolved object must pass on this kind of view."""
         return require_active_org_object(self.request, obj)
-
-    # -- forms -------------------------------------------------------------
 
     def get_form(self, *args, **kwargs):
         return scope_form_fields(self.request, super().get_form(*args, **kwargs))
@@ -162,7 +156,6 @@ def view_class_attrs(viewset):
 
 
 def mixin_for(attr):
-    """The scoping mixin a view class named ``attr`` gets — read, or write."""
     return OrgScopedViewMixin if attr in READ_ONLY_VIEW_CLASS_ATTRS else OrgScopedWriteViewMixin
 
 

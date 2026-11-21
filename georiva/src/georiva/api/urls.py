@@ -26,9 +26,4 @@ core_urlpatterns = [
     path("upload-sessions/<int:session_id>/status/", upload_session_status_api, name="upload_session_status_api"),
 ]
 
-# Plugin-contributed routes, **after** core's. `/api/` is one organisation's whole
-# public service (ADR 0012), and a plugin that publishes something over it should
-# not have to ask core to be routed — but it must not be able to take a route
-# core already answers. Appending is the whole of that rule: the resolver stops
-# at the first match, so every pattern above is unreachable from below (ADR 0028).
 urlpatterns = core_urlpatterns + plugin_api_urlpatterns()

@@ -5,7 +5,7 @@ The bucket-scan phase of the periodic Sweep, extracted so the feed-scoped
 "Check unprocessed files" action can run it read-only under a catalog
 prefix. Classifies every conforming file in the incoming/sources buckets:
 
-- ``untracked`` — no FileIngestion record at all (the webhook missed it)
+- ``untracked`` — no FileIngestion record at all (its notification was lost)
 - ``pending``   — registered but never processed (a lost dispatch)
 - ``reingest``  — completed-but-dead data or an operator-forced re-ingest
 - ``rewritten`` — an ``incoming`` key written again after it was ingested,

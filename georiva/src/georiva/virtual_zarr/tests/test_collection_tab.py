@@ -83,8 +83,6 @@ class CollectionVirtualZarrTabTests(TestCase):
         collection = collection or self.collection
         return self.client.get(reverse("collection_virtual_zarr", args=[collection.pk]))
 
-    # -- tenancy: fail closed ----------------------------------------------
-
     def test_another_organisations_collection_is_not_found(self):
         response = self._get(self.uganda_collection)
         self.assertEqual(response.status_code, 404)
@@ -93,8 +91,6 @@ class CollectionVirtualZarrTabTests(TestCase):
         self.client.logout()
         response = self._get()
         self.assertEqual(response.status_code, 302)
-
-    # -- rendering ----------------------------------------------------------
 
     def test_lists_every_variable_with_status_and_coverage(self):
         precip = add_variable(self.collection, slug="precip")
@@ -178,8 +174,6 @@ class CollectionVirtualZarrTabTests(TestCase):
 
         self.assertContains(response, "4 left out")
         self.assertContains(response, "dtype float32, not int16")
-
-    # -- navigation ---------------------------------------------------------
 
     def test_items_page_links_to_the_virtual_zarr_tab_and_back(self):
         tab_url = reverse("collection_virtual_zarr", args=[self.collection.pk])

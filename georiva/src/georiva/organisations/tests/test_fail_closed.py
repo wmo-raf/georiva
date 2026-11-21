@@ -43,7 +43,6 @@ from georiva.virtual_zarr.models import VirtualZarrManifest
 from .factories import PASSWORD, add_member, make_user
 from .urlsweep import flatten_url_patterns
 
-# The colliding slug both organisations use.
 SHARED_SLUG = "forecast"
 
 #: The models that reach no organisation the dispatcher can find, each for a
@@ -196,8 +195,6 @@ class CrossOrgAdminTests(TestCase):
         self.client.login(username="amina", password=PASSWORD)
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
 
-    # -- listings ----------------------------------------------------------
-
     def test_catalog_index_shows_only_this_organisations_catalogs(self):
         response = self.client.get(reverse("catalog:index"))
         self.assertEqual(response.status_code, 200)
@@ -213,8 +210,6 @@ class CrossOrgAdminTests(TestCase):
         response = self.client.get(reverse("catalog:index_results"), {"q": "Forecast"})
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Uganda Forecast")
-
-    # -- choosers ----------------------------------------------------------
 
     def test_chooser_list_offers_only_this_organisations_catalogs(self):
         response = self.client.get(reverse("catalog_chooser:choose"))
@@ -236,8 +231,6 @@ class CrossOrgAdminTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Uganda Forecast")
-
-    # -- object views ------------------------------------------------------
 
     def test_editing_another_organisations_catalog_is_not_found(self):
         url = reverse("catalog:edit", args=[self.uganda_tree["catalog"].pk])
@@ -279,8 +272,6 @@ class CrossOrgAdminTests(TestCase):
             with self.subTest(view=name):
                 self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 200)
 
-    # -- writes ------------------------------------------------------------
-
     def test_a_posted_foreign_catalog_id_fails_validation(self):
         """The residual a scoped chooser leaves: a hand-crafted POST."""
         response = self.client.post(
@@ -294,8 +285,6 @@ class CrossOrgAdminTests(TestCase):
         )
         self.assertNotEqual(response.status_code, 302)
         self.assertFalse(Collection.objects.filter(slug="smuggled").exists())
-
-    # -- membership --------------------------------------------------------
 
     def test_a_revoked_membership_fails_closed_on_the_next_request(self):
         self.assertEqual(self.client.get(reverse("catalog:index")).status_code, 200)

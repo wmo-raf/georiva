@@ -3,14 +3,6 @@
 A "plugin" is one of the packages discovered from ``GEORIVA_PLUGIN_DIRS`` and
 added to ``INSTALLED_APPS`` at startup (see ``config/settings/base.py``); their
 import-package names are exposed as ``settings.GEORIVA_PLUGIN_NAMES``.
-
-Metadata is read from the installed distribution via ``importlib.metadata``.
-
-Three things live here: what a plugin *is* (the metadata above), the place a
-plugin reaches into the instance's public data surface — :func:`api_urlpatterns`
-— and the import rule every such convention shares,
-:func:`import_plugin_module`. A plugin's *page* surface is the same idea one step
-out and lives beside this, in :mod:`georiva.core.web_apps`.
 """
 
 import importlib
@@ -92,35 +84,12 @@ def get_plugin_metadata(module_name):
 
 
 def get_installed_plugins():
-    """Metadata for every discovered plugin, sorted by display name."""
     plugins = [get_plugin_metadata(name) for name in settings.GEORIVA_PLUGIN_NAMES]
     return sorted(plugins, key=lambda p: (p.get("name") or "").lower())
 
 
 def api_urlpatterns():
-    """The URL patterns discovered plugins contribute under ``/api/``.
-
-    A plugin that wants a route publishes an ``api_urls`` module with a
-    ``urlpatterns`` list, and it is included. The convention is the whole of the
-    registration: there is no registry to append to and no settings entry to
-    add, so a plugin cannot be installed and routed separately, and there is no
-    second list that can disagree with what is installed.
-
-    **Core's patterns are matched first.** This list is appended to core's, never
-    merged into it, so a plugin declaring ``stac/`` does not shadow
-    ``/api/stac/`` — it declares a route that can never be reached, which is a
-    plugin's own bug rather than an instance outage. Between plugins the order is
-    discovery order and the first match wins; nothing here arbitrates that,
-    because the alternative is a namespace prefix nobody asked for on every route
-    a plugin publishes.
-
-    **A plugin whose ``api_urls`` will not import is logged and skipped.** One
-    broken plugin must not take down the instance's URL conf: an unhandled
-    exception here is raised while Django is building the resolver, so it reaches
-    every request on the instance rather than the routes of the plugin that
-    caused it — the STAC API included. Skipping costs that plugin its routes,
-    which is the blast radius the fault deserves.
-    """
+    """The URL patterns discovered plugins contribute under ``/api/``."""
     patterns = []
 
     for module_name in getattr(settings, "GEORIVA_PLUGIN_NAMES", []) or []:
@@ -141,17 +110,6 @@ def api_urlpatterns():
 
 def import_plugin_module(module_name, submodule, logger, contributes):
     """A plugin's convention module, or None if it has none or it is broken.
-
-    Every convention a plugin may opt into — ``api_urls`` (ADR 0028),
-    ``web_app`` (ADR 0039) — is discovered by looking for a module with a fixed
-    name, and all of them need the same two cases told apart. That distinction is
-    the whole reason this is not a bare ``try: import_module``. Most plugins
-    publish no such module at all, so "no such module" is the ordinary case and
-    must stay silent — but a module that imports a dependency the operator did
-    not install raises ``ModuleNotFoundError`` too, and catching both together
-    would file a genuine fault under the silent case. Asking the finder first
-    separates "the file is not there" from "the file is there and does not work",
-    and only the second is worth waking anybody for.
 
     ``logger`` is the caller's, so the log line comes from the mechanism the
     operator lost something to, and ``contributes`` names what was lost.

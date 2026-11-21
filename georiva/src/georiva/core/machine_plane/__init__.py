@@ -35,8 +35,8 @@ The grammar deliberately mirrors ``core.storage``'s key grammar, so a tile URL
 and the COG behind it differ only by prefix.
 
 The re-exports below are the surface the old top-level ``core/machine_plane.py``
-offered, kept so its callers did not have to move with it. The other three
-modules are imported by their own paths.
+offered, kept so its callers did not have to move with it. The other modules
+are imported by their own paths.
 """
 
 from .addresses import (  # noqa: F401

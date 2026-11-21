@@ -107,8 +107,6 @@ API_KEY_PARAM = "api_key"
 
 
 class WMTSException(Exception):
-    """An error owed to the client as an OWS 1.1 ExceptionReport."""
-
     def __init__(self, status_code: int, code: str, locator: str | None, text: str):
         super().__init__(text)
         self.status_code = status_code
@@ -118,7 +116,6 @@ class WMTSException(Exception):
 
 
 def exception_report(exc: WMTSException) -> Response:
-    """Render ``exc`` as the ExceptionReport XML legacy clients parse."""
     locator = f" locator={quoteattr(exc.locator)}" if exc.locator else ""
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -222,7 +219,6 @@ def _parse_layer(params: dict[str, str]) -> tuple[str, str, str]:
 
 
 def _parse_tile_coords(params: dict[str, str]) -> tuple[int, int, int]:
-    """Validate TILEMATRIX/TILEROW/TILECOL against the WebMercatorQuad grid."""
     matrix = _require(params, "tilematrix")
     # Some clients qualify the matrix identifier with its set, e.g.
     # "WebMercatorQuad:5" — the qualified spelling names the same matrix.
@@ -405,7 +401,6 @@ def _detail_of(response: httpx.Response) -> str:
 
 
 async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, str]) -> Response:
-    """Answer GetTile by re-entering the existing semantic tile route."""
     _validate_service_and_version(params)
     _validate_tile_choices(params)
     catalog, collection, variable = _parse_layer(params)
@@ -637,7 +632,6 @@ async def _dispatch_get_feature_info(
     org_slug: str,
     params: dict[str, str],
 ) -> Response:
-    """Answer KVP GetFeatureInfo with the value under the clicked pixel (#363)."""
     _validate_service_and_version(params)
     _validate_tile_choices(params)
     _validate_info_format(params)

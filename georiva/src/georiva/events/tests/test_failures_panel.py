@@ -36,7 +36,6 @@ class FailuresTestCase(TestCase):
         cls.uganda = provision_organisation(name="Uganda Met", slug="uganda")
         _fail_a_file(cls.kenya, "kenya/chirps/rainfall/bad.tif")
         _fail_a_file(cls.uganda, "uganda/chirps/rainfall/theirs.tif")
-        # unattributed refusal
         _fail_a_file(None, "atlantis/x/y/z.tif", outcome="refused", error="Unknown organisation")
         catalog = Catalog.objects.create(organisation=cls.kenya, name="C", slug="chirps", file_format="geotiff")
         cls.feed = DataFeed.objects.create(name="CHIRPS", catalog=catalog)

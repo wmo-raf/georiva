@@ -24,28 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class IngestionHandler:
-    """
-    Processes all variables for a single (collection, timestamp) pair.
-
-    Usage::
-
-        handler = IngestionHandler(ctx)
-        item, assets, clip_info, failed_vars = handler.process_timestamp(
-            collection=collection,
-            local_path=local_path,
-            timestamp=ts,
-            source_file="sources:ecmwf/2025/01/01/file.grib",
-        )
-    """
-
     def __init__(self, ctx: IngestionContext):
         self.ctx = ctx
         self.item_handler = ItemHandler()
         self.asset_handler = AssetHandler(ctx.writer, ctx.extractor)
-
-    # =========================================================================
-    # Public entry point
-    # =========================================================================
 
     def process_timestamp(
         self,
@@ -76,7 +58,6 @@ class IngestionHandler:
         ctx = self.ctx
         clipper = ctx.clipper
 
-        # ── Spatial metadata from first variable ──────────────────────────────
         first_var = variables[0]
         meta = ctx.extractor.get_metadata(first_var, local_path, timestamp)
         src_width, src_height = meta["width"], meta["height"]
@@ -88,7 +69,6 @@ class IngestionHandler:
         clip_info = {"original_size": (src_width, src_height), "clipped_size": None}
         clip_window = None
 
-        # ── Clip window ───────────────────────────────────────────────────────
         if clipper.is_active:
             try:
                 clip_window = clipper.compute_window(src_bounds, src_width, src_height)
@@ -118,7 +98,6 @@ class IngestionHandler:
         ts_utc = ensure_utc(timestamp)
         bounds = normalize_bounds(bounds)
 
-        # ── Item ──────────────────────────────────────────────────────────────
         item, created = self.item_handler.get_or_create(
             collection=collection,
             timestamp=ts_utc,
@@ -131,7 +110,6 @@ class IngestionHandler:
             crs=crs,
         )
 
-        # ── Per-variable asset processing ─────────────────────────────────────
         assets: list[Asset] = []
         failed_variables: list[str] = []
 
@@ -166,7 +144,6 @@ class IngestionHandler:
         # Extent expansion happens per successful variable inside the shared
         # AssetMaterializer, so an all-failed run no longer widens the extent.
 
-        # ── Orphan guard ──────────────────────────────────────────────────────
         if not assets:
             self.item_handler.delete_orphan(item)
             return None, [], clip_info, failed_variables

@@ -62,10 +62,6 @@ from .serializers import (
     STACVariableCollectionSerializer,
 )
 
-# =============================================================================
-# Helpers
-# =============================================================================
-
 
 def _org_catalogs(request: Request):
     """The active catalogs of the organisation this host serves."""
@@ -108,28 +104,14 @@ def _resolve_variable(request: Request, catalog_slug: str, collection_slug: str,
     )
 
 
-# =============================================================================
-# Base Views
-# =============================================================================
-
-
 class STACAPIView(APIView):
-    """Base view for STAC catalog/collection endpoints."""
-
     renderer_classes = [STACJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
 
 
 class STACGeoAPIView(APIView):
-    """Base view for STAC item endpoints (GeoJSON)."""
-
     renderer_classes = [GeoJSONRenderer, STACJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
-
-
-# =============================================================================
-# Root & Conformance
-# =============================================================================
 
 
 class STACLandingPageView(STACAPIView):
@@ -162,12 +144,6 @@ class STACLandingPageView(STACAPIView):
 
 
 class STACConformanceView(STACAPIView):
-    """
-    STAC API Conformance Declaration
-
-    GET /stac/conformance/
-    """
-
     def get(self, request: Request) -> Response:
         return Response(
             {
@@ -184,18 +160,7 @@ class STACConformanceView(STACAPIView):
         )
 
 
-# =============================================================================
-# Catalog Views
-# =============================================================================
-
-
 class STACCatalogListView(STACAPIView):
-    """
-    List all Catalogs as top-level STAC Collections.
-
-    GET /stac/collections/
-    """
-
     def get(self, request: Request) -> Response:
         catalogs = _org_catalogs(request).prefetch_related(
             "collections",
@@ -229,11 +194,6 @@ class STACCatalogDetailView(STACAPIView):
         data = STACCatalogAsCollectionSerializer(catalog, context={"request": request}).data
 
         return Response(data)
-
-
-# =============================================================================
-# Variable Collection Views
-# =============================================================================
 
 
 class STACCollectionListView(STACAPIView):
@@ -274,12 +234,6 @@ class STACCollectionListView(STACAPIView):
 
 
 class STACCollectionDetailView(STACAPIView):
-    """
-    Get a variable as a STAC Collection.
-
-    GET /stac/collections/{catalog_slug}/{collection_slug}/{variable_slug}
-    """
-
     def get(
         self,
         request: Request,
@@ -292,11 +246,6 @@ class STACCollectionDetailView(STACAPIView):
         data = STACVariableCollectionSerializer(variable, context={"request": request}).data
 
         return Response(data)
-
-
-# =============================================================================
-# Item Views
-# =============================================================================
 
 
 class STACItemsView(STACGeoAPIView):
@@ -328,13 +277,10 @@ class STACItemsView(STACGeoAPIView):
         variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
         collection = variable.collection
 
-        # Parse query parameters
         limit = self._parse_limit(request)
         datetime_param = request.query_params.get("datetime")
         bbox_param = request.query_params.get("bbox")
         token = request.query_params.get("token")
-
-        # Build query — items that have assets for this variable
 
         queryset = (
             Item.objects.filter(collection=collection)
@@ -354,7 +300,6 @@ class STACItemsView(STACGeoAPIView):
 
                 queryset = queryset.filter(time__gte=timezone.now())
 
-        # Apply filters
         if datetime_param:
             queryset = self._apply_datetime_filter(queryset, datetime_param)
 
@@ -364,12 +309,10 @@ class STACItemsView(STACGeoAPIView):
         if token:
             queryset = self._apply_pagination_token(queryset, token)
 
-        # Order and execute
         queryset = queryset.order_by("-time")
         total_count = queryset.count()
         items = list(queryset[: limit + 1])
 
-        # Determine pagination
         has_next = len(items) > limit
         if has_next:
             items = items[:limit]
@@ -377,7 +320,6 @@ class STACItemsView(STACGeoAPIView):
         else:
             next_token = None
 
-        # Serialize — pass variable in context for asset filtering
         data = STACItemCollectionSerializer(
             {
                 "items": items,
@@ -498,7 +440,6 @@ class STACItemDetailView(STACGeoAPIView):
     def _find_item(self, collection: Collection, item_id: str) -> Item | None:
         parts = item_id.split("_")
 
-        # Base queryset — respect retention's past-item policy
         base_qs = Item.objects.filter(collection=collection)
         if retention.is_pruned(collection):
             from django.utils import timezone
@@ -533,11 +474,6 @@ class STACItemDetailView(STACGeoAPIView):
             pass
 
         return None
-
-
-# =============================================================================
-# Search
-# =============================================================================
 
 
 class STACSearchView(STACGeoAPIView):
@@ -584,37 +520,29 @@ class STACSearchView(STACGeoAPIView):
             .prefetch_related("assets", "assets__variable")
         )
 
-        # Resolve variable context from collections param
         variable = None
         collections_param = params.get("collections", [])
         queryset, variable = self._apply_collections_filter(request, queryset, collections_param)
 
-        # Filter by item IDs
         queryset = self._apply_ids_filter(queryset, params.get("ids", []))
 
-        # Filter by datetime
         datetime_param = params.get("datetime")
         if datetime_param:
             queryset = self._apply_datetime_filter(queryset, datetime_param)
 
-        # Filter by bbox
         queryset = self._apply_bbox_filter(queryset, params.get("bbox"))
 
-        # Filter by intersects geometry
         queryset = self._apply_intersects_filter(queryset, params.get("intersects"))
 
-        # Pagination
         limit = self._parse_limit(params.get("limit", self.DEFAULT_LIMIT))
         token = params.get("token")
         if token:
             queryset = self._apply_pagination_token(queryset, token)
 
-        # Order and execute
         queryset = queryset.order_by("-time")
         total_count = queryset.count()
         items = list(queryset[: limit + 1])
 
-        # Determine pagination
         has_next = len(items) > limit
         if has_next:
             items = items[:limit]
@@ -622,7 +550,6 @@ class STACSearchView(STACGeoAPIView):
         else:
             next_token = None
 
-        # Serialize
         data = STACItemCollectionSerializer(
             {
                 "items": items,
@@ -821,11 +748,6 @@ class STACSearchView(STACGeoAPIView):
             return None
 
 
-# =============================================================================
-# Queryables
-# =============================================================================
-
-
 class STACQueryablesView(STACAPIView):
     """
     STAC Queryables (for CQL2 filter extension)
@@ -874,7 +796,6 @@ class STACQueryablesView(STACAPIView):
             "additionalProperties": True,
         }
 
-        # Catalog-level: list available variable collections
         if catalog_slug and not variable_slug:
             catalog = get_org_object_or_404(
                 request,
@@ -884,12 +805,10 @@ class STACQueryablesView(STACAPIView):
             variables = _org_variables(request).filter(collection__catalog=catalog)
             queryables["properties"]["collection"]["enum"] = [v.slug for v in variables]
 
-        # Variable-level: add forecast queryables if applicable
         if catalog_slug and collection_slug and variable_slug:
             variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
             collection = variable.collection
 
-            # Variable info
             queryables["properties"]["georiva:variable"] = {
                 "title": variable.name,
                 "type": "string",
@@ -902,7 +821,6 @@ class STACQueryablesView(STACAPIView):
                     "const": variable.units,
                 }
 
-            # Forecast queryables
             has_forecasts = collection.items.filter(reference_time__isnull=False).exists()
 
             if has_forecasts:

@@ -1,7 +1,3 @@
-"""
-CollectionExtentHandler — expand a Collection's temporal and spatial extent.
-"""
-
 import logging
 from datetime import datetime
 
@@ -33,7 +29,6 @@ class CollectionExtentHandler:
         """
         update_fields = []
 
-        # ── Temporal extent ───────────────────────────────────────────────────
         if collection.time_start is None or timestamp < collection.time_start:
             collection.time_start = timestamp
             update_fields.append("time_start")
@@ -42,7 +37,6 @@ class CollectionExtentHandler:
             collection.time_end = timestamp
             update_fields.append("time_end")
 
-        # ── Spatial extent ────────────────────────────────────────────────────
         current = collection.bounds
         if not current or len(current) < 4:
             collection.bounds = list(bounds)

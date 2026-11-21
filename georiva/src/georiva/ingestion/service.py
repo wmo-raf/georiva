@@ -25,49 +25,17 @@ from georiva.ingestion.result import IngestionResult
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Ingestion Service
-# =============================================================================
-
-
 class IngestionService:
     """
     Orchestrates the full ingestion pipeline for geospatial data files.
 
-    Operates across GeoRiva's multi-bucket storage architecture:
+    The Organisation is resolved from the path's first segment, then the Catalog
+    *within that organisation* (must exist and be active). There is no default
+    organisation and no catalog-by-slug lookup without one: an unknown org, or a
+    catalog that belongs to a different org, fails the run and leaves the file in
+    place. A path without a collection slug processes every active collection
+    under the catalog.
 
-        georiva-incoming  ──┐
-                            ├──► process ──► georiva-assets  (COG + PNG + JSON)
-        georiva-sources   ──┘
-                            │
-                            └──► georiva-archive             (raw copy, optional)
-
-    Processing Flow:
-    ─────────────────
-    1.  Parse the file path → extract org slug, catalog slug, collection slug,
-        reference time
-    2.  Resolve the Organisation from the path's first segment, then the Catalog
-        *within that organisation* (must exist and be active). There is no
-        default organisation and no catalog-by-slug lookup without one: an
-        unknown org, or a catalog that belongs to a different org, fails the run
-        and leaves the file in place.
-    3.  Resolve Collection(s):
-          - If collection slug present in path → process that one collection
-          - If absent → process ALL active collections under the catalog
-    4.  Look up the format plugin (GRIB, NetCDF, GeoTIFF etc)
-    5.  Initialize the boundary clipper if the catalog has a spatial boundary
-    6.  Build an IngestionContext (shared processing objects, instantiated once)
-    7.  Download the source file once to a local temp directory
-    8.  For each collection × timestamp, delegate to IngestionHandler which:
-          a. Computes the spatial clip window
-          b. Gets or creates one Item for the collection + timestamp
-          c. Runs each Variable through AssetHandler (extract → encode → write)
-          d. Expands the Collection's temporal + spatial extent
-    9.  Archive raw file to georiva-archive (if configured)
-    10. Delete from origin bucket (only if fully successful)
-
-    Partial Failure Behaviour:
-    ──────────────────────────
     If some variables fail but others succeed, the Item and successful
     Assets are kept. The source file is NOT deleted so it can be
     re-processed. This is intentional — a partial ingest is better than
@@ -77,10 +45,6 @@ class IngestionService:
     def __init__(self):
         self.logger = logging.getLogger("georiva.ingestion")
         self._source_file_manager = SourceFileManager()
-
-    # =========================================================================
-    # Main Entry Point
-    # =========================================================================
 
     def process_file(
         self,
@@ -100,14 +64,6 @@ class IngestionService:
             catalog.archive_source_files = True  →  copy to georiva-archive
             Successful, fully-complete runs       →  delete from origin bucket
             Partial variable failures             →  keep in origin for retry
-
-        Args:
-            file_path:       Path relative to the bucket root.
-            origin_bucket:   Which bucket the file came from.
-            reference_time:  Explicit reference time (overrides GR-- prefix).
-
-        Returns:
-            IngestionResult summarising what was created and any errors.
         """
         from task_ferry.progress import Progress
 
@@ -117,7 +73,6 @@ class IngestionService:
         origin = storage.bucket(origin_bucket)
         self.logger.info("Processing: %s/%s", origin.bucket_name, file_path)
 
-        # ── Path parsing ──────────────────────────────────────────────────────
         path_meta = parse_path(file_path)
         org_slug = path_meta.get("org")
         catalog_slug = path_meta.get("catalog")
@@ -136,13 +91,11 @@ class IngestionService:
         )
 
         try:
-            # ── Organisation + catalog resolution ─────────────────────────────
             catalog, error = resolve_org_catalog(org_slug, catalog_slug)
             if catalog is None:
                 result.add_error(error or f"Cannot resolve a catalog from path: {file_path}")
                 return result
 
-            # ── Collection resolution ─────────────────────────────────────────
             collections = self._resolve_collections(catalog, collection_slug)
 
             if not collections:
@@ -158,13 +111,11 @@ class IngestionService:
                 ", ".join(c.slug for c in collections),
             )
 
-            # ── Format plugin ─────────────────────────────────────────────────
             plugin = format_registry.get(catalog.file_format)
             if not plugin:
                 result.add_error(f"No format plugin for: {catalog.file_format}")
                 return result
 
-            # ── Boundary clipper ──────────────────────────────────────────────
             clipper = BoundaryClipper(
                 boundary=catalog.boundary if catalog.clip_mode != "none" else None,
                 apply_mask=(catalog.clip_mode == "mask"),
@@ -174,7 +125,6 @@ class IngestionService:
                 result.clip_boundary = str(catalog.boundary)
                 self.logger.info("Clipping enabled: %s", catalog.boundary)
 
-            # ── FileIngestion reference ────────────────────────────────────────
             ingestion_log = FileIngestion.objects.filter(bucket=origin_bucket, file_path=file_path).first()
 
             # Write resolved collections immediately — even a run that fails
@@ -182,7 +132,6 @@ class IngestionService:
             if ingestion_log:
                 ingestion_log.collections.set(collections)
 
-            # ── Build shared context + handler ────────────────────────────────
             ctx = IngestionContext(
                 plugin=plugin,
                 clipper=clipper,
@@ -196,7 +145,6 @@ class IngestionService:
 
             progress.increment(by=10, state="file opened")
 
-            # ── Process ───────────────────────────────────────────────────────
             # Read before the download, never after: a write landing in between is then
             # one the cleanup will not delete, rather than one it deletes unread.
             read_version = origin.version_of(file_path)
@@ -279,7 +227,6 @@ class IngestionService:
                 if hasattr(plugin, "clear_cache"):
                     plugin.clear_cache()
 
-            # ── Archive + cleanup ─────────────────────────────────────────────
             progress.increment(by=10, state="archiving")
             self._source_file_manager.cleanup(origin, file_path, catalog, result, read_version=read_version)
 
@@ -296,10 +243,6 @@ class IngestionService:
             result.add_error(str(e))
 
         return result
-
-    # =========================================================================
-    # Collection Resolution
-    # =========================================================================
 
     def _record_published(self, collection, source_file: str, valid_times: list) -> None:
         """One ``ProductPublished`` per file-and-collection — never one per Item.

@@ -91,10 +91,6 @@ class BuildDisciplinedModel(TimeStampedModel):
     class Meta:
         abstract = True
 
-    # =========================================================================
-    # Lock arithmetic
-    # =========================================================================
-
     @classmethod
     def stale_lock_cutoff(cls):
         """Locks stamped before this are abandoned."""
@@ -116,10 +112,6 @@ class BuildDisciplinedModel(TimeStampedModel):
         and is trusted, matching ``virtual_zarr``'s reading of the same field.
         """
         return not claim or self.locked_by == claim
-
-    # =========================================================================
-    # Claiming
-    # =========================================================================
 
     @classmethod
     def claim_for_build(cls, pk, claim: str = "", force: bool = False) -> bool:
@@ -184,10 +176,6 @@ class BuildDisciplinedModel(TimeStampedModel):
             locked_at=None,
             locked_by="",
         )
-
-    # =========================================================================
-    # Transitions
-    # =========================================================================
 
     def mark_ready(self, **fields) -> None:
         """A build finished. ``fields`` are the subclass's own coverage caches.
@@ -263,10 +251,6 @@ class BuildDisciplinedModel(TimeStampedModel):
             )
         )
         return bool(updated)
-
-    # =========================================================================
-    # Queries
-    # =========================================================================
 
     @classmethod
     def get_buildable(cls):

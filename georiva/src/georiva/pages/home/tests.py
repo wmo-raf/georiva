@@ -12,10 +12,6 @@ from georiva.pages.home.widgets import PortalAppSelect
 
 
 class HomeSetUpTests(WagtailPageTestCase):
-    """
-    Tests for basic page structure setup and HomePage creation.
-    """
-
     def test_root_create(self):
         root_page = Page.objects.get(pk=1)
         self.assertIsNotNone(root_page)
@@ -28,10 +24,6 @@ class HomeSetUpTests(WagtailPageTestCase):
 
 
 class HomeTests(WagtailPageTestCase):
-    """
-    Tests for homepage functionality and rendering.
-    """
-
     def setUp(self):
         """
         Use the HomePage the initial migration creates — the default Site

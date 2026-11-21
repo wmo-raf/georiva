@@ -45,7 +45,6 @@ def collection_available_dates(request, catalog_slug, collection_slug):
     level = request.GET.get("level", "years")
     variable_slug = request.GET.get("variable", "").strip()
 
-    # Items that have an asset Titiler can draw for the requested variable
     qs = Item.objects.filter(
         drawable_q("assets__"),
         collection=collection,

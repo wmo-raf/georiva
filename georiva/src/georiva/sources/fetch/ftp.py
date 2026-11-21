@@ -1,9 +1,3 @@
-"""
-GeoRiva HTTP Fetch Strategy
-
-For direct HTTP/HTTPS downloads
-"""
-
 import errno
 import ftplib
 import socket
@@ -18,12 +12,6 @@ class _FileTimeout(Exception):
 
 
 class FTPFetchStrategy(BaseFetchStrategy):
-    """
-    Fetch strategy for FTP/SFTP/FTPS.
-
-    Wraps your existing FTP loader logic into the new architecture.
-    """
-
     type = "ftp"
     label = "FTP/SFTP/FTPS"
 
@@ -61,14 +49,12 @@ class FTPFetchStrategy(BaseFetchStrategy):
         return FetchMode.SYNC
 
     def connect(self) -> None:
-        """Establish FTP/SFTP connection."""
         if self.protocol == "sftp":
             self._connect_sftp()
         else:
             self._connect_ftp()
 
     def _connect_ftp(self) -> None:
-        """Connect via FTP/FTPS."""
         from ftplib import FTP, FTP_TLS
 
         if self.protocol == "ftps":
@@ -96,7 +82,6 @@ class FTPFetchStrategy(BaseFetchStrategy):
         self.logger.info(f"Connected to {self.host}")
 
     def _connect_sftp(self) -> None:
-        """Connect via SFTP."""
         import paramiko
 
         self._ssh = paramiko.SSHClient()
@@ -129,7 +114,6 @@ class FTPFetchStrategy(BaseFetchStrategy):
         self.logger.info(f"Connected to {self.host} via SFTP")
 
     def disconnect(self) -> None:
-        """Close connection."""
         if self._sftp:
             self._sftp.close()
             self._sftp = None

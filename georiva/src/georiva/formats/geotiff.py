@@ -52,10 +52,6 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         except Exception:
             return False
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def list_variables(self, file_path: PathLike) -> list[dict]:
         """
         List all bands in the GeoTIFF file.
@@ -113,16 +109,9 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> Generator[VariableInfo, None, None]:
-        """
-        Open a GeoTIFF band lazily via rioxarray.
-
-        The returned DataArray is dask-backed — no pixel data is read until
-        you call .compute() or access .values.
-        """
         file_path = Path(file_path)
         band = self._parse_band_index(variable_name)
 
-        # Open lazily with rioxarray
         ds = xr.open_dataset(file_path, engine="rasterio", chunks={})
         try:
             # rioxarray puts bands in a "band" dimension
@@ -132,13 +121,11 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
 
             var = ds[var_names[0]]
 
-            # Select band
             if "band" in var.dims:
                 if band < 1 or band > var.sizes["band"]:
                     raise ValueError(f"Band {band} not found (file has {var.sizes['band']} bands)")
                 var = var.sel(band=band)
 
-            # Window slicing (lazy)
             y_dim, x_dim = self._spatial_dims(var)
             if window and y_dim and x_dim:
                 x_off, y_off, w, h = window
@@ -217,7 +204,6 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
 
             data = src.read(band, window=rio_window)
 
-            # Replace nodata with NaN
             if src.nodata is not None:
                 data = data.astype(float, copy=False)
                 data = np.where(data == src.nodata, np.nan, data)
@@ -279,10 +265,6 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                 "crs": str(src.crs) if src.crs else "EPSG:4326",
             }
 
-    # ------------------------------------------------------------------
-    # Internal: band resolution
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _parse_band_index(variable_name: str) -> int:
         """Extract band index from variable name like 'band_3'. Defaults to 1."""
@@ -292,10 +274,6 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             except (ValueError, IndexError):
                 pass
         return 1
-
-    # ------------------------------------------------------------------
-    # Internal: spatial helpers
-    # ------------------------------------------------------------------
 
     _Y_NAMES = {"latitude", "lat", "y"}
     _X_NAMES = {"longitude", "lon", "x"}
@@ -334,10 +312,6 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         needs_flip = transform.e > 0
 
         return bounds, resolution, crs, needs_flip
-
-    # ------------------------------------------------------------------
-    # Internal: time handling
-    # ------------------------------------------------------------------
 
     _TIMESTAMP_PATTERNS = [
         (r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", "%Y-%m-%dT%H:%M:%S"),

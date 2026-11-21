@@ -1,27 +1,3 @@
-"""Per-user API keys: a credential for a person, carrying no tenancy at all.
-
-GeoRiva has two kinds of caller for non-public data. One is a browser on an
-organisation's portal, authenticated by a session cookie. The other is a script
-— QGIS, ``pystac-client``, a notebook, a cron job — which has no browser and no
-login form, and that is what these keys are for.
-
-What a key deliberately does *not* carry is an organisation. It says who you
-are; what that gets you is then decided by the same membership check a session
-goes through, against the organisation the request's Host resolved to
-(``organisations.access.may_see_private``). A key that named its own scope would
-be a second source of truth for tenancy — the thing ADR 0012 spent a whole
-decision avoiding — and would go stale the moment a membership changed. One
-identity path, two transports.
-
-The secret exists in plaintext exactly once, in the response to the request that
-minted it. What is stored is a SHA-256 digest, so a dump of this table hands an
-attacker nothing they can present. A digest rather than a password hasher is
-deliberate and is the standard treatment for this kind of credential: the secret
-is 256 bits from ``secrets``, not something a person chose, so there is no
-dictionary to run and nothing for a slow KDF to buy — while a slow KDF on a
-credential checked once per tile request would be its own denial of service.
-"""
-
 import hashlib
 import secrets
 from datetime import timedelta
@@ -32,12 +8,8 @@ from django.utils import timezone
 
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 
-#: Marks a GeoRiva key on sight, in a log line, a support ticket or a leaked
-#: config file — and lets a secret scanner match one.
 KEY_PREFIX = "grv_"
 
-#: Bytes of entropy behind each key. 32 is 256 bits; see the module docstring
-#: for why that is what makes a bare digest the right storage.
 SECRET_BYTES = 32
 
 #: How much of the secret is kept in the clear, after the prefix, so a user can
@@ -116,17 +88,6 @@ class ApiKeyManager(models.Manager.from_queryset(ApiKeyQuerySet)):
 
 
 class ApiKey(models.Model):
-    """One named credential belonging to one user.
-
-    Named because people hold several — a laptop, a server, a notebook — and
-    revoking the one that leaked should not log out the other three.
-    """
-
-    #: A key belongs to a *person*, not to an organisation: its holder may be a
-    #: member of several, and it grants exactly what each of those memberships
-    #: grants on the host that serves them. So there is no path from here to an
-    #: Organisation and there should not be one — scoping a key by organisation
-    #: is a category error, and this makes attempting it raise (ADR 0011).
     ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
 
     objects = ApiKeyManager()
@@ -182,11 +143,8 @@ class ApiKey(models.Model):
     def revoke(self):
         """Retire the key, keeping the row.
 
-        Kept rather than deleted so ``last_used_at`` survives the revocation: the
-        question after a leak is what the key was doing, and deleting the row
-        answers it with silence. Revoking twice keeps the first timestamp — when
-        it stopped working is a fact, not a function of how often somebody
-        clicked.
+        Revoking twice keeps the first timestamp — when it stopped working is a
+        fact, not a function of how often somebody clicked.
         """
         if self.revoked_at is None:
             self.revoked_at = timezone.now()

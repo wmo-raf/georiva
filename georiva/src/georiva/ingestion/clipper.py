@@ -17,11 +17,6 @@ class BoundaryClipper:
     """
 
     def __init__(self, boundary: "AdminBoundary" = None, apply_mask: bool = True):
-        """
-        Args:
-            boundary: AdminBoundary instance with PostGIS geometry
-            apply_mask: Whether to apply precise geometry mask (vs bbox only)
-        """
         self.boundary = boundary
         self.apply_mask = apply_mask
         self._shapely_geom = None
@@ -41,7 +36,6 @@ class BoundaryClipper:
 
     @property
     def shapely_geom(self):
-        """Convert PostGIS geometry to Shapely for masking."""
         if self._shapely_geom is None and self.boundary:
             from shapely import wkt
 
@@ -55,16 +49,9 @@ class BoundaryClipper:
         src_height: int,
     ) -> dict | None:
         """
-        Compute pixel window for clipped extraction.
-
-        Args:
-            src_bounds: Source data bounds [west, south, east, north]
-            src_width: Source raster width in pixels
-            src_height: Source raster height in pixels
-
-        Returns:
-            dict with x_off, y_off, width, height, bounds
-            or None if no clipping needed
+        Compute pixel window for clipped extraction from ``src_bounds``
+        [west, south, east, north]: a dict with x_off, y_off, width, height,
+        bounds, or None if no clipping is needed.
         """
         if not self.bbox:
             return None
@@ -72,17 +59,14 @@ class BoundaryClipper:
         src_west, src_south, src_east, src_north = src_bounds
         clip_west, clip_south, clip_east, clip_north = self.bbox
 
-        # Check intersection
         if clip_east <= src_west or clip_west >= src_east or clip_north <= src_south or clip_south >= src_north:
             raise ValueError(f"Boundary bbox {self.bbox} does not intersect source bounds {src_bounds}")
 
-        # Compute intersection
         int_west = max(src_west, clip_west)
         int_south = max(src_south, clip_south)
         int_east = min(src_east, clip_east)
         int_north = min(src_north, clip_north)
 
-        # Pixel resolution
         res_x = (src_east - src_west) / src_width
         res_y = (src_north - src_south) / src_height
 
@@ -92,13 +76,11 @@ class BoundaryClipper:
         win_width = int(np.ceil((int_east - int_west) / res_x))
         win_height = int(np.ceil((int_north - int_south) / res_y))
 
-        # Clamp to source dimensions
         x_off = max(0, min(x_off, src_width - 1))
         y_off = max(0, min(y_off, src_height - 1))
         win_width = min(win_width, src_width - x_off)
         win_height = min(win_height, src_height - y_off)
 
-        # Recompute exact bounds from pixel window
         exact_west = src_west + x_off * res_x
         exact_north = src_north - y_off * res_y
         exact_east = exact_west + win_width * res_x

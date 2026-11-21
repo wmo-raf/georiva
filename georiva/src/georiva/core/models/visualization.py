@@ -76,7 +76,6 @@ def _spread_positions(stops) -> list:
 
 
 def _swatch_html(gradient: str):
-    """A gradient swatch for admin listings, or "" for nothing to show."""
     if not gradient:
         return ""
     return format_html(
@@ -89,7 +88,6 @@ def _swatch_html(gradient: str):
 
 
 def _ramp_colors_and_positions(ramp):
-    """The ramp as parallel (rgba colors, 0–1 positions) lists."""
     stops = list(ramp.stops.all())
     if not stops:
         return [], []
@@ -194,21 +192,6 @@ def served_ramp_stops(ramp, variable, mode: str = "continuous", steps: int = Non
 
 
 class ColorRamp(ClusterableModel):
-    """A value-free color ramp: pure aesthetics, reusable across variables.
-
-    The catalog half of the two-layer styling model (ADR 0022): ordered colors
-    with optional 0–1 positions and a type — deliberately **no physical
-    values**. Applying a ramp over a variable's range is what produces
-    concrete value→color stops; the ramp itself stays reusable because it
-    never mentions anybody's range.
-
-    Tiered like other shared reference data (ADR 0011): a ramp with no
-    organisation is the instance-wide tier every organisation draws on and
-    only the instance admin edits; a ramp with one belongs to that institution
-    alone. A data migration seeds the instance-wide tier with a curated,
-    colorblind-aware catalog under matplotlib-compatible names.
-    """
-
     ORGANISATION_LOOKUP = "organisation"
     ORGANISATION_GLOBAL_TIER = True
 
@@ -268,12 +251,9 @@ class ColorRamp(ClusterableModel):
         return self.name
 
     def owner_label(self):
-        """Which tier this ramp is in, for a listing that shows both."""
         return self.organisation.name if self.organisation_id else "Instance-wide"
 
     owner_label.short_description = "Owner"
-
-    # -------- presentation helpers --------
 
     def css_gradient(self):
         """The ramp as a CSS ``linear-gradient()``, for previews.
@@ -301,15 +281,12 @@ class ColorRamp(ClusterableModel):
         return f"linear-gradient(to right, {', '.join(parts)})"
 
     def preview(self):
-        """A gradient swatch for the admin listing."""
         return _swatch_html(self.css_gradient())
 
     preview.short_description = "Preview"
 
 
 class ColorRampStop(Orderable):
-    # Owned by whoever owns the ramp — including nobody, for the instance-wide
-    # tier. See ColorRamp.
     ORGANISATION_LOOKUP = "ramp__organisation"
     ORGANISATION_GLOBAL_TIER = True
 
@@ -342,22 +319,6 @@ class ColorRampStop(Orderable):
 
 
 class VariableStyle(TimeStampedModel):
-    """An applied style: one variable's value→color contract, snapshotted.
-
-    The semantic half of the two-layer styling model (ADR 0022). Where a
-    :class:`ColorRamp` is value-free aesthetics, a style is that ramp *applied*
-    over one variable's range into absolute value→color stops — and then owned
-    by the operator, who may fine-tune any stop, including pinning physical
-    thresholds like 0 °C. The snapshot never live-links back to the ramp or the
-    range: editing either leaves the stops untouched until the operator
-    explicitly re-applies, which regenerates and discards tuning.
-
-    A variable may carry several named styles — an official public palette
-    beside an analyst's — with exactly one default, enforced by a partial
-    unique constraint so a second default is impossible to write, not merely
-    impolite.
-    """
-
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
     class Mode(models.TextChoices):
@@ -455,8 +416,6 @@ class VariableStyle(TimeStampedModel):
         if errors:
             raise ValidationError(errors)
 
-    # -------- default management --------
-
     def promote_to_default(self):
         """Make this style the variable's default, demoting the current one.
 
@@ -472,8 +431,6 @@ class VariableStyle(TimeStampedModel):
                 self.is_default = True
                 self.save(update_fields=["is_default", "modified"])
 
-    # -------- snapshot generation --------
-
     def apply_ramp(self):
         """Regenerate the stops snapshot from the ramp and the variable's
         current range — laid out in the served unit, stored in the source
@@ -485,21 +442,16 @@ class VariableStyle(TimeStampedModel):
         variable = self.variable
         self.stops = variable.stored_stops(served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps))
 
-    # -------- runtime conversion helpers --------
-
     def as_weatherlayers_palette(self):
         """The snapshot as ``[[value, [r,g,b(,a)]], ...]`` — the shape the
         tile-config colormap builder and WeatherLayers clients consume."""
         return [[s["value"], hex_to_rgba_list(s["color"])] for s in self.stops]
 
     def min_max_from_stops(self):
-        """(min, max) of the snapshot's values, or (None, None) when empty."""
         if not self.stops:
             return None, None
         values = [s["value"] for s in self.stops]
         return min(values), max(values)
-
-    # -------- presentation helpers --------
 
     def css_gradient(self):
         """The snapshot as a CSS ``linear-gradient()``, for swatches. Stop
@@ -515,7 +467,6 @@ class VariableStyle(TimeStampedModel):
         return f"linear-gradient(to right, {', '.join(parts)})"
 
     def preview(self):
-        """A gradient swatch for admin listings."""
         return _swatch_html(self.css_gradient())
 
     preview.short_description = "Preview"

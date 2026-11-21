@@ -103,8 +103,6 @@ class Command(BaseCommand):
             # The cutoff is when the live set was read: an object written after
             # it may belong to a row that set does not hold yet.
             scanned_at = timezone.now()
-            # Remote hrefs are upstream URLs, never keys here: neither live nor
-            # orphaned (ADR 0043 §8).
             live = set(Asset.objects.filter(local_q(), href__startswith=f"{prefix}/").values_list("href", flat=True))
             listing = storage.assets.list_files(prefix, recursive=True)
             modified = {f["path"]: f.get("modified") for f in listing}

@@ -32,11 +32,6 @@ class IngestionEventsTestCase(TestCase):
         return json.loads(msg["data"])
 
 
-# =============================================================================
-# Cycle 1: publish_update() delivers to the channel
-# =============================================================================
-
-
 class PublishEventTests(IngestionEventsTestCase):
     def test_published_event_is_received_on_channel(self):
         from georiva.ingestion.live_updates import publish_update
@@ -47,11 +42,6 @@ class PublishEventTests(IngestionEventsTestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["type"], "test.ping")
         self.assertEqual(event["value"], 42)
-
-
-# =============================================================================
-# Cycle 2: FileIngestion creation publishes file_ingestion.created
-# =============================================================================
 
 
 class FileIngestionCreatedEventTests(IngestionEventsTestCase):
@@ -78,11 +68,6 @@ class FileIngestionCreatedEventTests(IngestionEventsTestCase):
         self.assertNotEqual(event["type"], "file_ingestion.status_changed")
 
 
-# =============================================================================
-# Cycle 3: FileIngestion status changes publish file_ingestion.status_changed
-# =============================================================================
-
-
 class FileIngestionStatusEventTests(IngestionEventsTestCase):
     def test_status_change_publishes_event(self):
         from georiva.ingestion.models import FileIngestion
@@ -98,11 +83,6 @@ class FileIngestionStatusEventTests(IngestionEventsTestCase):
         self.assertEqual(event["type"], "file_ingestion.status_changed")
         self.assertEqual(event["id"], fi.pk)
         self.assertEqual(event["status"], "processing")
-
-
-# =============================================================================
-# Cycle 4: FileIngestionJob state changes publish an event
-# =============================================================================
 
 
 class FileIngestionJobStateEventTests(IngestionEventsTestCase):
@@ -136,11 +116,6 @@ class FileIngestionJobStateEventTests(IngestionEventsTestCase):
 
         event = self._next_event(timeout=0.5)
         self.assertIsNone(event)
-
-
-# =============================================================================
-# Cycle 5: PublishingProgress._publish() emits a job.progress_updated event
-# =============================================================================
 
 
 class PublishingProgressEventTests(IngestionEventsTestCase):

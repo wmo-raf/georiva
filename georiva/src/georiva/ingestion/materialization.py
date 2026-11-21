@@ -72,10 +72,6 @@ class AssetMaterializer:
         self.writer = writer
         self.extent_handler = CollectionExtentHandler()
 
-    # =========================================================================
-    # Public entry points
-    # =========================================================================
-
     def clip_array(
         self,
         data: np.ndarray,
@@ -263,10 +259,6 @@ class AssetMaterializer:
             filename="",
         ).rstrip("/")
         return f"{base_dir}/{base_name}.tif"
-
-    # =========================================================================
-    # Helpers
-    # =========================================================================
 
     def _after_save_asset(self, asset: Asset) -> None:
         """Run every ``GEORIVA_AFTER_SAVE_ASSET`` hook (#715). Each is

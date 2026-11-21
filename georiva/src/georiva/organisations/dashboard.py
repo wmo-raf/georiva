@@ -125,8 +125,6 @@ class OrgScopedUserObjectsInWorkflowModerationPanel(UserObjectsInWorkflowModerat
 
 
 class OrgScopedWorkflowObjectsToModeratePanel(WorkflowObjectsToModeratePanel):
-    """The "awaiting your review" queue, for this organisation only."""
-
     def get_context_data(self, parent_context):
         context = super().get_context_data(parent_context)
         request = parent_context["request"]

@@ -267,9 +267,6 @@ class CollectionSurvey:
         return buckets, hosts
 
 
-# ── The catalog ─────────────────────────────────────────────────────────────
-
-
 def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
     """The collections an Upstream offers. Raises `UpstreamUnreachable` when its
     root cannot be read at all."""
@@ -282,9 +279,6 @@ def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
     except UpstreamUnreachable:
         # Its collections do not answer; its root still links to each of them.
         return CatalogSurvey(has_api=root.is_api, collections=list(root.children), described=False)
-
-
-# ── One collection ──────────────────────────────────────────────────────────
 
 
 #: What the survey is waiting on, as an operator is told it while they wait.
@@ -404,8 +398,6 @@ def _is_store(asset: UpstreamAsset) -> bool:
     media_type = asset.media_type.lower()
     return any(kind in media_type for kind in _STORE_TYPES) or _path(asset).endswith(_STORE_SUFFIXES)
 
-
-# ── An Upstream store ───────────────────────────────────────────────────────
 
 #: Names a time-like dimension goes by where the collection does not call it temporal.
 _STEP_NAMES = frozenset(
@@ -544,8 +536,6 @@ def _chunk_regions(upstream: UpstreamCatalogClient, declared: list[str]) -> dict
             regions[place] = region
     return regions
 
-
-# ── Which of a store's arrays can become Variables ──────────────────────────
 
 _GEOGRAPHIC_NAMES = frozenset({"lat", "latitude", "lon", "longitude"})
 _GEOGRAPHIC_SYSTEMS = ("4326", "crs84", "wgs84", "wgs 84")
@@ -726,9 +716,6 @@ def _samples(items, rasters):
             if key in rasters and key not in seen and _is_raster(asset):
                 seen.add(key)
                 yield key, asset
-
-
-# ── Where the files live ────────────────────────────────────────────────────
 
 
 class _Places:

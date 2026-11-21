@@ -79,8 +79,6 @@ class BoundaryStatsTileScopingTests(TestCase):
             count=1,
         )
 
-    # -- helpers -----------------------------------------------------------
-
     @staticmethod
     def _tile(**params):
         """The MVT bytes Martin would return for ``params``.
@@ -141,8 +139,6 @@ class BoundaryStatsTileScopingTests(TestCase):
                     self._tile(**self._params(**{missing: ""}))
 
 
-# -- reading a tile back -----------------------------------------------------
-#
 # Just enough of the Mapbox Vector Tile protobuf to read feature properties: a
 # tile holds layers (3); a layer holds features (2), keys (3) and values (4); a
 # feature's tags (2) are packed key/value index pairs. A value is a string (1),

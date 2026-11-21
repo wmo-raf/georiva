@@ -53,8 +53,6 @@ class OrgHopperScriptTests(TestCase):
         self.assertTrue(response["Content-Type"].startswith("text/javascript"))
         return response.content.decode()
 
-    # -- who is listed ------------------------------------------------------
-
     def test_a_multi_org_member_sees_every_organisation_they_belong_to(self):
         user = self._login("amina")
         add_member(user, self.kenya)
@@ -97,8 +95,6 @@ class OrgHopperScriptTests(TestCase):
     def test_an_anonymous_request_is_told_about_no_organisation(self):
         """The login page loads this too, and there is nobody to answer for."""
         self.assertEqual(self._script().strip(), "")
-
-    # -- what the block offers ---------------------------------------------
 
     def test_the_current_organisation_is_marked_and_the_popover_offered(self):
         user = self._login("amina")
@@ -153,8 +149,6 @@ class OrgHopperScriptTests(TestCase):
 
         self.assertIn("uganda met uganda uganda.georiva.test", script)
 
-    # -- the links themselves ----------------------------------------------
-
     def test_each_entry_is_a_plain_cross_host_link_to_that_orgs_admin(self):
         user = self._login("amina")
         add_member(user, self.kenya)
@@ -186,8 +180,6 @@ class OrgHopperScriptTests(TestCase):
         script = self._script()
 
         self.assertIn("//uganda.georiva.test:8000/admin/", script)
-
-    # -- delivery -----------------------------------------------------------
 
     def test_the_markup_is_never_held_in_a_shared_cache(self):
         user = self._login("amina")

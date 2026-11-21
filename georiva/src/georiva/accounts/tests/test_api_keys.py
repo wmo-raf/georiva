@@ -1,16 +1,3 @@
-"""What an API key is, and what presenting one gets you.
-
-A key is a credential for a *person*, not for an organisation. It carries no
-tenancy of its own: presenting one says who you are, and what that buys is then
-decided by the same membership check a browser session goes through
-(``organisations.access``). One identity path, two transports.
-
-The storage contract is the other half. The secret exists in plaintext exactly
-once — in the response to the request that created it — and what the database
-keeps is a hash, so a dump of the table hands an attacker nothing they can
-present.
-"""
-
 from datetime import timedelta
 
 from django.test import TestCase, override_settings
@@ -135,13 +122,6 @@ PRIVATE_SLUG = "private-forecast"
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class ApiKeyAuthenticationTests(TestCase):
-    """A key over the wire, on the plane it exists for.
-
-    Both transports have to work and mean the same thing. The header is what a
-    script sends; the query parameter is for the clients that cannot set one —
-    QGIS and a web map take a tile URL and nothing else.
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
@@ -219,12 +199,6 @@ class ApiKeyAuthenticationTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_a_key_that_was_never_issued_is_rejected_as_a_credential(self):
-        """Not 404: a broken credential is the caller's problem, not a missing row.
-
-        It leaks nothing — the answer is the same whether or not the collection
-        exists — and a scripting user with a typo in their key deserves to be
-        told so rather than to debug a phantom 404.
-        """
         response = self.client.get(
             self.url,
             HTTP_AUTHORIZATION=f"Bearer {KEY_PREFIX}nonsense",
@@ -232,12 +206,10 @@ class ApiKeyAuthenticationTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_a_bearer_token_that_is_not_ours_is_left_alone(self):
-        """Another scheme's Bearer token is not this authenticator's business."""
         response = self.client.get(self.url, HTTP_AUTHORIZATION="Bearer eyJhbGciOi.x.y")
         self.assertEqual(response.status_code, 404)
 
     def test_a_key_still_only_reaches_the_organisations_it_belongs_to(self):
-        """Keys carry no org of their own — the host decides which one is in play."""
         self.client.defaults["HTTP_HOST"] = "uganda.georiva.test"
         response = self.client.get(
             self.url,

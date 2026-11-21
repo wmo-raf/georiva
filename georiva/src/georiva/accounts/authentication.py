@@ -1,11 +1,4 @@
-"""Turning a presented API key into ``request.user``, and nothing more.
-
-This authenticator's whole job is identity. It does not decide what the caller
-may see — that is ``organisations.access``, reached by the serving planes on
-every request, exactly as it is for a browser session. The two transports
-converge here so there is one identity path behind both.
-
-Order matters in ``DEFAULT_AUTHENTICATION_CLASSES``: this runs before session
+"""Order matters in ``DEFAULT_AUTHENTICATION_CLASSES``: this runs before session
 auth, so a request that presents a key is judged on the key even if the browser
 happens to be signed in as somebody else — a script's credential is the explicit
 one, and silently preferring a stale cookie would be surprising in exactly the
@@ -17,10 +10,6 @@ from rest_framework.authentication import BaseAuthentication, get_authorization_
 
 from .models import KEY_PREFIX, ApiKey
 
-#: The query parameter, for clients that cannot set a header. QGIS, Leaflet and
-#: every other map library take a tile URL and nothing else, so the key has to
-#: be able to travel in one. It is the weaker transport — URLs end up in proxy
-#: logs and browser history — and the header is what a script should use.
 QUERY_PARAM = "api_key"
 
 #: The ``Authorization`` scheme. ``Bearer`` rather than a bespoke word so the
@@ -74,12 +63,6 @@ class ApiKeyAuthentication(BaseAuthentication):
 
         key = ApiKey.objects.resolve(secret)
         if key is None:
-            # A key was offered and it does not work. This is 401 rather than
-            # the 404 a caller gets for data they may not see, and the two are
-            # different questions: the 404 hides whether a collection exists,
-            # which this answer does not touch, while telling a scripting user
-            # their credential is expired or revoked saves them debugging a
-            # phantom missing dataset.
             raise exceptions.AuthenticationFailed("Invalid or expired API key.")
 
         return key.user, key

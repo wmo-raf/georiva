@@ -1,10 +1,3 @@
-"""``SourceUnitCorrected``: an operator said a Variable's bytes hold another unit (ADR 0046 §8).
-
-Correct source unit converts nothing: every value of the Variable, its range,
-its style stops and its stored statistics now mean a different physical value.
-The event is the record of who decided that, and when, and what the label was.
-"""
-
 from django.db import models
 
 from georiva.events.models import DomainEvent

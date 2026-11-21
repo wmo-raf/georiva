@@ -33,8 +33,6 @@ class ExhaustedRetriesTests(TestCase):
             retry_count=retry_count,
         )
 
-    # -- a lock that went stale -------------------------------------------------
-
     def test_a_stale_lock_with_retries_left_goes_back_to_pending(self):
         self._stale_processing(MAX - 1)
 
@@ -83,8 +81,6 @@ class ExhaustedRetriesTests(TestCase):
         self.log.refresh_from_db()
         self.assertEqual(self.log.status, FileIngestion.Status.PROCESSING)
 
-    # -- a row left pending -----------------------------------------------------
-
     def test_a_pending_file_with_no_retries_left_is_failed(self):
         self._row(retry_count=MAX)
 
@@ -121,8 +117,6 @@ class ExhaustedRetriesTests(TestCase):
 
         self.assertEqual(FileIngestionFinished.objects.count(), 1)
 
-    # -- the sweep --------------------------------------------------------------
-
     def test_the_sweep_fails_a_stuck_pending_file_instead_of_redispatching_it(self):
         self._row(retry_count=MAX, updated_at=dj_timezone.now() - FileIngestion.PENDING_TIMEOUT * 2)
 
@@ -140,8 +134,6 @@ class ExhaustedRetriesTests(TestCase):
         self.assertEqual(dispatched, [])
         self.log.refresh_from_db()
         self.assertEqual(self.log.status, FileIngestion.Status.FAILED)
-
-    # -- after it has failed ----------------------------------------------------
 
     def test_a_fresh_upload_of_the_same_file_can_be_ingested_again(self):
         self._row(retry_count=MAX)

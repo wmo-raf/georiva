@@ -2,11 +2,6 @@ from rest_framework.renderers import JSONRenderer
 
 
 class EDRJSONRenderer(JSONRenderer):
-    """
-    Renderer for standard EDR metadata responses.
-    application/json
-    """
-
     media_type = "application/json"
     format = "json"
 

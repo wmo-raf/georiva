@@ -135,7 +135,7 @@ class PluginTimelineAndSignalTests(PluginContractBase):
         from georiva.ingestion.models import RunIngestionClosed
 
         closed = RunIngestionClosed.objects.get()
-        (published,) = calls  # exactly once
+        (published,) = calls
         self.assertEqual(published.caused_by_id, closed.pk)
         self.assertEqual(published.correlation_id, closed.correlation_id)
         self.assertEqual(published.organisation_id, self.kenya.pk)

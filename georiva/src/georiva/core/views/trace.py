@@ -21,7 +21,6 @@ from georiva.organisations.ownership import scope_rows
 
 
 def _candidates(request, item):
-    """Events that could be the story of ``item``: derived attempts first, then ingestions, newest first."""
     from georiva.ingestion.models import FileIngestionFinished
     from georiva.processing.models import DerivationAttemptFinished
 

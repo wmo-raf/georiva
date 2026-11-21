@@ -45,7 +45,6 @@ PRIVATE_LAYER = "forecast:members-only:t2m"
 
 
 def clear_capabilities_cache():
-    """Drop every organisation's cached capabilities document."""
     cache.delete_pattern(f"{CAPABILITIES_KEY_PREFIX}:*")
 
 

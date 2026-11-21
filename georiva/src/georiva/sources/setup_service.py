@@ -196,10 +196,6 @@ class SourceSetupService:
                 )
             return products
 
-    # -------------------------------------------------------------------------
-    # Internal helpers
-    # -------------------------------------------------------------------------
-
     @staticmethod
     def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: dict | None = None):
         defaults = {**model_cls.get_wizard_defaults(), **(extra_data or {})}
@@ -214,11 +210,6 @@ class SourceSetupService:
         return data_feed
 
     def _provision_collection(self, *, catalog, definition: CollectionDefinition, data_feed, config_values: dict):
-        """Create/update Collection + Variables + Link for one CollectionDefinition."""
-        # Slug is the definition key alone — no catalog prefix (ADR-0010 §5) — so
-        # it matches the key the derived-product InputRef/OutputRef declarations
-        # reference and the output collections materialise under. The bucket path
-        # already carries the catalog segment, so the prefix was redundant.
         slug = slugify(definition.key)
 
         # selected_variable_keys is a wizard-only field, not stored on the link
@@ -281,8 +272,6 @@ class SourceSetupService:
         }
         existing = Variable.objects.filter(collection=collection, slug=slug).select_related("source_unit").first()
         if existing is not None and existing.source_unit_locked():
-            # The bytes already held say what they hold (ADR 0046 §8): a
-            # declaration that changed is not a relabelling of them.
             base_defaults.pop("source_unit")
             if existing.source_unit_id != source_unit.pk:
                 logger.warning(
@@ -295,10 +284,6 @@ class SourceSetupService:
                     existing.source_unit.symbol,
                     source_unit.symbol,
                 )
-        # Seed-vs-tune (ADR 0022): the plugin's declared range and styling
-        # only seed a new Variable — an operator-tuned range or style must
-        # survive re-provisioning. Canonical stops outrank the declared range:
-        # when valid palette_stops are present the range derives from them.
         seed_stops, stops_error = _validated_palette_stops(var_def.palette_stops)
         seed_warnings = []
         if stops_error:
@@ -411,13 +396,11 @@ class SourceSetupService:
             is_default=True,
             ramp=ramp,
         )
-        # Laid over the served range, stored converted (ADR 0046 §3).
         style.apply_ramp()
         style.save()
 
     @staticmethod
     def _upsert_link(*, data_feed, collection, definition: CollectionDefinition, config_values: dict):
-        """Create or update a DataFeedCollectionLink with definition_key and config_values."""
         link_model = type(data_feed).get_collection_link_model()
 
         # Baked-in config from the plugin (e.g. CHIRPS period derived from definition key)

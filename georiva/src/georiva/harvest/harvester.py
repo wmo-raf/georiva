@@ -442,7 +442,6 @@ class _Reach:
         return in_window(run or when, self.window)
 
     def runs_q(self) -> Q:
-        """The runs in the window, by `reference_time`."""
         return _window_q(self.window, "reference_time")
 
     def written_q(self, prefix: str = "") -> Q:

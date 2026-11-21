@@ -43,7 +43,6 @@ class CollectionForm(WagtailAdminModelForm):
                 variables.form = _not_file_read_variable_form(variables.form, self.instance)
 
     def clean_boundary_stats_levels(self):
-        # Convert list of strings → list of ints for the ArrayField
         return [int(v) for v in self.cleaned_data.get("boundary_stats_levels", [])]
 
 
@@ -116,8 +115,6 @@ def visible_visibilities(request):
 
 
 class CollectionQuerySet(models.QuerySet):
-    """Query vocabulary shared by every surface that serves collections."""
-
     def servable(self):
         """Everything this instance is willing to serve to *somebody*.
 
@@ -172,15 +169,6 @@ class CollectionQuerySet(models.QuerySet):
 
 
 class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, ClusterableModel):
-    """
-    Groups one or more Variables.
-
-    Examples:
-        - gfs-temperature-2m (single variable)
-        - gfs-wind-10m (wind_speed + wind_direction)
-        - sentinel-vegetation (ndvi + nir + red)
-    """
-
     base_form_class = CollectionForm
 
     objects = CollectionQuerySet.as_manager()
@@ -188,9 +176,9 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
     ORGANISATION_LOOKUP = "catalog__organisation"
 
     class Visibility(models.TextChoices):
-        PUBLIC = "public", "Public"  # served via STAC/EDR/pages/tiles to anyone
-        PRIVATE = "private", "Private"  # served only to members of the owning org
-        INTERNAL = "internal", "Internal"  # derivation intermediate — never served
+        PUBLIC = "public", "Public"
+        PRIVATE = "private", "Private"
+        INTERNAL = "internal", "Internal"
 
     class TimeResolution(models.TextChoices):
         SUB_HOURLY = "sub_hourly", "Sub-Hourly"
@@ -209,16 +197,11 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
 
     catalog = models.ForeignKey("georivacore.Catalog", on_delete=models.CASCADE, related_name="collections")
 
-    # Identity (slug, name, description), spatial extent (bounds, crs)
-    # are inherited from AbstractCollection.
-
-    # Temporal extent (auto-updated)
     time_resolution = models.CharField(max_length=20, choices=TimeResolution.choices, blank=True)
     time_start = models.DateTimeField(null=True, blank=True, editable=False)
     time_end = models.DateTimeField(null=True, blank=True, editable=False)
     item_count = models.PositiveIntegerField(default=0, editable=False)
 
-    # Status
     is_active = models.BooleanField(default=True)
     visibility = models.CharField(
         max_length=10,
@@ -233,7 +216,6 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         ),
     )
 
-    # --- Forecast config ---
     is_forecast = models.BooleanField(
         default=False, help_text="Check if items represent forecast (future) data with a reference_time"
     )
@@ -338,9 +320,9 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
     def reads_variables_from_files(self) -> bool:
         """Whether this collection's Variables are read out of ingested files.
 
-        Only such a Variable needs ``sources``, ``transform_type`` and
-        ``source_unit`` — they tell the extractor which bands to read and how to
-        convert them. Two kinds of collection are fed otherwise, and say so by a
+        Only such a Variable needs ``sources`` and ``transform_type`` — they
+        tell the extractor which bands to read and how to convert them. Two
+        kinds of collection are fed otherwise, and say so by a
         mark already on the row:
 
         - a harvested collection (``harvested_by``, ADR 0042 §7): each Variable
@@ -371,12 +353,6 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
 
     @property
     def date_picker_type(self) -> str:
-        """
-        HTML input type for the date filter, based on time resolution.
-        'number'  → year only   (annual)
-        'month'   → year+month  (monthly, seasonal, climatology)
-        'date'    → full date   (everything else)
-        """
         if self.time_resolution == self.TimeResolution.ANNUAL:
             return "number"
         if self.time_resolution in (
@@ -389,7 +365,6 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
 
     @property
     def date_picker_min(self) -> str:
-        """Formatted time_start for use as the date input min attribute."""
         if not self.time_start:
             return ""
         if self.date_picker_type == "number":
@@ -400,7 +375,6 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
 
     @property
     def date_picker_max(self) -> str:
-        """Formatted time_end for use as the date input max attribute."""
         if not self.time_end:
             return ""
         if self.date_picker_type == "number":
@@ -410,7 +384,6 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         return self.time_end.strftime("%Y-%m-%d")
 
     def source_variables_list(self):
-        """Return a list of source variable names in this collection."""
         source_vars = []
         for variable in self.variables.all():
             variable_sources_params = variable.sources_param_list
@@ -428,8 +401,5 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         return self.items.filter(reference_time__isnull=False).exists()
 
     def get_latest_item_date(self) -> datetime | None:
-        """
-        Latest valid_time in this collection (Item.time).
-        """
-        latest = self.items.order_by("-time").first()  # uses related_name='items'
+        latest = self.items.order_by("-time").first()
         return latest.time if latest else None

@@ -23,15 +23,6 @@ exactly as STAC's is (#271): the organisation never appears in an id, and
 Cross-API relationships:
     EDR collection detail  → links to STAC collection via canonical rel
     STAC collection        → can link to EDR collection detail
-
-Future additions:
-    GET /api/edr/collections/{collection_id}/position/
-    GET /api/edr/collections/{collection_id}/area/
-    GET /api/edr/collections/{collection_id}/locations/
-    GET /api/edr/collections/{collection_id}/instances/
-
-    Each resolves its collection through `resolve_edr_collection`, which gives
-    it the bare-slug redirect for free.
 """
 
 from django.db.models import Exists, OuterRef
@@ -59,10 +50,6 @@ from .serializers import (
     EDRCollectionSerializer,
     EDRCollectionSummarySerializer,
 )
-
-# =============================================================================
-# Helpers
-# =============================================================================
 
 
 def _org_collections(request: Request, queryset=None):
@@ -117,33 +104,12 @@ def resolve_edr_collection(request, collection_id: str, queryset=None):
     )
 
 
-# =============================================================================
-# Base view
-# =============================================================================
-
-
 class EDRAPIView(APIView):
-    """Base view for all EDR endpoints."""
-
     renderer_classes = [EDRJSONRenderer, JSONRenderer]
     parser_classes = [JSONParser]
 
 
-# =============================================================================
-# Landing Page
-# =============================================================================
-
-
 class EDRLandingPageView(EDRAPIView):
-    """
-    EDR API Landing Page.
-
-    GET /api/edr/
-
-    Returns service metadata and links to conformance,
-    collections, and API definition.
-    """
-
     def get(self, request: Request) -> Response:
         base_url = get_full_url_by_request(request, "/api/edr/")
         organisation = require_active_org(request)
@@ -188,44 +154,20 @@ class EDRLandingPageView(EDRAPIView):
         )
 
 
-# =============================================================================
-# Conformance
-# =============================================================================
-
-
 class EDRConformanceView(EDRAPIView):
-    """
-    EDR Conformance Declaration.
-
-    GET /api/edr/conformance/
-
-    Declares which OGC conformance classes this implementation satisfies.
-    Currently: core + collections metadata only.
-    """
-
     def get(self, request: Request) -> Response:
         return Response(
             {
                 "conformsTo": [
-                    # OGC API Common
                     "http://www.opengis.net/spec/ogcapi-common-1/1.0/conf/core",
                     "http://www.opengis.net/spec/ogcapi-common-2/1.0/conf/collections",
-                    # OGC API EDR core
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/core",
-                    # Encoding
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/oas30",
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/html",
                     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/geojson",
-                    # Future
-                    # "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/covjson",
                 ]
             }
         )
-
-
-# =============================================================================
-# Collection List
-# =============================================================================
 
 
 class EDRCollectionListView(EDRAPIView):
@@ -253,7 +195,6 @@ class EDRCollectionListView(EDRAPIView):
                 "variables",
             )
             .annotate(
-                # Single EXISTS subquery per collection — no per-row extra queries
                 has_reference_time=Exists(
                     Item.objects.filter(
                         collection=OuterRef("pk"),
@@ -287,11 +228,6 @@ class EDRCollectionListView(EDRAPIView):
                 "collections": collections_data,
             }
         )
-
-
-# =============================================================================
-# Collection Detail
-# =============================================================================
 
 
 class EDRCollectionDetailView(EDRAPIView):

@@ -1,7 +1,3 @@
-"""
-GeoRiva Ingestion Celery Tasks
-"""
-
 import logging
 from datetime import timedelta
 from pathlib import Path
@@ -33,7 +29,7 @@ def process_incoming_file(
     self,
     file_path: str,
     origin_bucket: str,
-    reference_time: str = None,  # kept for backwards compat; IngestionService resolves it
+    reference_time: str = None,
     job_id: int = None,
 ):
     """
@@ -110,20 +106,11 @@ def process_staging_file(self, bucket: str, key: str):
 )
 def sweep_unprocessed(sync: bool = False):
     """
-    Safety net — finds files that the webhook missed and retries failures.
-
-    Three phases:
-    1. Reset stale locks (workers that crashed mid-processing), and fail files with no retries left
-    2. Scan incoming/sources buckets for untracked files and for pending
-       files whose dispatched task was lost (pending past PENDING_TIMEOUT)
-    3. Retry failed files that haven't exceeded max retries
+    Safety net — finds files whose bucket notification was missed, pending files whose
+    dispatched task was lost, and failed files with retries left.
     """
 
     logger.info("Starting sweep...")
-
-    # -----------------------------------------------------------------
-    # Phase 1: Reset stale locks
-    # -----------------------------------------------------------------
 
     stale_count = FileIngestion.reset_stale_locks(sweep="unprocessed")
     if stale_count:
@@ -134,10 +121,6 @@ def sweep_unprocessed(sync: bool = False):
     exhausted_count = FileIngestion.fail_exhausted_pending(sweep="unprocessed")
     if exhausted_count:
         logger.warning("Failed %d pending files with no retries left", exhausted_count)
-
-    # -----------------------------------------------------------------
-    # Phase 2: Scan buckets for untracked files
-    # -----------------------------------------------------------------
 
     new_files = 0
     redispatched = 0
@@ -225,10 +208,6 @@ def sweep_unprocessed(sync: bool = False):
     if redispatched:
         logger.info("Re-dispatched %d stale pending files", redispatched)
 
-    # -----------------------------------------------------------------
-    # Phase 3: Retry failed files
-    # -----------------------------------------------------------------
-
     retryable = FileIngestion.get_retryable(limit=50)
     retry_count = 0
 
@@ -250,11 +229,6 @@ def sweep_unprocessed(sync: bool = False):
         )
         retry_count += 1
 
-    # -----------------------------------------------------------------
-    # Summary
-    # -----------------------------------------------------------------
-
-    # Log permanently failed files for visibility
     permanently_failed = FileIngestion.get_permanently_failed().count()
     if permanently_failed:
         logger.warning(

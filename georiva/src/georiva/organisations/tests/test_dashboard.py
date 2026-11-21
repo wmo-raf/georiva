@@ -70,8 +70,6 @@ class DashboardScopingTests(TestCase):
         page.save_revision(user=self.user)
         return workflow.start(page, self.user)
 
-    # -- recent edits ------------------------------------------------------
-
     def test_an_edit_in_another_organisation_is_not_listed(self):
         self.record_edit(self.uganda_page)
         self.assertNotContains(self.dashboard(), "Kampala Bulletin")
@@ -95,8 +93,6 @@ class DashboardScopingTests(TestCase):
             self.record_edit(page, timestamp=timezone.now())
         self.assertContains(self.dashboard(), "Nairobi Bulletin")
 
-    # -- locked pages ------------------------------------------------------
-
     def test_a_page_locked_in_another_organisation_is_not_listed(self):
         self.lock(self.uganda_page)
         self.assertNotContains(self.dashboard(), "Kampala Bulletin")
@@ -112,8 +108,6 @@ class DashboardScopingTests(TestCase):
         page.save()
         return page
 
-    # -- workflow moderation ------------------------------------------------
-
     def test_neither_workflow_panel_shows_another_organisations_page(self):
         self.start_workflow(self.uganda_page)
         self.assertNotContains(self.dashboard(), "Kampala Bulletin")
@@ -121,8 +115,6 @@ class DashboardScopingTests(TestCase):
     def test_the_workflow_panels_show_this_organisations_page(self):
         self.start_workflow(self.kenya_page)
         self.assertContains(self.dashboard(), "Nairobi Bulletin")
-
-    # -- the upgrade canary -------------------------------------------------
 
     def test_every_panel_on_the_dashboard_is_one_we_have_scoped(self):
         """Fails on the Wagtail release that adds or renames a dashboard panel.
@@ -140,8 +132,6 @@ class DashboardScopingTests(TestCase):
         allowed = set(dashboard.SCOPED_DASHBOARD_PANELS.values()) | {IngestionActivityPanel, FailuresPanel}
         panels = self.dashboard().context["panels"]
         self.assertEqual({type(panel) for panel in panels}, allowed)
-
-    # -- the ownership predicate, by direct call ----------------------------
 
     def request_for(self, organisation):
         request = RequestFactory().get("/admin/")

@@ -142,7 +142,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         /datasets/<catalog_slug>/<collection_slug>/items/<item_id>/  → item detail
     """
 
-    # Operator-configurable fields
     intro_text = models.TextField(
         blank=True, verbose_name="Introduction", help_text="Optional intro shown above the dataset listing."
     )
@@ -165,10 +164,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
     class Meta:
         verbose_name = "Datasets Index Page"
-
-    # -------------------------------------------------------------------------
-    # Routes
-    # -------------------------------------------------------------------------
 
     @path("")
     def index(self, request):
@@ -216,16 +211,13 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
         variables = list(collection.variables.filter(is_active=True).order_by("sort_order"))
 
-        # --- Filters ---
         active_var_slug = request.GET.get("variable", "").strip()
         date_str = request.GET.get("date", "").strip()
         run_str = request.GET.get("run", "").strip()
 
-        # Validate active variable — must belong to this collection
         if active_var_slug not in {v.slug for v in variables}:
             active_var_slug = variables[0].slug if variables else ""
 
-        # --- Variable coverage ---
         # Check which variables have at least one asset Titiler can draw (a COG
         # or a Store asset) in the current filtered item set. Used to disable variables with no data and to
         # fall back the active variable if it has no coverage.
@@ -248,13 +240,11 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         )
         coverage = set(coverage_qs)
 
-        # Annotate variables with a drawable-coverage flag
         for variable in variables:
             variable.has_coverage = variable.slug in coverage
 
         ungrouped_variables, variable_groups = _group_variables_by_level(variables)
 
-        # Mark the group containing the active variable as open; fall back to first group
         active_group_marked = False
         for group in variable_groups:
             group["is_active"] = active_var_slug in {v.slug for v in group["variables"]}
@@ -263,15 +253,12 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         if not active_group_marked and variable_groups:
             variable_groups[0]["is_active"] = True
 
-        # Fall back active variable to first one with drawable coverage
         if not active_var_slug or active_var_slug not in coverage:
             fallback = next((v for v in variables if v.has_coverage), None)
             active_var_slug = fallback.slug if fallback else active_var_slug
 
         active_variable = next((v for v in variables if v.slug == active_var_slug), None)
 
-        # --- Item queryset ---
-        # Only items that have an asset Titiler can draw for the active variable.
         items_qs = (
             base_items_qs.filter(
                 drawable_q("assets__"),
@@ -293,7 +280,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         items_page = paginator.get_page(page_number)
         page_range = paginator.get_elided_page_range(items_page.number)
 
-        # --- Forecast runs ---
         forecast_runs = []
         if collection.is_forecast:
             forecast_runs = (
@@ -344,7 +330,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             pk=item_id,
         )
 
-        # Assets Titiler draws on the map — a COG or a Store asset, one per variable
         map_assets = list(
             item.assets.filter(drawable_q(), variable__is_active=True)
             .select_related("variable", "variable__unit")
@@ -352,10 +337,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .order_by("variable__sort_order")
         )
 
-        # Encoded texture URLs by variable — derived on demand by Titiler, from
-        # the COG or the Upstream store (ADR 0044 §9), at the variable's current
-        # render range (ADR 0021), so a min/max edit is live on the next request
-        # with nothing to regenerate.
         texture_urls = {a.variable.slug: titiler_encoded_preview_url(item, a.variable) for a in map_assets}
 
         # All downloadable assets for the downloads section. A Store asset is
@@ -380,7 +361,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .order_by("variable__sort_order")
         )
 
-        # Resolve active variable from ?variable= param
         active_var_slug = request.GET.get("variable", "").strip()
         map_slugs = [a.variable.slug for a in map_assets]
         if active_var_slug not in map_slugs:
@@ -395,7 +375,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         # control never flashes in before JS can hide it.
         boundary_levels_active = boundary_levels_by_variable.get(active_var_slug, [])
 
-        # Previous / next item by time
         prev_item = (
             Item.objects.filter(collection=collection, time__lt=item.time).order_by("-time").values("pk").first()
         )
@@ -415,7 +394,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             for a in map_assets
         ]
 
-        # Group map assets by vertical level for the map panel
         ungrouped_map_assets, map_asset_groups = _group_assets_by_level(map_assets)
         active_group_marked = False
         for group in map_asset_groups:
@@ -425,7 +403,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         if not active_group_marked and map_asset_groups:
             map_asset_groups[0]["is_active"] = True
 
-        # Group downloadable assets by vertical level for the downloads section
         ungrouped_downloads, download_groups = _group_assets_by_level(downloadable_assets)
         active_dl_marked = False
         for group in download_groups:
@@ -471,10 +448,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             },
         )
 
-    # -------------------------------------------------------------------------
-    # Helpers
-    # -------------------------------------------------------------------------
-
     def _apply_date_filter(self, qs, date_str: str):
         """
         Apply a date filter to an Item queryset, interpreting date_str
@@ -487,16 +460,13 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         try:
             parts = date_str.split("T")[0].split("-")  # strip time component first
             if len(parts) == 1:
-                # Year only — e.g. "2025"
                 return qs.filter(time__year=int(parts[0]))
             if len(parts) == 2:
-                # Year + month — e.g. "2025-03"
                 return qs.filter(time__year=int(parts[0]), time__month=int(parts[1]))
             # Full date or datetime — e.g. "2025-03-15" or "2025-03-15T06:00:00Z"
             parsed = parse_date(parts[0] + "-" + parts[1] + "-" + parts[2])
             if parsed:
                 if "T" in date_str:
-                    # Has hour component
                     hour = int(date_str.split("T")[1].split(":")[0])
                     return qs.filter(time__date=parsed, time__hour=hour)
                 return qs.filter(time__date=parsed)
@@ -504,14 +474,10 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             pass
         return qs
 
-    # -------------------------------------------------------------------------
-    # Tenant rows
-    #
     # A portal is one organisation's, and so is everything it lists. Each route
     # above reaches its catalogs, collections and items through one of these
     # four, which take the organisation from the request Host — never from a
     # path segment, because there is none (#271).
-    # -------------------------------------------------------------------------
 
     def _org_catalog(self, request, catalog_slug):
         """An active catalog of this host's organisation, or 404."""

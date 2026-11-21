@@ -45,21 +45,6 @@ class Topic(Indexed, TimeStampedModel):
 
 
 class Catalog(Indexed, TimeStampedModel):
-    """
-    A data source that produces multiple collections.
-
-    Examples: GFS, CHIRPS, ERA5, MSG
-
-    This is an organizational grouping - it defines how data is ingested
-
-    A Catalog is the tenancy root of the data tree: everything beneath it
-    (Collection, Variable, Item, Asset, DataFeed, upload configs, virtual-zarr
-    manifests, zonal stats) belongs to the catalog's organisation transitively
-    through the FK chain, and carries no organisation FK of its own.
-    """
-
-    # The tenancy root: everything beneath declares the path that reaches this
-    # field. See organisations/access.py.
     ORGANISATION_LOOKUP = "organisation"
 
     organisation = models.ForeignKey(
@@ -75,7 +60,6 @@ class Catalog(Indexed, TimeStampedModel):
     slug = models.SlugField(max_length=100)
     description = models.TextField(blank=True)
 
-    # Provider information
     provider = models.CharField(max_length=255, blank=True)
     provider_url = models.URLField(blank=True)
     license = models.CharField(max_length=255, blank=True)
@@ -84,7 +68,6 @@ class Catalog(Indexed, TimeStampedModel):
         "georivacore.Topic", blank=True, related_name="catalogs", help_text="Thematic topics for this catalog."
     )
 
-    # Source file format
     class FileFormat(models.TextChoices):
         GRIB = "grib2", "GRIB/GRIB2"
         NETCDF = "netcdf", "NetCDF"

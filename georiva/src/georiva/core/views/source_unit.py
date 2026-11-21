@@ -1,12 +1,3 @@
-"""Correct source unit (ADR 0046 §8): the one way to change what a Variable's bytes are said to hold.
-
-A Variable's ``source_unit`` is read-only in its form once it has an asset,
-because it describes bytes that already exist. When that label is wrong, this
-page says what follows — every value, the range, the style stops and the stored
-asset and zonal statistics are reinterpreted, not converted — changes the label
-and records who did it.
-"""
-
 from django import forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction

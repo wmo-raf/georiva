@@ -1,5 +1,3 @@
-"""What GeoRivaTestRunner sets up for the whole suite."""
-
 from django.contrib.auth.hashers import get_hasher
 from django.test import SimpleTestCase
 

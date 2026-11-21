@@ -1,14 +1,3 @@
-"""
-Staging data tier — source-grained, not-served STAC models.
-
-Mirrors the Published STAC spec (Collection/Item/Asset) but follows the
-source/acquisition shape: one ``StagingItem`` per raw file (no timestep
-shredding), a flexible temporal extent (no TimescaleDB hypertable), and assets
-carrying the ``source`` role.
-
-See docs/adr/0004-staging-tier-and-abstract-stac-models.md.
-"""
-
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
@@ -26,10 +15,8 @@ from georiva.core.models.base import (
 
 @register_snippet
 class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
-    """A source-grained grouping of staged raw artifacts."""
-
     # Machine-generated data, not editorial content — kept out of Wagtail's
-    # reference index (see core/test_reference_index_exclusion.py).
+    # reference index (see core/tests/test_reference_index_exclusion.py).
     wagtail_reference_index_ignore = True
 
     ORGANISATION_LOOKUP = "catalog__organisation"
@@ -40,12 +27,8 @@ class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
         related_name="staging_collections",
     )
 
-    # The published-tier core Collection this staging collection corresponds to
-    # (same catalog + slug). Pinned at registration so the arriving-input trigger
-    # can carry a collection_id and dispatch can match binding rows by FK
-    # (ADR-0010 §3/§4). Nullable: a staged file whose core Collection isn't
-    # provisioned yet still registers; SET_NULL keeps staging data if the core
-    # Collection is later deleted.
+    # Nullable: a staged file whose core Collection isn't provisioned yet still
+    # registers; SET_NULL keeps staging data if the core Collection is later deleted.
     collection = models.ForeignKey(
         "georivacore.Collection",
         null=True,
@@ -66,18 +49,8 @@ class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
 
 @register_snippet
 class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
-    """
-    One staged raw file held as a STAC-shaped item.
-
-    Not a TimescaleDB hypertable. Carries a flexible STAC temporal extent:
-    a nullable single ``datetime`` (one slice) and/or a ``start_datetime`` /
-    ``end_datetime`` range (multi-temporal file). These are approximate
-    Gregorian index bounds for selection only — the authoritative time and
-    calendar are read from file content at derivation time.
-    """
-
     # Machine-generated data written on every staged file — kept out of Wagtail's
-    # reference index (see core/test_reference_index_exclusion.py).
+    # reference index (see core/tests/test_reference_index_exclusion.py).
     wagtail_reference_index_ignore = True
 
     ORGANISATION_LOOKUP = "collection__catalog__organisation"
@@ -88,7 +61,6 @@ class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
         related_name="items",
     )
 
-    # Flexible STAC temporal extent (all nullable).
     datetime = models.DateTimeField(
         null=True,
         blank=True,
@@ -163,19 +135,6 @@ class StagingAsset(AbstractAsset, TimeStampedModel, Orderable):
 
 
 class DerivationLink(models.Model):
-    """
-    Lineage edge: a Published Item was derived from one input Item.
-
-    One row per (output, input) edge. The input is either a StagingItem or a
-    Published Item — exactly one of the two source FKs is set (check
-    constraint). Tagged with the recipe id/version and the input hash that
-    produced the output. Item-level granularity, cross-tier.
-
-    Lives in the staging app (not core) so the data-layer dependency direction
-    stays staging → core, keeping core dependency-free. Written by the engine.
-    See docs/adr/0004-staging-tier-and-abstract-stac-models.md.
-    """
-
     ORGANISATION_LOOKUP = "derived_item__collection__catalog__organisation"
 
     # FKs to Item use db_constraint=False because Item is a TimescaleDB

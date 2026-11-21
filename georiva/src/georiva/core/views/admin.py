@@ -171,41 +171,25 @@ def collection_items_list(request, collection_pk):
         pk=collection_pk,
     )
 
-    # ------------------------------------------------------------------
-    # POST actions
-    # ------------------------------------------------------------------
     if request.method == "POST":
         action = request.POST.get("action")
 
         if action == "trigger_ingestion":
-            # TODO: wire up real Celery task, e.g.:
-            # from georiva.ingestion.tasks import run_loader_for_collection
-            # run_loader_for_collection.delay(collection.pk)
             messages.success(request, _("Ingestion queued (placeholder)."))
             return redirect(request.path)
 
-    # ------------------------------------------------------------------
-    # Variables
-    # ------------------------------------------------------------------
     variable_list = list(collection.variables.filter(is_active=True).prefetch_related("styles"))
 
-    # ------------------------------------------------------------------
-    # Active variable tab
-    # ------------------------------------------------------------------
     active_var_slug = request.GET.get("var", "")
     active_variable = None
     if active_var_slug:
         active_variable = next((v for v in variable_list if v.slug == active_var_slug), None)
-        # Unrecognised slug — fall back to "All"
         if not active_variable:
             active_var_slug = ""
 
-    # ------------------------------------------------------------------
-    # Items queryset
     # Use a Subquery for asset_count rather than annotate(Count(...)).
     # annotate + COUNT triggers GROUP BY which conflicts with TimescaleModel's
     # extra fields (created, modified) on PostgreSQL.
-    # ------------------------------------------------------------------
     from georiva.core.models import Asset
 
     asset_count_sq = (
@@ -215,12 +199,8 @@ def collection_items_list(request, collection_pk):
     items = Item.objects.filter(collection=collection).annotate(asset_count=Subquery(asset_count_sq)).order_by("-time")
 
     if active_variable:
-        # Only items that have at least one asset for this variable
         items = items.filter(assets__variable=active_variable).distinct()
 
-    # ------------------------------------------------------------------
-    # Pagination
-    # ------------------------------------------------------------------
     try:
         page_num = int(request.GET.get("p", 1))
     except ValueError:
@@ -235,12 +215,10 @@ def collection_items_list(request, collection_pk):
 
     elided_page_range = paginator.get_elided_page_range(page_obj.number)
 
-    # ------------------------------------------------------------------
     # Attach ingestion_log to each item on this page.
     # Bulk lookup by source_file (convention: "{bucket}:{file_path}") so
     # every item — including GRIB/NetCDF items that are not the last one
     # written — gets the correct status badge.
-    # ------------------------------------------------------------------
     from django.db.models import F, Value
     from django.db.models.functions import Concat
 
@@ -261,9 +239,6 @@ def collection_items_list(request, collection_pk):
     for item in page_obj.object_list:
         item.ingestion_log = fi_by_source_file.get(item.source_file)
 
-    # ------------------------------------------------------------------
-    # Context
-    # ------------------------------------------------------------------
     context = {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
@@ -288,7 +263,6 @@ def collection_items_list(request, collection_pk):
 
 
 def _collection_history(request, collection):
-    """Each time new data was published into the collection, and each run it closed or reopened."""
     from georiva.core.models import ProductPublished
     from georiva.events.history import build_history
     from georiva.ingestion.models import RunIngestionClosed, RunIngestionReopened
@@ -336,12 +310,10 @@ def plugin_list(request):
 
 
 def add_data_select(request):
-    """The Add Data front door: route to the setup wizard matching how the data arrives."""
     return render(
         request,
         "core/add_data.html",
         {
-            # Rendered by the slim header via wagtailadmin/generic/base.html.
             "breadcrumbs_items": [
                 {"url": reverse("wagtailadmin_home"), "label": _("Home")},
                 {"url": None, "label": _("Add Data")},

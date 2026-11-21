@@ -58,14 +58,7 @@ class VariableExtractor:
         """
         Extract data for a Variable, applying its transform. No unit is converted.
 
-        Args:
-            variable:  Variable instance with sources StreamField populated
-            file_path: Local path to source file
-            timestamp: Timestamp to extract
-            window:    Optional (x, y, w, h) for chunked/windowed reading
-
-        Returns:
-            2D numpy array (height, width) of float32 values in variable.source_unit
+        Returns a 2D (height, width) float32 array in ``variable.source_unit``.
         """
         sources = list(variable.sources)
 
@@ -118,22 +111,13 @@ class VariableExtractor:
             **kwargs,
         )
 
-    # =========================================================================
-    # Source Helpers
-    # =========================================================================
-
     def _get_primary_source(self, sources: list) -> "StructValue":
-        """
-        Get the primary source block value.
-        Falls back to first block if no primary block exists.
-        """
         for block in sources:
             if block.block_type == "primary":
                 return block.value
         raise ValueError("No primary source found in variable sources")
 
     def _get_source_by_role(self, sources: list, role: str) -> "StructValue":
-        """Get a source block value by its block_type (role)."""
         for block in sources:
             if block.block_type == role:
                 return block.value
@@ -174,18 +158,8 @@ class VariableExtractor:
         window: tuple = None,
     ) -> np.ndarray:
         """
-        Extract raw data for a single source StructValue using the format plugin.
-
-        No unit conversion here or anywhere on the way in (ADR 0046 §1).
-
-        Args:
-            source:    StructValue with source_name, vertical_dimension, vertical_value
-            file_path: Path to source file
-            timestamp: Timestamp to extract
-            window:    Optional spatial subset (x, y, w, h)
-
-        Returns:
-            2D numpy array (float32) in the source file's native units
+        No unit conversion here or anywhere on the way in (ADR 0046 §1): the array
+        is in the source file's native units.
         """
         kwargs = self._build_plugin_kwargs(source)
 
@@ -199,12 +173,7 @@ class VariableExtractor:
 
         return np.asarray(extracted.data, dtype=np.float32)
 
-    # =========================================================================
-    # Transform Implementations
-    # =========================================================================
-
     def _extract_passthrough(self, sources, file_path, timestamp, window) -> np.ndarray:
-        """Direct read from primary source with no computation."""
         primary = self._get_primary_source(sources)
         return self._extract_source(primary, file_path, timestamp, window)
 
@@ -242,10 +211,6 @@ class VariableExtractor:
         del u, v
         return direction
 
-    # =========================================================================
-    # Statistics
-    # =========================================================================
-
     def compute_stats(
         self,
         variable: "Variable",
@@ -259,12 +224,6 @@ class VariableExtractor:
         For PASSTHROUGH without a clip window, uses lazy/dask-backed loading
         to avoid materialising the full array in memory. Falls back to full
         extraction for VECTOR transforms or windowed reads.
-
-        Args:
-            variable:  Variable to compute stats for
-            file_path: Path to source file
-            timestamp: Timestamp to extract
-            window:    Optional clip window dict with x_off, y_off, width, height
         """
         try:
             sources = list(variable.sources)
@@ -280,7 +239,6 @@ class VariableExtractor:
                     window["height"],
                 )
 
-            # Lazy path: PASSTHROUGH only, no window
             if window_tuple is None and variable.transform_type == variable.TransformType.PASSTHROUGH:
                 try:
                     stats = self._compute_stats_lazy(variable, sources, file_path, timestamp)
@@ -289,7 +247,6 @@ class VariableExtractor:
                 except (NotImplementedError, ValueError):
                     pass  # fall through to full extraction
 
-            # Full extraction path
             data = self.extract(variable, file_path, timestamp, window=window_tuple)
 
             return {
@@ -315,7 +272,6 @@ class VariableExtractor:
 
         Statistics are of the raw values, in the source unit (ADR 0046 §3) —
         no full array materialisation, dask streams in chunks.
-        Returns None if the plugin does not support lazy loading.
         """
         primary = self._get_primary_source(sources)
         kwargs = self._build_plugin_kwargs(primary)

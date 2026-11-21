@@ -12,7 +12,7 @@ their ingestion progress:
    POST push_feed_complete      — per file, once the PUT is done: confirm it landed, start ingestion
    POST push_feed_submit        — the same for a backend with nothing to sign for: the files come
                                       in the request, are written to ``incoming`` here, and ingested
-4. Client polls GET /api/arrivals/{id}/status/ until a terminal status.
+4. The page polls ``upload_session_status_api`` until a terminal status.
 """
 
 import logging
@@ -105,7 +105,6 @@ def _batch_error(config, filenames, variable_ids, times) -> str | None:
     """
     is_geotiff = config.catalog.file_format == "geotiff"
 
-    # For GeoTIFF, validate that each file has a corresponding variable.
     if is_geotiff:
         feed_variable_ids = {str(pk) for pk in config.variables().values_list("pk", flat=True)}
         for i in range(len(filenames)):
@@ -113,7 +112,6 @@ def _batch_error(config, filenames, variable_ids, times) -> str | None:
             if not vid or vid not in feed_variable_ids:
                 return str(_("Please choose a variable for each file."))
 
-    # Pre-validate time requirements before creating the session.
     for i, name in enumerate(filenames):
         operator_time = _parse_datetime_local(times[i] if i < len(times) else "")
         reference_time, valid_time = _resolve_times(config, name, operator_time)
@@ -239,7 +237,6 @@ def push_feed_page(request, pk, issued=None):
 
 
 def push_feed_extract_times(request, pk):
-    """Pre-fill attempt: extract times from a filename before upload."""
     from georiva.ingestion.models import PushFeed
 
     if request.method != "POST":

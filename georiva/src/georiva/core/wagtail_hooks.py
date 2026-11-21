@@ -155,14 +155,6 @@ def boundary_settings_url(site=None):
 
 
 class SuperuserMenuItem(MenuItem):
-    """Shown to the instance admin alone.
-
-    Administrative boundaries are SHARED_REFERENCE_DATA (ADR 0011): no
-    organisation owns them and every organisation reads them, so a reload
-    rewrites the dataset the whole instance depends on. That is the instance
-    admin's act, not an org admin's — and not a page editor's.
-    """
-
     def is_shown(self, request):
         return bool(request.user.is_superuser)
 

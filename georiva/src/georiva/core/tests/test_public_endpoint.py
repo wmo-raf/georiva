@@ -1,5 +1,3 @@
-"""Where a browser's upload goes, and whether it can get there."""
-
 from django.test import SimpleTestCase, override_settings
 
 from georiva.core.checks import check_public_endpoint_name

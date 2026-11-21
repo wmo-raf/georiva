@@ -128,14 +128,7 @@ def build_chain(feed):
             "last_activity": status.last_completed_at,
             "readiness": readiness,
             "readiness_hint": _readiness_hint(definition, readiness),
-            # Output collections are read from the pinned DerivedProductOutput
-            # rows (ADR-0010 §2), so an operator slug rename can't drop them.
             "output_collections": [b.collection for b in product.output_bindings.select_related("collection")],
-            # Every trigger mode is hand-runnable (ADR-0020): run_product_now
-            # builds a wide selector, so for an event product this is a
-            # backfill over the already-staged record — the only recovery for
-            # files that arrived while the product was disabled. The label
-            # keeps the semantics honest per mode.
             "can_run": True,
             "run_label": (_("Backfill") if definition.trigger_mode == "event" else _("Run now")),
         }
@@ -429,8 +422,7 @@ def pin_bindings(product, definition, feed, output_collections):
     the raw collection its ``CollectionDefinition`` link points at, or the sibling
     product's materialised output collection; an input that can't resolve yet
     (its collection not provisioned) is left unpinned and re-pins on a later
-    enable — surfaced as an *unbound* product in a later slice, never a hard
-    failure here."""
+    enable — surfaced as an *unbound* product, never a hard failure here."""
     from georiva.sources.models import DerivedProductInput, DerivedProductOutput
 
     for ref, collection in zip(definition.outputs, output_collections, strict=True):

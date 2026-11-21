@@ -1,16 +1,3 @@
-"""
-Core building blocks for virtual Zarr (Icechunk) repos over GeoRiva COG assets.
-
-    MinioStoreConfig     — connection parameters + store factory methods
-    MinioVirtualTIFF     — VirtualTIFF subclass that correctly wires AsyncS3Store
-                           for MinIO (bypasses the broken obstore → async-tiff
-                           conversion that panics on missing aws_ prefix)
-    VirtualZarrBuilder   — scans COG headers and builds a virtual xarray
-                           Dataset (virtual chunk refs only, no pixel data)
-    write_rebuild / write_append
-                         — commit a virtual dataset into an Icechunk repo
-"""
-
 from __future__ import annotations
 
 import logging
@@ -30,11 +17,6 @@ from virtualizarr import open_virtual_dataset
 from virtualizarr.manifests import ManifestStore
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -92,10 +74,6 @@ class MinioStoreConfig:
             public_endpoint=getattr(settings, "MINIO_PUBLIC_ENDPOINT", ""),
         )
 
-    # ------------------------------------------------------------------
-    # Store factories
-    # ------------------------------------------------------------------
-
     def _build_obstore(self) -> S3Store:
         """
         obstore S3Store for the assets bucket, pointed at the internal endpoint.
@@ -143,10 +121,6 @@ class MinioStoreConfig:
         prefix = f"{self.internal_endpoint}/{self.bucket}/"
         return ObjectStoreRegistry({prefix: store})
 
-    # ------------------------------------------------------------------
-    # URL helpers
-    # ------------------------------------------------------------------
-
     def url_for(self, path: str) -> str:
         """
         Full internal URL for a bucket-relative asset path.
@@ -171,11 +145,6 @@ class MinioStoreConfig:
             if internal_url.startswith(prefix):
                 return f"s3://{self.bucket}/{internal_url[len(prefix) :]}"
         return internal_url  # already s3:// or unrecognised
-
-
-# ---------------------------------------------------------------------------
-# VirtualTIFF parser
-# ---------------------------------------------------------------------------
 
 
 class MinioVirtualTIFF(VirtualTIFF):
@@ -213,11 +182,6 @@ class MinioVirtualTIFF(VirtualTIFF):
             ifd_layout=self.ifd_layout,
         )
         return ManifestStore(registry=registry, group=manifest_group)
-
-
-# ---------------------------------------------------------------------------
-# Builder
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -304,10 +268,6 @@ class VirtualZarrBuilder:
         logger.info("Rewriting chunk URLs to s3:// URIs…")
         return combined.vz.rename_paths(self.config.s3_uri_for)
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _assign_geo_coords(ds: xr.Dataset) -> xr.Dataset:
         """
@@ -353,11 +313,6 @@ class VirtualZarrBuilder:
         return ds.assign_coords(lat=("y", lats), lon=("x", lons)).swap_dims({"y": "lat", "x": "lon"})
 
 
-# ---------------------------------------------------------------------------
-# Icechunk writers
-# ---------------------------------------------------------------------------
-
-
 def write_rebuild(
     repo,
     vds: xr.Dataset,
@@ -392,9 +347,6 @@ def write_append(
     metadata: dict,
     message: str,
 ) -> str:
-    """
-    Append new timesteps along ``time`` and commit.  Returns the snapshot id.
-    """
     session = repo.writable_session("main")
     vds.vz.to_icechunk(session.store, append_dim="time", last_updated_at=last_updated_at)
     return session.commit(message, metadata=metadata)
@@ -404,7 +356,7 @@ def last_committed_time(repo) -> pd.Timestamp | None:
     """
     Last value of the committed time coordinate at the tip of ``main``.
 
-    Belt-and-braces for the append path (design decision 5): the caller
+    Belt-and-braces for the append path: the caller
     asserts every appended timestep is strictly after this, independently of
     the commit-metadata watermark.  Reads only the native time array — no
     virtual chunks are touched.

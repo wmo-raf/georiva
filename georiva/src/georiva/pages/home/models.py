@@ -122,13 +122,10 @@ class HomePage(Page):
     # No max_count: there is one HomePage per organisation, each the root of its
     # own portal, all siblings under the Wagtail root node.
 
-    # Pages are org-owned through the Site → root-page link rather than a field
-    # (decision #261), so the owner is decided by tree position.
     ORGANISATION_LOOKUP = PAGE_TREE
 
     subpage_types = ["datasets.DatasetsIndexPage"]
 
-    # --- Hero Section ---
     hero_heading = models.CharField(max_length=255, default="GeoRiva")
     hero_background_image = models.ForeignKey(
         "wagtailimages.Image",
@@ -145,21 +142,18 @@ class HomePage(Page):
     hero_subheading = models.CharField(max_length=500, blank=True)
     hero_show_search = models.BooleanField(default=True)
 
-    # --- Stats Bar ---
     stats_show_collection_count = models.BooleanField(default=True)
     stats_show_catalog_count = models.BooleanField(default=True)
     stats_show_last_updated = models.BooleanField(default=True)
     stats_custom_label = models.CharField(max_length=100, blank=True)
     stats_custom_value = models.CharField(max_length=100, blank=True)
 
-    # --- Apps ---
     apps_heading = models.CharField(
         max_length=255,
         default="Apps",
         help_text="Which apps are listed, and how, is set in Settings → GeoRiva Settings → Apps.",
     )
 
-    # --- Featured Catalogs ---
     featured_heading = models.CharField(max_length=255, default="Featured Datasets")
 
     content_panels = Page.content_panels + [

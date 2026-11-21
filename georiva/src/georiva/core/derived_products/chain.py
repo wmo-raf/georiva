@@ -1,29 +1,10 @@
-"""
-Pure product-dependency chain (ADR-0008/0009).
-
-The product-level DAG over a feed's declared derived products: product P depends
-on product Q iff a **required** input of P at **published** tier names a
-collection among Q's outputs, unioned with P's explicit ``depends_on``. Tier
-awareness is essential — a staging-tier input is fed by the loader, not by
-another product, so a tier-blind rule would fabricate edges (e.g. anomaly ->
-promotion in CHIRPS).
-
-Everything here is pure over a ``Sequence[DerivedProductDefinition]``: no DB, no
-recipe execution, so the module is importable from both the feed layer
-(``sources``) and the engine (``processing``) without a backwards dependency
-(ADR-0005). The DB-backed resolution of declared inputs into catalog items lives
-in ``processing``; this module is graph math only.
-"""
-
 from __future__ import annotations
 
 
-class ChainError(ValueError):
-    """A derived-product chain declaration is invalid (bad structure)."""
+class ChainError(ValueError): ...
 
 
-class ChainCycleError(ChainError):
-    """The declared products form a dependency cycle."""
+class ChainCycleError(ChainError): ...
 
 
 def _raw_dependencies(defs) -> dict:
@@ -48,14 +29,8 @@ def _raw_dependencies(defs) -> dict:
 
 
 def product_dependencies(defs) -> dict:
-    """
-    Map each product key to the set of product keys it depends on.
-
-    An edge P -> Q exists iff a *required*, *published*-tier input of P names a
-    collection among Q's outputs, or Q is listed in P's ``depends_on``. A
-    product never lists itself (a self-edge is dropped here; it is caught as a
-    cycle by ``validate_chain``).
-    """
+    """A product never lists itself: a self-edge is dropped here; it is caught
+    as a cycle by ``validate_chain``."""
     deps = _raw_dependencies(defs)
     for key, upstream in deps.items():
         upstream.discard(key)
@@ -101,14 +76,11 @@ def dependents_closure(defs, key) -> set:
 
 
 def output_keys(defs) -> set:
-    """Every collection key produced by some product in ``defs``."""
     return {ref.collection for defn in defs for ref in defn.outputs}
 
 
 def collection_namespace(defs, collection_keys) -> set:
-    """The feed-local collection-key namespace an input may reference (ADR-0010
-    §1): the feed's raw ``CollectionDefinition`` keys unioned with every product
-    output key. A ``None`` ``collection_keys`` means "raw keys unknown here" —
+    """A ``None`` ``collection_keys`` means "raw keys unknown here" —
     only the output keys are namespaced (used by the pure structural callers that
     don't have the collection definitions to hand)."""
     return set(collection_keys or ()) | output_keys(defs)

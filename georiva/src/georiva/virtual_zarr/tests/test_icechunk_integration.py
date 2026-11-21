@@ -61,8 +61,6 @@ class IcechunkStorageChecks(SimpleTestCase):
         self.addCleanup(_purge_prefix, storage.assets, self.scratch)
         self.addCleanup(_purge_prefix, storage.zarr, self.scratch)
 
-    # -- helpers -------------------------------------------------------------
-
     def _cog(self, name: str, data: np.ndarray) -> str:
         key = f"{self.scratch}/{name}"
         _write_cog(key, data)
@@ -95,8 +93,6 @@ class IcechunkStorageChecks(SimpleTestCase):
         session = repo.readonly_session(branch="main")
         return xr.open_zarr(session.store, consolidated=False, chunks=None, **kwargs)
 
-    # -- check 1: conditional writes on MinIO --------------------------------
-
     def test_concurrent_commit_conflicts_cleanly(self):
         import icechunk
         import zarr
@@ -120,8 +116,6 @@ class IcechunkStorageChecks(SimpleTestCase):
         reopened = open_repo(self.repo_path)
         group = zarr.open_group(reopened.readonly_session(branch="main").store, mode="r")
         np.testing.assert_array_equal(group["x"][:], np.full(4, 1, dtype="int32"))
-
-    # -- check 2: overwrite safety -------------------------------------------
 
     def test_cog_overwrite_errors_at_read_never_wrong_bytes(self):
         from georiva.virtual_zarr.repo import open_repo
@@ -150,8 +144,6 @@ class IcechunkStorageChecks(SimpleTestCase):
             self._open_tip(fresh)["precip"].isel(time=0).values  # noqa: B018
         self.assertIn("checksum", str(ctx.exception).lower())
 
-    # -- check 3: predictor round-trip ---------------------------------------
-
     def test_predictor_roundtrip_bit_equal_to_rasterio(self):
 
         rng = np.random.default_rng(1)
@@ -177,8 +169,6 @@ class IcechunkStorageChecks(SimpleTestCase):
                 # _FillValue to NaN-masked floats (same as the kerchunk path)
                 ds = self._open_tip(repo, mask_and_scale=False)
                 np.testing.assert_array_equal(ds["v"].isel(time=0).values, source)
-
-    # -- check 4: virtual append + pinned snapshot ----------------------------
 
     def test_append_extends_time_axis_and_pins_survive(self):
         from georiva.virtual_zarr.repo import commit_metadata, open_repo
@@ -309,7 +299,6 @@ class BuildTaskEndToEndTests(BuiltVariableFixture):
         self._add_item(2)
         manifest = self._manifest()
 
-        # --- first build: full rebuild into a fresh repo ---
         _run_build(manifest)
         manifest.refresh_from_db()
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
@@ -320,7 +309,6 @@ class BuildTaskEndToEndTests(BuiltVariableFixture):
         # initial commit + rebuild commit
         commits_after_first = self._ancestry_len(manifest)
 
-        # --- new item strictly after time_end: appends, does not rebuild ---
         self._add_item(3)
         _run_build(manifest)
         manifest.refresh_from_db()
@@ -332,14 +320,12 @@ class BuildTaskEndToEndTests(BuiltVariableFixture):
         self.assertEqual(ds.sizes["time"], 3)
         self.assertIn("precip", ds)
 
-        # --- no changes: up-to-date, no new commit ---
         snapshot_before = manifest.snapshot_id
         _run_build(manifest)
         manifest.refresh_from_db()
         self.assertEqual(manifest.snapshot_id, snapshot_before)
         self.assertEqual(self._ancestry_len(manifest), commits_after_first + 1)
 
-        # --- overwrite inside the committed range: rebuild fallback ---
         asset0.save()  # update_or_create semantics: same pk, modified bumps
         _run_build(manifest)
         manifest.refresh_from_db()
@@ -374,7 +360,6 @@ class BuildTaskEndToEndTests(BuiltVariableFixture):
         )
         manifest = self._manifest()
 
-        # --- first build: rebuild, with the skip counted -------------------
         build_virtual_zarr_manifest.apply(args=[manifest.pk])
         manifest.refresh_from_db()
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
@@ -392,7 +377,6 @@ class BuildTaskEndToEndTests(BuiltVariableFixture):
         self.assertGreater(manifest.repo_size_bytes, 0)
         self.assertGreater(manifest.repo_object_count, 0)
 
-        # --- append cycle: its own row, tail count only --------------------
         self._add_item(3)
         build_virtual_zarr_manifest.apply(args=[manifest.pk])
         manifest.refresh_from_db()
@@ -402,13 +386,11 @@ class BuildTaskEndToEndTests(BuiltVariableFixture):
         self.assertEqual(append_log.items_written, 1)
         self.assertEqual(append_log.snapshot_id, manifest.snapshot_id)
 
-        # --- up-to-date cycle: recorded, nothing written -------------------
         build_virtual_zarr_manifest.apply(args=[manifest.pk])
         uptodate_log = manifest.build_logs.order_by("-started_at").first()
         self.assertEqual(uptodate_log.mode, VirtualZarrBuildLog.Mode.UP_TO_DATE)
         self.assertEqual(uptodate_log.items_written, 0)
 
-        # --- GC leaves a per-repo record and refreshes the caches ----------
         VirtualZarrManifest.objects.filter(pk=manifest.pk).update(repo_size_bytes=0, repo_object_count=0)
         gc_virtual_zarr_repos.apply()
 

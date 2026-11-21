@@ -211,7 +211,6 @@ class DisableCascadeTests(ProductServiceBase):
             row.refresh_from_db()
         self.assertFalse(self.rows["climatology"].is_enabled)
         self.assertFalse(self.rows["anomaly"].is_enabled)
-        # An unrelated product is untouched.
         self.assertTrue(self.rows["promotion"].is_enabled)
 
     def test_disable_of_a_leaf_touches_only_itself(self):

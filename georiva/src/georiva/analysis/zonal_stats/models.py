@@ -9,15 +9,7 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
     Zonal statistics for one (Item, Variable, AdminBoundary) triple.
 
     TimescaleDB hypertable partitioned by ``time`` (valid_time).
-
-    Unique constraint: (item, variable, boundary) — one row per
-    boundary per variable per timestep.  Safe to re-compute with
-    bulk_create(update_conflicts=True).
     """
-
-    # -------------------------------------------------------------------------
-    # Identity
-    # -------------------------------------------------------------------------
 
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
@@ -41,10 +33,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
         help_text=_("Administrative boundary region."),
     )
 
-    # -------------------------------------------------------------------------
-    # Statistics
-    # -------------------------------------------------------------------------
-
     mean = models.FloatField(null=True, blank=True)
     min = models.FloatField(null=True, blank=True)
     max = models.FloatField(null=True, blank=True)
@@ -56,16 +44,7 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
         help_text=_("Number of valid (non-NaN) pixels within the boundary."),
     )
 
-    # -------------------------------------------------------------------------
-    # Meta
-    # -------------------------------------------------------------------------
-
     class Meta:
-        # TimescaleModel provides the 'time' field (= valid_time).
-        # We add ordering and indexes but NOT unique_together because
-        # TimescaleDB hypertables do not support unique constraints that
-        # don't include the partition column.  Uniqueness is enforced at
-        # the application layer via bulk_create(update_conflicts=True).
         ordering = ["-time"]
         constraints = [
             models.UniqueConstraint(
@@ -89,10 +68,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
     def __str__(self):
         return f"{self.variable.slug} @ {self.boundary} [{self.time}]"
 
-    # -------------------------------------------------------------------------
-    # Convenience accessors
-    # -------------------------------------------------------------------------
-
     @property
     def valid_time(self):
         """Alias for TimescaleModel.time — matches Item.valid_time semantics."""
@@ -100,7 +75,6 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
 
     @property
     def reference_time(self):
-        """Forecast reference time from the parent Item."""
         return self.item.reference_time
 
     @property

@@ -39,11 +39,6 @@ def _t(hours: int) -> datetime:
     return T0 + timedelta(hours=hours)
 
 
-# ---------------------------------------------------------------------------
-# Service over DB fixtures (no repo behind the manifests)
-# ---------------------------------------------------------------------------
-
-
 class VariableDetailTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -193,11 +188,6 @@ class VariableDetailTests(TestCase):
         detail = variable_detail(self.variable, history_limit=3)
 
         self.assertEqual(len(detail.build_history), 3)
-
-
-# ---------------------------------------------------------------------------
-# Service over a real Icechunk repo (existing integration-test pattern)
-# ---------------------------------------------------------------------------
 
 
 def _purge_prefix(bucket, prefix: str) -> None:

@@ -78,13 +78,12 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     )
 
     interval_minutes = models.PositiveIntegerField(
-        default=360,  # 6 hours
+        default=360,
         validators=[MinValueValidator(5)],
         verbose_name=_("Run Interval"),
         help_text=_("Minutes between runs (global default for all collections)"),
     )
 
-    # Run tracking
     last_run_at = models.DateTimeField(null=True, blank=True)
     last_run_status = models.CharField(
         max_length=20,
@@ -101,7 +100,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     last_run_message = models.TextField(blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
 
-    # Statistics
     total_runs = models.PositiveIntegerField(default=0)
     total_files_fetched = models.PositiveIntegerField(default=0)
     total_bytes_transferred = models.BigIntegerField(default=0)
@@ -131,7 +129,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         return f"{self.name} - {self.get_real_instance_class().__name__}"
 
     def get_loader_config(self) -> dict:
-        """Get loader configuration dictionary."""
         return {}
 
     @property
@@ -227,13 +224,8 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         """
         return []
 
-    # =========================================================================
-    # Collection link helpers
-    # =========================================================================
-
     @classmethod
     def get_collection_link_model(cls):
-        """Return the DataFeedCollectionLink subclass for this feed type. Default: base class."""
         return DataFeedCollectionLink
 
     @classmethod
@@ -247,10 +239,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         see it as an editable field.
         """
         return {}
-
-    # =========================================================================
-    # Factory Methods
-    # =========================================================================
 
     def get_data_source(self, collection=None):
         """Instantiate configured data source, merging per-collection link config."""
@@ -271,7 +259,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         return source_class(config)
 
     def get_loader(self, collection=None):
-        """Create fully configured Loader instance."""
         from .loader import Loader
 
         return Loader(
@@ -279,10 +266,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             collection=collection,
             data_feed=self,
         )
-
-    # =========================================================================
-    # Run Management
-    # =========================================================================
 
     def _update_run_stats(self, result, collection, started_at=None):
         """Update feed-level and collection-link scheduling stats after a run.
@@ -319,7 +302,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         )
 
     def is_due(self) -> bool:
-        """Check if data feed is due to run."""
         if not self.is_active:
             return False
 
@@ -492,7 +474,6 @@ class DataFeedCollectionLink(PolymorphicModel):
         return self.interval_minutes or self.data_feed.interval_minutes
 
     def is_due(self) -> bool:
-        """Return True if this collection is due to run."""
         if not self.data_feed.is_active:
             return False
         if not self.last_run_at:
@@ -510,10 +491,6 @@ class DataFeedCollectionLink(PolymorphicModel):
     def __str__(self):
         return f"{self.data_feed_id} → {self.collection_id}"
 
-    # -------------------------------------------------------------------------
-    # UI / form discovery
-    # -------------------------------------------------------------------------
-
     @classmethod
     def get_panels(cls) -> list:
         """
@@ -523,7 +500,6 @@ class DataFeedCollectionLink(PolymorphicModel):
         return []
 
     def has_configurable_fields(self) -> bool:
-        """Return True if there are any operator-editable config fields on this link."""
         return bool(self.get_panels())
 
     @classmethod
@@ -666,8 +642,8 @@ class DerivedProductInput(models.Model):
     (tier routing, dispatch, input resolution) matches by FK rather than
     re-matching a slug on each event. `source_key` keeps the declared key for
     re-resolution across upgrades and for diagnostics. Deleting the bound
-    `Collection` cascades this row away (surfaced as an *unbound* product in a
-    later slice)."""
+    `Collection` cascades this row away, leaving the product *unbound*
+    (ADR-0010 §6)."""
 
     ORGANISATION_LOOKUP = "product__data_feed__catalog__organisation"
 
@@ -722,11 +698,6 @@ class DerivedProductOutput(models.Model):
 
     def __str__(self):
         return f"{self.product_id}:{self.role} → {self.collection_id}"
-
-
-# ---------------------------------------------------------------------------
-# Acquisition tracking models
-# ---------------------------------------------------------------------------
 
 
 class FetchRun(models.Model):
@@ -992,7 +963,6 @@ class FetchRun(models.Model):
 
     @property
     def retried_as(self):
-        """The run that retried this one, if any."""
         return self.resumes.order_by("pk").first()
 
     def mark_completed(self, retry_after=None, **counters):
@@ -1065,8 +1035,6 @@ class FetchRun(models.Model):
 
 
 class FetchedFile(models.Model):
-    """Per-file record within a FetchRun."""
-
     class Status(models.TextChoices):
         # Planned, not yet reached. "Waiting", not "Queued": queued is the
         # loader's remote-provider state.
@@ -1141,11 +1109,6 @@ class FetchedFile(models.Model):
         self.failure_scope = scope or FailureScope.TRANSIENT
         self.completed_at = timezone.now()
         self.save(update_fields=["status", "error", "failure_scope", "completed_at"])
-
-
-# ---------------------------------------------------------------------------
-# Task-ferry Job model
-# ---------------------------------------------------------------------------
 
 
 class FetchRunStarted(DomainEvent):

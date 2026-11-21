@@ -79,7 +79,6 @@ class ParameterManifest:
         object.__setattr__(self, "groups", tuple(groups))
 
     def by_key(self, key: str) -> "Parameter | DerivedParameter":
-        """Resolve a key to a Parameter or DerivedParameter."""
         for p in (*self.parameters, *self.derived):
             if p.key == key:
                 return p
@@ -90,7 +89,6 @@ class ParameterManifest:
         return [p.key for p in (*self.parameters, *self.derived)]
 
     def ungrouped_keys(self) -> list[str]:
-        """Keys that don't belong to any ParameterGroup."""
         grouped = {k for g in self.groups for k in g.member_keys}
         return [k for k in self.all_keys() if k not in grouped]
 

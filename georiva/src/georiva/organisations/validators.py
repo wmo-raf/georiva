@@ -44,7 +44,6 @@ RESERVED_ORG_SLUGS = frozenset(
 
 
 def validate_org_slug(value):
-    """Reject anything that is not a safe subdomain label and path segment."""
     if not value:
         raise ValidationError("Enter an organisation slug.", code="invalid_org_slug")
 

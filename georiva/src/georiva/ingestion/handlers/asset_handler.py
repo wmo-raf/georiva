@@ -4,7 +4,7 @@ AssetHandler — extract raster data for a single variable.
 Owns:
   - Direct and chunked raster extraction
 
-Everything downstream of the extracted array — boundary masking, COG / JSON
+Everything downstream of the extracted array — boundary masking, COG
 writing, Asset DB records, collection extent — is the shared
 AssetMaterializer (``ingestion/materialization.py``), which the derivation
 engine uses too.
@@ -48,10 +48,6 @@ class AssetHandler:
         self.extractor = extractor
         self.materializer = AssetMaterializer(writer)
 
-    # =========================================================================
-    # Public entry point
-    # =========================================================================
-
     def process_variable(
         self,
         *,
@@ -66,16 +62,6 @@ class AssetHandler:
         clipper: BoundaryClipper | None = None,
         clip_window: dict | None = None,
     ) -> list[Asset]:
-        """
-        Run the full pipeline for *variable* at *timestamp*.
-
-        Steps:
-          1. Extract the raw float array
-          2. Hand off to the shared AssetMaterializer (mask, write, record,
-             expand collection extent)
-
-        Returns the list of Asset records created.
-        """
         logger.debug("Processing variable: %s", variable.slug)
 
         final_data = self._extract(
@@ -101,10 +87,6 @@ class AssetHandler:
         del final_data
 
         return assets
-
-    # =========================================================================
-    # Extraction
-    # =========================================================================
 
     def _extract(
         self,
@@ -156,7 +138,6 @@ class AssetHandler:
         timestamp: datetime,
         clip_window: dict | None = None,
     ) -> np.ndarray:
-        """Read the full (or windowed) array at once."""
         window = None
         if clip_window:
             window = (

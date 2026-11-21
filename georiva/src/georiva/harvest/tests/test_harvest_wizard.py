@@ -98,8 +98,6 @@ class WizardMixin:
         for args in self.surveys_started:
             background_survey.run(*args)
 
-    # The steps, each as an operator takes it.
-
     def give_address(self, address=ADDRESS):
         return self.client.post(step(1), {"upstream_url": address})
 
@@ -362,7 +360,6 @@ class WizardStopsWhereItMustTests(WizardMixin, TestCase):
         self.assertContains(found, "GeoRiva cannot show")
         self.assertContains(found, "split across several items")
         self.assertNotContains(found, step(4))
-        # And there is no way round it.
         self.assertRedirects(self.client.get(step(4)), step(3))
         self.assertRedirects(self.choose_images(), step(3))
         self.assertRedirects(self.client.get(step(5)), step(4), fetch_redirect_response=False)

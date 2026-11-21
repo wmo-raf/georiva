@@ -1,5 +1,3 @@
-"""The Trace link from a Published Item to its chain (ADR 0030, #431)."""
-
 from datetime import UTC, datetime
 
 from django.contrib.auth.models import Group, Permission
