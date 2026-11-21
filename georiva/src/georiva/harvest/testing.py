@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import replace
-from datetime import datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .upstream import (
@@ -529,3 +531,288 @@ server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
 print(server.server_address[1], flush=True)
 server.serve_forever()
 """
+
+
+# ---- a real Upstream store, on local disk ---------------------------------------------
+
+#: Where a :class:`LocalStore` says it lives unless a test says otherwise.
+LOCAL_STORE_HREF = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
+
+
+def ramp(run: int, step: int, shape: tuple[int, int] = (4, 8)):
+    """A field of run `run` and step `step`, row 0 north: every cell a different value."""
+    import numpy as np
+
+    return (100.0 * run + 10.0 * step + np.arange(float(shape[0] * shape[1])).reshape(shape)).astype(np.float32)
+
+
+@dataclass(frozen=True)
+class StoreArray:
+    """One array of a :class:`LocalStore`, by its path in the store.
+
+    `values(run, step)` is its field at that run and step (indexes into the
+    store's runs and leads), north-up. `held(run, step)` says whether the store
+    holds that step at all: a step not held has no chunk written, as an
+    Upstream store that has not received it yet, or never will (precipitation
+    at step 0). Every step is held unless a test says otherwise.
+    """
+
+    path: str
+    values: Callable | None = None
+    held: Callable[[int, int], bool] | None = None
+
+    def holds(self, run: int, step: int) -> bool:
+        return self.held is None or bool(self.held(run, step))
+
+
+@dataclass(frozen=True)
+class StoreVariable:
+    """The Variable an array of a :class:`LocalStore` is harvested into.
+
+    Units are symbols; a unit not yet known is created.
+    """
+
+    slug: str
+    name: str = ""
+    source_unit: str = "K"
+    unit: str = ""
+    water: bool = False
+
+
+@dataclass
+class HarvestedStore:
+    """The rows a store harvest of a :class:`LocalStore` would have made."""
+
+    feed: object
+    collection: object
+    #: The Variable each harvested array became, by its path in the store.
+    variables: dict
+
+
+class LocalStore:
+    """A forecast-shaped Icechunk store on local disk, read wherever its address is opened.
+
+    Its arrays are laid out as an Upstream forecast store's are: a run axis
+    (``init_time`` × ``lead_time``) over a latitude–longitude grid, latitudes
+    south first, one chunk per run and step. Built for `test` (a
+    ``unittest.TestCase``): its folder is removed and the address patched back
+    when the test ends. While the test runs, opening a store at `href` through
+    ``core.values`` opens this one instead; nothing reaches a network.
+
+    The store is written as it is made; with ``build=False`` it is left empty,
+    for a test that changes :attr:`config` first and then calls :meth:`commit`.
+    :meth:`harvest` makes the feed, collection, Variables, Items and Store
+    assets a store harvest would have made of it.
+    """
+
+    def __init__(
+        self,
+        test,
+        *,
+        href: str = LOCAL_STORE_HREF,
+        runs: list[datetime] | None = None,
+        leads: list[timedelta] | None = None,
+        latitudes: list[float] | None = None,
+        longitudes: list[float] | None = None,
+        arrays: list[StoreArray] | None = None,
+        build: bool = True,
+    ):
+        import tempfile
+        from unittest import mock
+
+        import icechunk
+
+        self.test = test
+        self.href = href
+        self.runs = list(runs or [datetime(2026, 3, 22, 12, tzinfo=UTC), datetime(2026, 3, 23, 0, tzinfo=UTC)])
+        self.leads = list(leads or [timedelta(hours=0), timedelta(hours=6), timedelta(hours=12)])
+        #: Cell centres, south first as many stores keep them; a read is north-up all the same.
+        self.latitudes = list(latitudes or [-15.0, -5.0, 5.0, 15.0])
+        self.longitudes = list(longitudes or [5.0, 15.0, 25.0, 35.0, 45.0, 55.0, 65.0, 75.0])
+        self.arrays = list(arrays or [StoreArray("temperature_2m")])
+        #: Whether the last opening of the store was allowed plain HTTP.
+        self.opened_allowing_http: bool | None = None
+
+        folder = tempfile.TemporaryDirectory()
+        test.addCleanup(folder.cleanup)
+        self.folder = folder.name
+        self.storage = icechunk.local_filesystem_storage(os.path.join(self.folder, "repo"))
+        self.config = icechunk.RepositoryConfig.default()
+        self.repository = None
+        opening = mock.patch("georiva.core.values.store.repository_storage", side_effect=self._storage_at)
+        opening.start()
+        test.addCleanup(opening.stop)
+        if build:
+            self.commit(self.write_forecast)
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return len(self.latitudes), len(self.longitudes)
+
+    @property
+    def bounds(self) -> list[float]:
+        """The grid's extent, ``[west, south, east, north]``, from its cell centres."""
+        dy = abs(self.latitudes[1] - self.latitudes[0]) if len(self.latitudes) > 1 else 1.0
+        dx = abs(self.longitudes[1] - self.longitudes[0]) if len(self.longitudes) > 1 else 1.0
+        return [
+            min(self.longitudes) - dx / 2,
+            min(self.latitudes) - dy / 2,
+            max(self.longitudes) + dx / 2,
+            max(self.latitudes) + dy / 2,
+        ]
+
+    def _storage_at(self, href, *, allow_http=False, **_options):
+        self.test.assertEqual(href, self.href)
+        self.opened_allowing_http = allow_http
+        return self.storage
+
+    def commit(self, build) -> None:
+        """Write to the store: `build(store)` on a writable session, then committed."""
+        import icechunk
+
+        if self.repository is None:
+            self.repository = icechunk.Repository.create(self.storage, config=self.config)
+            self.repository.save_config()
+        session = self.repository.writable_session("main")
+        build(session.store)
+        session.commit("build")
+
+    def field(self, array: StoreArray, run: int, step: int):
+        """The field `array` holds at `run` and `step`, north-up, as written."""
+        return (array.values or (lambda r, s: ramp(r, s, self.shape)))(run, step)
+
+    def write_forecast(self, store) -> None:
+        """Write the run axis, the grid and every array's held steps into `store`."""
+        import numpy as np
+        import zarr
+
+        runs, leads = len(self.runs), len(self.leads)
+        init_time = zarr.create_array(store, name="init_time", shape=(runs,), dtype="i8", dimension_names=["init_time"])
+        init_time[:] = [int(run.timestamp()) for run in self.runs]
+        init_time.attrs.update({"units": "seconds since 1970-01-01", "calendar": "proleptic_gregorian"})
+        lead_time = zarr.create_array(
+            store, name="lead_time", shape=(leads,), dtype="i8", dimension_names=["lead_time"]
+        )
+        lead_time[:] = [int(lead.total_seconds()) for lead in self.leads]
+        lead_time.attrs.update({"units": "seconds"})
+        ny, nx = self.shape
+        zarr.create_array(store, name="latitude", shape=(ny,), dtype="f8", dimension_names=["latitude"])[:] = (
+            self.latitudes
+        )
+        zarr.create_array(store, name="longitude", shape=(nx,), dtype="f8", dimension_names=["longitude"])[:] = (
+            self.longitudes
+        )
+        for spec in self.arrays:
+            array = zarr.create_array(
+                store,
+                name=spec.path,
+                shape=(runs, leads, ny, nx),
+                chunks=(1, 1, ny, nx),
+                dtype="f8",
+                fill_value=np.nan,
+                dimension_names=["init_time", "lead_time", "latitude", "longitude"],
+            )
+            for run in range(runs):
+                for step in range(leads):
+                    if spec.holds(run, step):
+                        array[run, step] = np.flipud(self.field(spec, run, step))  # south first, as written
+
+    def _array(self, path: str) -> StoreArray:
+        for spec in self.arrays:
+            if spec.path == path:
+                return spec
+        raise KeyError(f"The store has no array {path!r}.")
+
+    def at(self, array: str, run: int, step: int, *, places: dict[str, str] | None = None, allow_http=False):
+        """The ``values.StoreSlice`` naming `array` at `run` and `step` (indexes), with pinned `places`."""
+        from georiva.core.values import StoreSlice
+
+        return StoreSlice(
+            store=self.href,
+            array=array,
+            time=self.runs[run] + self.leads[step],
+            reference_time=self.runs[run],
+            chunk_locations=places or {},
+            allow_http=allow_http,
+        )
+
+    def harvest(
+        self,
+        organisation,
+        *,
+        variables: dict[str, StoreVariable],
+        pins: dict[str, str] | None = None,
+        catalog_slug: str = "forecast",
+        upstream_collection_id: str = "noaa-gfs-forecast-virtual",
+        allow_http: bool = False,
+    ) -> HarvestedStore:
+        """The rows a store harvest would have made of this store, in a new catalog of `organisation`.
+
+        A HarvestFeed at :attr:`href` pinning `pins`; its collection; a Variable
+        (and mapping) per array in `variables`; an Item per run and step that
+        any of those arrays holds; and on it a Store asset per array holding that step.
+        """
+        from urllib.parse import urlsplit
+
+        from georiva.core.models import Asset, Catalog, Item, Unit, Variable
+
+        from .models import HarvestFeed, UpstreamShape, VariableMapping
+
+        def unit(symbol):
+            found = Unit.objects.filter(symbol=symbol).first()
+            return found or Unit.objects.create(name=symbol, symbol=symbol)
+
+        catalog = Catalog.objects.create(
+            organisation=organisation,
+            name=catalog_slug.title(),
+            slug=catalog_slug,
+            file_format=Catalog.FileFormat.ZARR,
+        )
+        feed = HarvestFeed.objects.create(
+            name=f"{upstream_collection_id} upstream",
+            catalog=catalog,
+            upstream_url="https://stac.upstream.example/catalog.json",
+            upstream_collection_id=upstream_collection_id,
+            upstream_shape=UpstreamShape.STORE,
+            store_href=self.href,
+            asset_hosts=[urlsplit(self.href).hostname],
+            pinned_chunk_locations=dict(pins or {}),
+            allow_http=allow_http,
+        )
+        collection = feed.ensure_collection()
+        made = {}
+        for path, wanted in variables.items():
+            self._array(path)
+            made[path] = Variable.objects.create(
+                collection=collection,
+                slug=wanted.slug,
+                name=wanted.name or wanted.slug.replace("-", " ").title(),
+                source_unit=unit(wanted.source_unit),
+                unit=unit(wanted.unit or wanted.source_unit),
+                water=wanted.water,
+            )
+            VariableMapping.objects.create(feed=feed, asset_key=path, variable=made[path])
+
+        for run, reference_time in enumerate(self.runs):
+            for step, lead in enumerate(self.leads):
+                holding = [path for path in made if self._array(path).holds(run, step)]
+                if not holding:
+                    continue
+                item = Item.objects.create(
+                    collection=collection,
+                    time=reference_time + lead,
+                    reference_time=reference_time,
+                    bounds=self.bounds,
+                    harvested_by=feed,
+                )
+                for path in holding:
+                    Asset.objects.create(
+                        item=item,
+                        variable=made[path],
+                        format=Asset.Format.ZARR,
+                        href=self.href,
+                        store_array=path,
+                        roles=[Asset.Role.DATA],
+                        harvested_by=feed,
+                    )
+        return HarvestedStore(feed=feed, collection=collection, variables=made)

@@ -17,7 +17,7 @@ from unittest import mock
 import numpy as np
 import rasterio
 from affine import Affine
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from rasterio.transform import from_origin
 
 from georiva.core import values
@@ -239,6 +239,39 @@ class WhatCanBeReadTests(AssetsBucketTestCase):
 
         bucket.assert_called_with(BucketType.STAGING)
         np.testing.assert_array_equal(field.data, EXPECTED)
+
+
+class WhichAssetsHaveValuesTests(TestCase):
+    """``values.readable`` is the one answer to which assets the read module gives values for (#759)."""
+
+    def setUp(self):
+        self.tree = make_org_tree(make_organisation("kenya"))
+        self.days = iter(range(1, 29))
+
+    def asset(self, href, fmt):
+        when = datetime(2026, 3, next(self.days), tzinfo=UTC)
+        item = Item.objects.create(collection=self.tree["collection"], time=when)
+        return Asset.objects.create(item=item, variable=self.tree["variable"], href=href, format=fmt)
+
+    def test_cogs_local_and_remote_and_store_assets_have_values(self):
+        readable = {
+            self.asset("kenya/c/c/v/2026/03/01/rain.tif", Asset.Format.COG),
+            self.asset("https://data.upstream.example/chirps/rain.tif", Asset.Format.COG),
+            self.asset("s3://upstream-bucket/aifs.icechunk", Asset.Format.ZARR),
+        }
+        for fmt in (Asset.Format.PNG, Asset.Format.WEBP, Asset.Format.JPEG):
+            self.asset(f"kenya/c/c/v/2026/03/01/rain.{fmt}", fmt)
+        self.asset("kenya/c/c/v/2026/03/01/rain.zarr", Asset.Format.ZARR)  # a local Zarr is no Store asset
+        self.asset("kenya/c/c/v/2026/03/01/rain.nc", Asset.Format.NETCDF)
+        self.asset("https://data.upstream.example/chirps/rain.grib2", Asset.Format.GRIB2)
+
+        self.assertEqual(set(values.readable(Asset.objects.all())), readable)
+
+    def test_it_narrows_the_queryset_it_is_given(self):
+        cog = self.asset("kenya/c/c/v/2026/03/01/rain.tif", Asset.Format.COG)
+        self.asset("kenya/c/c/v/2026/03/01/other.tif", Asset.Format.COG)
+
+        self.assertEqual(list(values.readable(Asset.objects.filter(pk=cog.pk))), [cog])
 
 
 class StoreAssetTests(SimpleTestCase):

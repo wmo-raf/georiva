@@ -162,6 +162,14 @@ class WizardSetsUpAStoreFeedTests(StoreWizardMixin, TestCase):
         self.assertIsNone(end)
         self.assertAlmostEqual(start, timezone.now() - timedelta(days=3), delta=timedelta(minutes=1))
 
+    def test_a_forecast_stores_collection_is_a_forecast(self):
+        self.reach_fields()
+        self.choose_temperature()
+
+        self.save_store()
+
+        self.assertTrue(HarvestFeed.objects.get().collection.is_forecast)
+
     def test_how_many_days_to_keep_is_the_operators_to_say_within_reason(self):
         self.reach_fields()
         self.choose_temperature()
@@ -190,6 +198,16 @@ class WizardSetsUpAStoreFeedTests(StoreWizardMixin, TestCase):
         self.assertIsNone(feed.rolling_window_days)
         self.assertEqual(feed.window_start.isoformat(), "2024-01-01T00:00:00+00:00")
         self.assertEqual(feed.window, (feed.window_start, None))
+
+    def test_an_analysis_stores_collection_is_not_a_forecast(self):
+        self.arrays = {"precipitation": (("time", "latitude", "longitude"), (1, 721, 1440), {"unit": "°C"})}
+        self.store(dimensions={"time": None, "latitude": 721, "longitude": 1440})
+        self.reach_fields()
+        self.choose_temperature()
+
+        self.save_store(window_start="2024-01-01")
+
+        self.assertFalse(HarvestFeed.objects.get().collection.is_forecast)
 
     def test_the_first_harvest_starts_as_the_feed_is_saved_and_the_operator_is_told(self):
         self.reach_fields()

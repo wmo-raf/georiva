@@ -278,6 +278,13 @@ class EditStoreFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
         self.feed.refresh_from_db()
         self.assertEqual((self.feed.rolling_window_days, self.feed.interval_minutes), (7, 360))
 
+    def test_saving_it_makes_a_collection_not_yet_marked_a_forecast(self):
+        Collection.objects.filter(pk=self.collection.pk).update(is_forecast=False)
+
+        self.edit()
+
+        self.assertTrue(Collection.objects.get(pk=self.collection.pk).is_forecast)
+
     def test_it_has_no_fixed_window_to_edit(self):
         fields = self.form().fields
 

@@ -41,6 +41,8 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   asset's store, array and pins, ADR 0044 §9)
 │   ├── values/               # What values an asset holds (ADR 0046 §10): `values.session()` reads a field,
 │   │                         #   window, point or series of a local or Remote COG, north-up float32 / NaN;
+│   │                         #   `values.readable(assets)` narrows a queryset to the assets it can read (COG
+│   │                         #   or Store asset) — callers ask it, never filter on `format` themselves;
 │   │                         #   store.py reads a Store asset: its store opened once per session at one
 │   │                         #   snapshot, with its feed's Pinned locations only (ADR 0044 §11, ADR 0046 §12).
 │   │                         #   Every value reader goes through it; core/tests/test_values_guard.py fails
@@ -90,8 +92,10 @@ georiva/src/georiva/          # Main Django application
 │   ├── materialize.py        # A feed's materialization window: each harvest sends its in-window Remote COGs to
 │   │                         #   `georiva-ingestion`, which fetches them past the allowlist and rewrites the same
 │   │                         #   Asset local via `AssetMaterializer`; it leaves the Jurisdiction (ADR 0042 §8)
-│   └── testing.py            # FakeUpstream — the one fake a harvest test needs; `become_store` makes it an Upstream
-│                             #   store, and `hold` / `release` say which steps it holds
+│   └── testing.py            # FakeUpstream — the fake upstream client; `become_store` makes it an Upstream store,
+│                             #   and `hold` / `release` say which steps it holds. LocalStore — a real Icechunk store
+│                             #   on disk that `core.values` reads in place of a store's address, and `harvest()`
+│                             #   indexes as a store feed's rows, for a test that needs values (ADR 0042 §13)
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)
 ├── processing/               # Derivation engine — the write-side counterpart of the Loader (ADR 0005)
 │   ├── engine.py             # Generic run loop: enumerate → resolve → readiness → compute → register
@@ -99,7 +103,7 @@ georiva/src/georiva/          # Main Django application
 │   ├── registry.py           # RecipeRegistry (decorator-based registration)
 │   └── recipes/              # climatology.py, promotion.py
 ├── geoprocessing/            # Pure compute library — no Django, no storage, no request layer
-│                             #   algebra.py, calendar.py, regrid.py, temporal.py, zonal.py
+│                             #   algebra.py, calendar.py, regrid.py, temporal.py, wind.py, zonal.py
 ├── organisations/            # Multi-tenancy (ADR 0011–0018)
 │   ├── ownership.py          # scope_rows / belongs_to_active_org — the tenancy choke point
 │   ├── access.py             # may_see_private, require_active_org

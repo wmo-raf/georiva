@@ -1323,8 +1323,9 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             # Seen usable again, and saved by the operator: its harvests may run.
             feed.upstream_refusal = ""
             changed.append("upstream_refusal")
-        if changed:
-            feed.save(update_fields=changed)
+        # Saved with nothing to confirm, this writes no field, and its collection
+        # still becomes what the feed harvests (#760).
+        feed.save(update_fields=changed)
         if "pinned_chunk_locations" in changed:
             _republish(feed)
         # The full pass over every run in the window, closed ones too: a store

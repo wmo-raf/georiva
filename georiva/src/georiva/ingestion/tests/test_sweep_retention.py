@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from django.utils import timezone
 
+from georiva.core import retention
 from georiva.core.models import Catalog, Collection, Item
 from georiva.core.storage import BucketType
 from georiva.core.tasks import prune_forecast_items
@@ -31,7 +32,7 @@ def _scan(paths):
         return {f.file_path: f.reason for f in find_unprocessed()}
 
 
-class SweepRetentionTests(TestCase):
+class RetentionFixture:
     def setUp(self):
         catalog = Catalog.objects.create(organisation=make_organisation(), name="IFS", slug="ifs", file_format="grib2")
         self.collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface", is_forecast=True)
@@ -59,6 +60,8 @@ class SweepRetentionTests(TestCase):
         )
         return file_path
 
+
+class SweepRetentionTests(RetentionFixture, TestCase):
     def test_a_file_whose_past_forecast_was_pruned_is_not_reingested(self):
         path = self._ingested("past.grib2", self.now - timedelta(days=60))
 
@@ -108,3 +111,61 @@ class SweepRetentionTests(TestCase):
         FileIngestion.objects.filter(file_path=path).update(force_reingest=True)
 
         self.assertEqual(_scan([path]), {path: "reingest"})
+
+
+class HarvestedForecastRetentionTests(RetentionFixture, TestCase):
+    """A forecast collection a Harvest feed owns is pruned only by its harvest:
+    its Rolling window and Mirror are its retention (ADR 0042, #760)."""
+
+    def setUp(self):
+        super().setUp()
+        from georiva.harvest.models import HarvestFeed
+
+        HarvestFeed.objects.create(
+            name="Surface upstream",
+            catalog=self.collection.catalog,
+            upstream_url="https://stac.upstream.example/",
+            upstream_collection_id="surface",
+        ).ensure_collection()
+
+    def test_a_prune_keeps_its_past_items(self):
+        self._ingested("past.grib2", self.now - timedelta(days=60))
+
+        prune_forecast_items()
+
+        self.assertEqual(Item.objects.count(), 1)
+
+    def test_a_prune_keeps_its_older_runs_with_latest_run_only(self):
+        self.collection.retain_latest_run_only = True
+        self.collection.save()
+        future = self.now + timedelta(days=2)
+        self._ingested("old.grib2", future, reference_time=self.now - timedelta(hours=12))
+        self._ingested("new.grib2", future + timedelta(hours=3), reference_time=self.now)
+
+        prune_forecast_items()
+
+        self.assertEqual(Item.objects.count(), 2)
+
+    def test_the_sweep_never_takes_its_missing_past_items_for_retired(self):
+        path = self._ingested("past.grib2", self.now - timedelta(days=60))
+        Item.objects.all().delete()
+
+        self.assertEqual(_scan([path]), {path: "reingest"})
+
+
+class WhetherRetentionPrunesTests(RetentionFixture, TestCase):
+    """One rule answers pruning, the Sweep and STAC; a collection that says of itself it is
+    not pruned costs no query, so the Sweep's per-file question stays cheap."""
+
+    def test_a_pruned_forecast_is_pruned(self):
+        self.assertTrue(retention.is_pruned(self.collection))
+        self.assertIn(self.collection, retention.prunable_collections())
+
+    def test_a_collection_that_is_not_a_forecast_is_answered_without_a_query(self):
+        for attribute, value in (("is_forecast", False), ("retain_past_forecasts", True), ("is_active", False)):
+            with self.subTest(attribute):
+                collection = Collection.objects.get(pk=self.collection.pk)
+                setattr(collection, attribute, value)
+
+                with self.assertNumQueries(0):
+                    self.assertFalse(retention.is_pruned(collection))

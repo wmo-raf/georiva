@@ -42,6 +42,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from georiva.core import retention
 from georiva.core.models import Catalog, Collection, Item, Variable
 from georiva.core.utils import get_full_url_by_request
 from georiva.organisations.access import (
@@ -345,8 +346,8 @@ class STACItemsView(STACGeoAPIView):
             .prefetch_related("assets", "assets__variable")
         )
 
-        # For forecast collections, exclude past items unless caller opts in
-        if collection.is_forecast and not collection.retain_past_forecasts:
+        # Past items of a collection retention prunes are hidden unless the caller opts in
+        if retention.is_pruned(collection):
             include_past = request.query_params.get("include_past", "false").lower() == "true"
             if not include_past:
                 from django.utils import timezone
@@ -497,9 +498,9 @@ class STACItemDetailView(STACGeoAPIView):
     def _find_item(self, collection: Collection, item_id: str) -> Item | None:
         parts = item_id.split("_")
 
-        # Base queryset — respect forecast past-item policy
+        # Base queryset — respect retention's past-item policy
         base_qs = Item.objects.filter(collection=collection)
-        if collection.is_forecast and not collection.retain_past_forecasts:
+        if retention.is_pruned(collection):
             from django.utils import timezone
 
             base_qs = base_qs.filter(time__gte=timezone.now())
