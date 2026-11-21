@@ -92,8 +92,10 @@ georiva/src/georiva/          # Main Django application
 │   ├── materialize.py        # A feed's materialization window: each harvest sends its in-window Remote COGs to
 │   │                         #   `georiva-ingestion`, which fetches them past the allowlist and rewrites the same
 │   │                         #   Asset local via `AssetMaterializer`; it leaves the Jurisdiction (ADR 0042 §8)
-│   └── testing.py            # FakeUpstream — the one fake a harvest test needs; `become_store` makes it an Upstream
-│                             #   store, and `hold` / `release` say which steps it holds
+│   └── testing.py            # FakeUpstream — the fake upstream client; `become_store` makes it an Upstream store,
+│                             #   and `hold` / `release` say which steps it holds. LocalStore — a real Icechunk store
+│                             #   on disk that `core.values` reads in place of a store's address, and `harvest()`
+│                             #   indexes as a store feed's rows, for a test that needs values (ADR 0042 §13)
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)
 ├── processing/               # Derivation engine — the write-side counterpart of the Loader (ADR 0005)
 │   ├── engine.py             # Generic run loop: enumerate → resolve → readiness → compute → register
