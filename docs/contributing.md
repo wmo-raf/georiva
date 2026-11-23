@@ -199,11 +199,11 @@ plugin").
 For non-trivial changes, include a brief body explaining the reasoning:
 
 ```
-Add TimescaleDB hypertable for Item model
+Add a primary key and real foreign keys to Item
 
-The Item table will be the most heavily queried model, primarily by
-time range. Converting it to a TimescaleDB hypertable enables automatic
-partitioning and optimized time-range queries.
+Item was a hypertable, so it had no primary key and nothing could
+reference it with a constraint; orphaned assets accumulated. Its reads
+name a collection, not a time window, so a plain table loses nothing.
 ```
 
 ### Django / Wagtail

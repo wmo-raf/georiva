@@ -246,8 +246,9 @@ Topic (thematic tag) ──M2M──→ Catalog ──1:N──→ Collection �
 - **Variable** (`core/models/variable.py`): Measured quantity. Maps raw source bands via a `sources` StreamField
   (`primary` / `u_component` / `v_component` `SourceBlock`s) plus a `transform_type` (`PASSTHROUGH`,
   `VECTOR_MAGNITUDE`, `VECTOR_DIRECTION`) — i.e. it supports both passthrough and derived (vector) variables.
-- **Item** (`core/models/item.py`): Single spatiotemporal granule. TimescaleDB hypertable keyed on `time`
-  (valid_time), with `reference_time` for forecasts.
+- **Item** (`core/models/item.py`): Single spatiotemporal granule. A plain table with `PRIMARY KEY (id)` — not a
+  hypertable (ADR 0047) — with `time` (valid_time) and `reference_time` for forecasts. The foreign keys to it are real
+  constraints; only `BoundaryZonalStats` is a hypertable.
 - **Asset** (`core/models/item.py`): Physical file (COG, PNG, JSON) linked to an Item.
 
 **Convention**: Models split into separate files under `core/models/`, re-exported from `__init__.py`.

@@ -228,7 +228,7 @@ Regardless of the ingestion path, all data passes through the same Celery-powere
 1. **Queue:** A Celery task is created and queued for async execution.
 2. **Validate:** The incoming file is parsed and validated against expected formats and metadata.
 3. **Generate COG:** The data is converted to a Cloud Optimized GeoTIFF, the canonical (and only) stored asset format.
-4. **Index as STAC Item:** A STAC Item record is created in TimescaleDB with the appropriate Catalog/Collection/Variable
+4. **Index as STAC Item:** A STAC Item record is created in PostgreSQL with the appropriate Catalog/Collection/Variable
    linkage.
 5. **Store Assets:** The COG is stored in MinIO and an Asset record is linked to the Item.
 
@@ -273,8 +273,10 @@ products computed from U/V components (`VECTOR_MAGNITUDE` for wind speed, `VECTO
 `sources` StreamField and `transform_type`.
 
 **Item** represents a single spatiotemporal data granule — one snapshot of one variable at one point in time. The Item
-model is backed by a TimescaleDB hypertable keyed on the `time` column (the valid time), with an additional
-`reference_time` column for forecast data (the model run time). Time-range queries are the dominant access pattern.
+model is a plain table keyed on `id`, with `time` (the valid time) and, for forecast data, `reference_time` (the model
+run time). Its reads name a collection, so `(collection, time)` is its working index
+([ADR-0047](../adr/0047-item-is-a-plain-table-only-zonal-stats-is-a-hypertable.md)). The foreign keys to it are real
+constraints.
 
 **Asset** represents a physical data object associated with an Item (following STAC conventions). Ingestion writes one
 COG per variable per timestep. Encoded textures are derived on demand rather than stored
@@ -292,8 +294,10 @@ in the same feed to run at different cadences. Individual executions are recorde
 
 ### 4.2 Key Design Decisions
 
-- **TimescaleDB for Items:** The Item table is expected to grow rapidly and will be queried primarily by time range.
-  TimescaleDB hypertables provide automatic partitioning and optimized time-range queries.
+- **Item is a plain table; zonal stats is the hypertable:** Item is read by collection, not by time window, so a
+  hypertable bought it nothing but planning cost and the loss of a primary key. `BoundaryZonalStats`, written per
+  boundary per timestep, is the one TimescaleDB hypertable
+  ([ADR-0047](../adr/0047-item-is-a-plain-table-only-zonal-stats-is-a-hypertable.md)).
 - **PostGIS for spatial:** The `bbox` field on Item uses PostGIS geometry types for spatial indexing and querying.
 - **JSONB for extensibility:** `extra_fields` and `properties` columns use PostgreSQL JSONB to accommodate STAC
   extensions and custom metadata without schema migrations.
@@ -424,9 +428,9 @@ This is the write-side counterpart of §3's ingestion. It has its own app (`proc
 Both mirror the STAC spec (Collection / Item / Asset) and share abstract base models, but they answer different
 questions. A `StagingItem` follows the shape of the *file that arrived*: one row per raw artifact, a flexible temporal
 extent (nullable `datetime` plus optional `start_datetime`/`end_datetime`), and assets carrying the `source` role. It is
-deliberately **not** a TimescaleDB hypertable, because there is no per-timestep row to key one on. A Published `Item`
-*is* a hypertable row — one per timestep — because that is the access pattern serving needs
-([ADR-0004](../adr/0004-staging-tier-and-abstract-stac-models.md)).
+one item per file, not per timestep. A Published `Item` is one row per timestep, because that is the access pattern
+serving needs ([ADR-0004](../adr/0004-staging-tier-and-abstract-stac-models.md); both are plain tables since
+[ADR-0047](../adr/0047-item-is-a-plain-table-only-zonal-stats-is-a-hypertable.md)).
 
 "Raw" is expressed as an asset *role*, not as a tier name. And "Published" does not mean "public": a Published
 Collection carries a `visibility` of `public`, `private`, or `internal` (§8). **Intermediate products** — a climatology
@@ -756,7 +760,7 @@ database lookup.
 | Vector Tiles (`...-martin`)               | Martin                                | Serves boundary/vector MVT tiles from PostGIS                             |
 | STAC Browser (`...-stac-browser`)         | stac-browser                          | Standalone STAC catalog browsing UI                                       |
 | Web Proxy (`...-web-proxy`)               | Nginx                                 | Reverse proxy, static & media, **and the `auth_request` tile auth gateway**|
-| Database (`...-db`)                       | PostgreSQL 18 + TimescaleDB + PostGIS | Models, time-series hypertables, spatial data                             |
+| Database (`...-db`)                       | PostgreSQL 18 + TimescaleDB + PostGIS | Models, the zonal-stats hypertable, spatial data                          |
 | Connection Pooler (`...-pgbouncer`)       | PgBouncer                             | Pools DB connections for the app and Martin                               |
 | Cache / Broker (`...-redis`)              | Redis                                 | Celery broker, application cache, and Bucket-notification bus                     |
 | Object Storage (`...-minio`)              | MinIO                                 | S3-compatible storage for all binary assets                               |
@@ -791,8 +795,9 @@ proxy and `provider = Minio`.
 
 - **MinIO over cloud S3:** MinIO provides S3 API compatibility while keeping the entire stack self-contained for
   on-premises deployment, which is critical for many National Meteorological Services.
-- **TimescaleDB over raw PostgreSQL:** The Item model's time-series nature makes TimescaleDB's hypertables and
-  compression essential for performance at scale.
+- **TimescaleDB beside PostgreSQL:** zonal statistics — one row per boundary, variable and timestep — are a
+  TimescaleDB hypertable. Item is not; it is read by collection
+  ([ADR-0047](../adr/0047-item-is-a-plain-table-only-zonal-stats-is-a-hypertable.md)).
 - **Redis-based event ingestion:** MinIO publishes bucket notifications to a Redis list via its native Redis target; a
   dedicated consumer (`georiva-minio-consumer`) drains the list and enqueues Celery tasks for the drop-zone path. This
   replaced the originally-planned MQTT/Mosquitto broker, removing an infrastructure component and reusing Redis.
@@ -895,7 +900,7 @@ Questions this document used to carry, and where their answers now live:
 | Titiler: encoded or styled tiles? | Both. Styled via admin-configured ramps; encoded textures derived on demand.     | [0021](../adr/0021-on-demand-encoded-textures.md), [0022](../adr/0022-two-layer-styling-ramps-and-variable-styles.md), [0023](../adr/0023-style-multiplicity-on-the-machine-plane.md) |
 | At what level is Zarr generated?  | Virtual (kerchunk) manifests per **Variable**, built automatically, no re-chunking. | §7.4 |
 | How are plugins distributed?      | Standalone PEP 621 packages: build-time, runtime, or editable local dev.          | [installation.md](../plugins/installation.md) |
-| Where does raw-but-unserved data live? | A **Staging** tier, source-grained, mirroring STAC but not a hypertable.     | [0004](../adr/0004-staging-tier-and-abstract-stac-models.md) |
+| Where does raw-but-unserved data live? | A **Staging** tier, source-grained, mirroring STAC, one item per raw file.   | [0004](../adr/0004-staging-tier-and-abstract-stac-models.md) |
 | Who orchestrates derivation?      | A generic engine owns the run loop; recipes only declare.                        | [0005](../adr/0005-generic-derivation-engine.md) |
 | How is a derived product configured and triggered? | Declared blueprints, saved per feed, bound to collections by FK at enable time. | [0008](../adr/0008-configurable-derivation-products.md), [0009](../adr/0009-derived-product-chain-and-lifecycle.md), [0010](../adr/0010-pinned-collection-bindings-for-derived-products.md) |
 | Should the STAC API be public? Are catalogs access-controlled? | Three visibility tiers per collection; org membership decides `private`. | [0014](../adr/0014-private-tier-and-per-user-api-keys.md) |
