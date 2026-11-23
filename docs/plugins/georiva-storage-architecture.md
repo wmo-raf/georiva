@@ -60,6 +60,13 @@ GeoRiva uses five dedicated MinIO buckets. Each bucket has a specific role, acce
 The bucket set is defined by `GEORIVA_BUCKETS` in `config/settings/base.py` and the `BucketType` enum in
 `core/storage/manager.py`. Only `georiva-incoming` and `georiva-sources` carry `s3:ObjectCreated:*` notifications.
 
+`georiva-incoming` is versioned (#773). After a full ingestion the source file is deleted by the version that was read,
+so a sender's later delivery under the same key (even with identical bytes) is a separate version and stays
+untouched. Other deletes there, such as quarantine moves and `.keep` removals, leave a noncurrent version and a delete
+marker behind. A lifecycle rule expires noncurrent versions a day after they stop being current, and removes delete
+markers once nothing is left behind them; current files never expire. `setup_minio` applies both, and the entrypoint
+runs it on every start, so an existing deployment picks them up on its next restart.
+
 **Why separate buckets instead of directories?**
 
 MinIO treats directories as virtual — they disappear when empty because a "directory" is just a common prefix shared by objects. There is no actual directory object. Buckets, on the other hand, are persistent and always visible even when empty. This is critical for `georiva-incoming` — novice users must always see a clear drop target in the MinIO Console.

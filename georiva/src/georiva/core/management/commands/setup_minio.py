@@ -2,7 +2,8 @@
 Management command to configure GeoRiva's MinIO/S3 buckets.
 
 Sets up:
-    georiva-incoming   → Redis notifications (triggers ingestion)
+    georiva-incoming   → Redis notifications (triggers ingestion), versioned; old
+                         versions and bare delete markers expire after a day
     georiva-sources    → Redis notifications (triggers ingestion)
     georiva-archive    → no notifications, private
     georiva-assets     → public read access (serves processed data)
@@ -22,9 +23,14 @@ from django.core.management.base import BaseCommand
 
 # Bucket-specific configuration
 BUCKET_CONFIGS = {
+    # Versioned so a source file's cleanup deletes the very write it ingested
+    # (#773): a sender's byte-identical re-delivery is another version, untouched.
+    # Every other delete here (a quarantine move, a .keep) leaves an old version
+    # and a delete marker behind, which the lifecycle rule expires.
     "incoming": {
         "public_read": False,
         "notify_on_create": True,
+        "versioned": True,
         "description": "User-uploaded raw data",
     },
     "sources": {
@@ -137,9 +143,13 @@ class Command(BaseCommand):
                     arn = getattr(settings, arn_setting, redis_arn)
                 self._set_redis_notification(s3, bucket_name, arn, dry_run)
 
-            # 4. Expire objects that are only held temporarily.
-            if config.get("expiry_days"):
-                self._set_expiry_rule(s3, bucket_name, config["expiry_days"], dry_run)
+            # 4. Keep every write apart, where a delete must take one write only.
+            if config.get("versioned"):
+                self._enable_versioning(s3, bucket_name, dry_run)
+
+            # 5. Expire what is only held for a while.
+            if rules := self._lifecycle_rules(bucket_name, config):
+                self._set_lifecycle(s3, bucket_name, rules, dry_run)
 
         self.stdout.write(self.style.SUCCESS("\nMinIO setup complete."))
 
@@ -214,29 +224,61 @@ class Command(BaseCommand):
     # Lifecycle
     # =========================================================================
 
-    def _set_expiry_rule(self, s3, bucket_name: str, days: int, dry_run: bool):
-        """Expire every object in the bucket ``days`` days after it was written."""
+    @staticmethod
+    def _lifecycle_rules(bucket_name: str, config: dict) -> list[dict]:
+        """The bucket's whole lifecycle: S3 takes one configuration per bucket, replacing any before it."""
+        rules = []
+        if days := config.get("expiry_days"):
+            # Every object, ``days`` days after it was written.
+            rules.append(
+                {
+                    "ID": f"GeoRiva-{bucket_name}-expiry",
+                    "Status": "Enabled",
+                    "Filter": {"Prefix": ""},
+                    "Expiration": {"Days": days},
+                }
+            )
+        if config.get("versioned"):
+            # A version a day after it stopped being current, and a delete marker
+            # once no version is left behind it. A current file never expires.
+            rules.append(
+                {
+                    "ID": f"GeoRiva-{bucket_name}-old-versions",
+                    "Status": "Enabled",
+                    "Filter": {"Prefix": ""},
+                    "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
+                    "Expiration": {"ExpiredObjectDeleteMarker": True},
+                }
+            )
+        return rules
+
+    def _set_lifecycle(self, s3, bucket_name: str, rules: list[dict], dry_run: bool):
+        names = ", ".join(rule["ID"] for rule in rules)
         if dry_run:
-            self.stdout.write(f"  → Would set {days}-day expiry rule")
+            self.stdout.write(f"  → Would set lifecycle rules: {names}")
             return
 
         try:
-            s3.put_bucket_lifecycle_configuration(
-                Bucket=bucket_name,
-                LifecycleConfiguration={
-                    "Rules": [
-                        {
-                            "ID": f"GeoRiva-{bucket_name}-expiry",
-                            "Status": "Enabled",
-                            "Filter": {"Prefix": ""},
-                            "Expiration": {"Days": days},
-                        }
-                    ]
-                },
-            )
-            self.stdout.write(self.style.SUCCESS(f"  ✓ {days}-day expiry rule set"))
+            s3.put_bucket_lifecycle_configuration(Bucket=bucket_name, LifecycleConfiguration={"Rules": rules})
+            self.stdout.write(self.style.SUCCESS(f"  ✓ Lifecycle rules set: {names}"))
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"  ✗ Failed to set expiry rule: {e}"))
+            self.stdout.write(self.style.ERROR(f"  ✗ Failed to set lifecycle rules: {e}"))
+
+    # =========================================================================
+    # Versioning
+    # =========================================================================
+
+    def _enable_versioning(self, s3, bucket_name: str, dry_run: bool):
+        """Turn versioning on. It is never turned off here: a bucket once versioned can only be suspended."""
+        if dry_run:
+            self.stdout.write("  → Would enable versioning")
+            return
+
+        try:
+            s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
+            self.stdout.write(self.style.SUCCESS("  ✓ Versioning enabled"))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"  ✗ Failed to enable versioning: {e}"))
 
     # =========================================================================
     # Redis notifications

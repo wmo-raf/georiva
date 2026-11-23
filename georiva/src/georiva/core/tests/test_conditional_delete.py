@@ -8,7 +8,7 @@ from unittest.mock import PropertyMock, patch
 import boto3
 from botocore.stub import Stubber
 from django.core.files.storage import FileSystemStorage
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, tag
 
 from georiva.core.storage import storage
 from georiva.core.storage.manager import Bucket, BucketType
@@ -77,7 +77,9 @@ class S3ConditionalDeleteTests(S3StubMixin, SimpleTestCase):
         version = self.bucket.version_of(KEY)
 
         self._head('"e1"', read_at)
-        self.stub.add_response("delete_object", {}, {"Bucket": "georiva-incoming", "Key": KEY, "IfMatch": '"e1"'})
+        self.stub.add_response(
+            "delete_object", {}, {"Bucket": "georiva-incoming", "Key": KEY, "VersionId": "null", "IfMatch": '"e1"'}
+        )
 
         self.assertTrue(self.bucket.delete_if_version(KEY, version))
         self.stub.assert_no_pending_responses()
@@ -109,7 +111,7 @@ class S3ConditionalDeleteTests(S3StubMixin, SimpleTestCase):
             "delete_object",
             service_error_code="PreconditionFailed",
             http_status_code=412,
-            expected_params={"Bucket": "georiva-incoming", "Key": KEY, "IfMatch": '"e1"'},
+            expected_params={"Bucket": "georiva-incoming", "Key": KEY, "VersionId": "null", "IfMatch": '"e1"'},
         )
 
         self.assertFalse(self.bucket.delete_if_version(KEY, version))
@@ -118,6 +120,70 @@ class S3ConditionalDeleteTests(S3StubMixin, SimpleTestCase):
         self.stub.add_client_error("head_object", service_error_code="404", http_status_code=404)
 
         self.assertIsNone(self.bucket.version_of(KEY))
+
+
+class S3VersionedDeleteTests(S3StubMixin, SimpleTestCase):
+    """On a versioned bucket (``incoming``) a write is named by its VersionId, and
+    the delete removes that version and no other, whatever its bytes (#773)."""
+
+    def _head(self, etag, modified, version_id=None, *, asked_version=None):
+        response = {"ETag": etag, "LastModified": modified, "ContentLength": 3}
+        if version_id is not None:
+            response["VersionId"] = version_id
+        params = {"Bucket": "georiva-incoming", "Key": KEY}
+        if asked_version is not None:
+            params["VersionId"] = asked_version
+        self.stub.add_response("head_object", response, params)
+
+    def test_a_versioned_write_is_named_by_its_version_id(self):
+        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
+        first = self.bucket.version_of(KEY)
+        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v2")
+
+        self.assertNotEqual(first, self.bucket.version_of(KEY))
+
+    def test_the_version_read_is_deleted_by_its_id_whatever_is_current(self):
+        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
+        version = self.bucket.version_of(KEY)
+
+        # The same bytes delivered again are v2 by now; v1 alone is asked after and deleted.
+        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1", asked_version="v1")
+        self.stub.add_response("delete_object", {}, {"Bucket": "georiva-incoming", "Key": KEY, "VersionId": "v1"})
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, version))
+        self.stub.assert_no_pending_responses()
+
+    def test_a_version_already_gone_deletes_nothing(self):
+        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
+        version = self.bucket.version_of(KEY)
+        self.stub.add_client_error("head_object", service_error_code="404", http_status_code=404)
+
+        self.assertFalse(self.bucket.delete_if_version(KEY, version))
+        self.stub.assert_no_pending_responses()
+
+    def test_a_write_from_before_versioning_is_deleted_as_the_null_version(self):
+        # Read before versioning was turned on: no VersionId, the ETag@LastModified form.
+        read_at = datetime(2026, 1, 1, 6, tzinfo=UTC)
+        self._head('"e1"', read_at)
+        version = self.bucket.version_of(KEY)
+
+        self._head('"e1"', read_at)
+        self.stub.add_response(
+            "delete_object", {}, {"Bucket": "georiva-incoming", "Key": KEY, "VersionId": "null", "IfMatch": '"e1"'}
+        )
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, version))
+        self.stub.assert_no_pending_responses()
+
+    def test_a_write_from_before_versioning_is_not_deleted_once_a_versioned_write_is_current(self):
+        read_at = datetime(2026, 1, 1, 6, tzinfo=UTC)
+        self._head('"e1"', read_at)
+        version = self.bucket.version_of(KEY)
+
+        self._head('"e1"', read_at, "v2")
+
+        self.assertFalse(self.bucket.delete_if_version(KEY, version))
+        self.stub.assert_no_pending_responses()
 
 
 class LocalDeleteIfWrittenTests(SimpleTestCase):
@@ -207,3 +273,91 @@ class MinioDeleteIfWrittenTests(SimpleTestCase):
 
         self.assertTrue(self.bucket.delete_if_written(self.key, receipt))
         self.assertFalse(self.bucket.exists(self.key))
+
+
+@tag("integration")
+class MinioVersionedDeleteTests(SimpleTestCase):
+    """Against the dev silo, in a throwaway versioned bucket with no notifications:
+    the write a cleanup read is deleted, and a byte-identical one sent after it is
+    kept (#773). Skips when the silo isn't reachable."""
+
+    def setUp(self):
+        from botocore.exceptions import BotoCoreError, ClientError
+        from django.conf import settings
+
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME,
+        )
+        self.bucket_name = f"test-773-{uuid.uuid4().hex[:12]}"
+        try:
+            self.client.create_bucket(Bucket=self.bucket_name)
+        except (BotoCoreError, ClientError):
+            self.skipTest("silo is not reachable")
+        self.addCleanup(self._remove_bucket)
+
+        s3 = type("S3", (), {})()
+        s3.bucket_name = self.bucket_name
+        s3.bucket = object()
+        s3.connection = type("Conn", (), {"meta": type("Meta", (), {"client": self.client})()})()
+        self.bucket = Bucket(BucketType.INCOMING, "incoming")
+        patcher = patch.object(Bucket, "storage", new_callable=PropertyMock, return_value=s3)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _remove_bucket(self):
+        listing = self.client.list_object_versions(Bucket=self.bucket_name)
+        for v in listing.get("Versions", []) + listing.get("DeleteMarkers", []):
+            self.client.delete_object(Bucket=self.bucket_name, Key=v["Key"], VersionId=v["VersionId"])
+        self.client.delete_bucket(Bucket=self.bucket_name)
+
+    def _version(self):
+        self.client.put_bucket_versioning(Bucket=self.bucket_name, VersioningConfiguration={"Status": "Enabled"})
+
+    def _current(self):
+        return self.client.get_object(Bucket=self.bucket_name, Key=KEY)["Body"].read()
+
+    def _versions(self):
+        return self.client.list_object_versions(Bucket=self.bucket_name, Prefix=KEY).get("Versions", [])
+
+    def test_a_byte_identical_write_sent_after_the_read_is_kept(self):
+        self._version()
+        self.bucket.put(KEY, b"the run")
+        read = self.bucket.version_of(KEY)
+        self.bucket.put(KEY, b"the run")
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, read))
+
+        self.assertEqual(self._current(), b"the run")
+        self.assertEqual(len(self._versions()), 1)
+        self.assertNotEqual(self.bucket.version_of(KEY), read)
+
+    def test_the_write_read_is_deleted_outright(self):
+        self._version()
+        self.bucket.put(KEY, b"the run")
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, self.bucket.version_of(KEY)))
+
+        listing = self.client.list_object_versions(Bucket=self.bucket_name, Prefix=KEY)
+        self.assertEqual(listing.get("Versions", []) + listing.get("DeleteMarkers", []), [])
+
+    def test_a_write_from_before_versioning_is_kept_once_a_byte_identical_one_is_current(self):
+        self.bucket.put(KEY, b"the run")
+        read = self.bucket.version_of(KEY)
+        self._version()
+        self.bucket.put(KEY, b"the run")
+
+        # The re-delivery is current, so the earlier write is no longer the one stored.
+        self.assertFalse(self.bucket.delete_if_version(KEY, read))
+        self.assertEqual(self._current(), b"the run")
+
+    def test_a_write_from_before_versioning_still_current_is_deleted(self):
+        self.bucket.put(KEY, b"the run")
+        read = self.bucket.version_of(KEY)
+        self._version()
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, read))
+        self.assertFalse(self._versions())

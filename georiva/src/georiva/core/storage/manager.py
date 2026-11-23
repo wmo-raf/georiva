@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 #: The error codes S3 (and MinIO) answer a request about a key that does not exist with.
 _MISSING_KEY_CODES = ("404", "NoSuchKey", "NotFound")
 
+#: How ``Bucket.version_of`` marks a VersionId, telling it apart from the
+#: ``ETag@LastModified`` form older FileIngestion rows hold (#773).
+_VERSION_ID_PREFIX = "vid:"
+
 
 class BucketType:
     """Known bucket types in GeoRiva."""
@@ -175,51 +179,84 @@ class Bucket:
             return True
         return False
 
+    def _head(self, path: str, **params) -> dict | None:
+        """S3's HEAD of ``path`` (of one version of it, given ``VersionId``), or None when there is none."""
+        from botocore.exceptions import ClientError
+
+        try:
+            return self.storage.connection.meta.client.head_object(Bucket=self.storage.bucket_name, Key=path, **params)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in _MISSING_KEY_CODES:
+                return None
+            raise
+
+    @staticmethod
+    def _version_from_head(head: dict) -> str:
+        # A write to a versioned bucket is its VersionId. One from before versioning was
+        # turned on has none (or "null"), and is named as on an unversioned bucket.
+        version_id = head.get("VersionId")
+        if version_id and version_id != "null":
+            return f"{_VERSION_ID_PREFIX}{version_id}"
+        return f"{head['ETag']}@{head['LastModified'].isoformat()}"
+
     def version_of(self, path: str) -> str | None:
         """Which write of ``path`` is stored now, or None when nothing is.
 
-        On S3 its ETag and last-modified time, so the same bytes written again are still
-        a different write; locally its size and modified time. Only compared, never parsed
-        outside this class.
+        On a versioned S3 bucket (``incoming``, #773) its VersionId, which no other
+        write shares; on an unversioned one, or for a write from before versioning,
+        its ETag and last-modified time, so the same bytes written again are still a
+        different write; locally its size and modified time. Only compared, never
+        parsed outside this class.
         """
         if self.is_s3:
-            from botocore.exceptions import ClientError
-
-            try:
-                head = self.storage.connection.meta.client.head_object(Bucket=self.storage.bucket_name, Key=path)
-            except ClientError as e:
-                if e.response.get("Error", {}).get("Code") in _MISSING_KEY_CODES:
-                    return None
-                raise
-            return f"{head['ETag']}@{head['LastModified'].isoformat()}"
+            head = self._head(path)
+            return None if head is None else self._version_from_head(head)
 
         if not self.exists(path):
             return None
         return f"{self.size(path)}@{self.modified_time(path).isoformat()}"
 
     def delete_if_version(self, path: str, version: str | None) -> bool:
-        """Delete ``path`` only while it is still the write ``version`` names; True if deleted.
+        """Delete the write of ``path`` that ``version`` names, and no other; True if deleted.
 
-        A newer write under the same key is left in place. On S3 the delete itself is
-        conditional on the ETag, so a write landing after the check is kept too.
+        A VersionId is deleted as that version, so a later write under the key —
+        byte-identical or not — is never touched, and is current again if it was
+        hidden behind the one deleted. Any other form is deleted only while it is
+        still the current write: on S3 conditional on its ETag, and as the write
+        from before versioning (the "null" version), so on a versioned bucket a
+        byte-identical write landing after the check is kept too. On an
+        unversioned bucket that last race remains (#773).
         """
-        if version is None or self.version_of(path) != version:
+        if version is None:
             return False
 
         if self.is_s3:
+            client = self.storage.connection.meta.client
+            if version.startswith(_VERSION_ID_PREFIX):
+                version_id = version.removeprefix(_VERSION_ID_PREFIX)
+                # S3 answers a delete of a version already gone with success, so it is asked first.
+                if self._head(path, VersionId=version_id) is None:
+                    return False
+                client.delete_object(Bucket=self.storage.bucket_name, Key=path, VersionId=version_id)
+                return True
+
+            head = self._head(path)
+            if head is None or self._version_from_head(head) != version:
+                return False
+
             from botocore.exceptions import ClientError
 
             etag, _, _ = version.partition("@")
             try:
-                self.storage.connection.meta.client.delete_object(
-                    Bucket=self.storage.bucket_name, Key=path, IfMatch=etag
-                )
+                client.delete_object(Bucket=self.storage.bucket_name, Key=path, VersionId="null", IfMatch=etag)
             except ClientError as e:
                 if e.response.get("Error", {}).get("Code") == "PreconditionFailed":
                     return False
                 raise
             return True
 
+        if self.version_of(path) != version:
+            return False
         self.storage.delete(path)
         return True
 
