@@ -314,6 +314,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         # ingested files; a harvested or recipe-written one has no bands to name.
         if self._reads_from_files():
             errors.update(self._sources_errors())
+        elif self.transform_type in VECTOR_TRANSFORMS:
+            errors.update(self._vector_errors())
 
         if errors:
             raise ValidationError(errors)
@@ -408,6 +410,33 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                         f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."
                     )
         return errors
+
+    def _vector_errors(self) -> dict:
+        """A vector Variable of a store collection names two of the arrays its
+        feed maps (ADR 0048). Of any other collection not read from files there
+        is nothing to check it against."""
+        try:
+            arrays = self.collection.mapped_store_arrays()
+        except ObjectDoesNotExist:
+            return {}
+        if arrays is None:
+            return {}
+        named = {block.block_type: block.value["source_name"] for block in self.sources or []}
+        missing = {"u_component", "v_component"} - set(named)
+        if missing:
+            return {
+                "sources": f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."
+            }
+        unmapped = [name for kind, name in sorted(named.items()) if kind in ("u_component", "v_component") and name not in arrays]
+        if unmapped:
+            return {
+                "sources": _(
+                    "%(names)s is not an array this collection's harvest feed maps. Map it first, "
+                    "then name it here by its path in the store."
+                )
+                % {"names": ", ".join(unmapped)}
+            }
+        return {}
 
     @property
     def is_derived(self):

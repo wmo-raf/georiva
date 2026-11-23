@@ -109,22 +109,43 @@ def _published_assets():
     return Asset.objects.filter((remote_q() & Q(format=Asset.Format.COG)) | store_q())
 
 
-def store_entry(href: str, array: str, chunk_locations: dict, allow_http: bool = False) -> dict:
+def store_entry(href: str, array: str, chunk_locations: dict, allow_http: bool = False, vector=None) -> dict:
     """What Titiler is told of a Store asset: the store, the array, where the
     store's data may be followed (ADR 0044 §9, §11), and whether a plain
     ``http`` store may be opened at all (ADR 0042 §9). Titiler reads the same
-    keys (``titiler-app/app/store.py``)."""
-    return {
-        "store": href,
-        "array": array,
-        "chunk_locations": dict(chunk_locations or {}),
-        "allow_http": bool(allow_http),
-    }
+    keys (``titiler-app/app/store.py``).
+
+    A vector Store asset (ADR 0048) names no array: in its place, ``vector``
+    says which two arrays it is computed from and which quantity of them it is
+    (a ``VectorComponents``)."""
+    entry = {"store": href}
+    if vector is not None:
+        entry["vector"] = {"u": vector.u, "v": vector.v, "transform": str(vector.transform)}
+    else:
+        entry["array"] = array
+    entry["chunk_locations"] = dict(chunk_locations or {})
+    entry["allow_http"] = bool(allow_http)
+    return entry
 
 
-def _store_value(href: str, array: str, access: StoreAccess) -> str:
+def _store_value(href: str, array: str, access: StoreAccess, vector=None) -> str:
     """A Store asset's value in the hash: its :func:`store_entry` as JSON."""
-    return json.dumps(store_entry(href, array, access.chunk_locations, access.allow_http))
+    return json.dumps(store_entry(href, array, access.chunk_locations, access.allow_http, vector))
+
+
+def _vectors_of(variable_pks) -> dict:
+    """The u and v each of these Variables is computed from, for those that are vectors (ADR 0048)."""
+    from georiva.core.models import Variable
+    from georiva.core.models.variable import VECTOR_TRANSFORMS
+
+    variable_pks = {pk for pk in variable_pks if pk is not None}
+    if not variable_pks:
+        return {}
+    found = {}
+    for variable in Variable.objects.filter(pk__in=variable_pks, transform_type__in=VECTOR_TRANSFORMS):
+        if variable.vector_components is not None:
+            found[variable.pk] = variable.vector_components
+    return found
 
 
 @dataclass(frozen=True)
@@ -165,10 +186,13 @@ def _values(rows) -> dict[tuple, str]:
     ``(variable_id, time, reference_time, format, href, store_array, harvested_by_id)``."""
     rows = [(*row, AssetLocation(row[4], row[3]).is_store) for row in rows]
     access = feed_store_access(row[6] for row in rows if row[7])
+    # A Store asset with no array of its own is a vector's: its Variable names two.
+    vectors = _vectors_of(row[0] for row in rows if row[7] and not row[5])
     values = {}
     for variable_pk, time, reference_time, _, href, store_array, harvested_by, is_store in rows:
         if is_store:
-            href = _store_value(href, store_array, access.get(harvested_by, NO_FEED))
+            vector = vectors.get(variable_pk) if not store_array else None
+            href = _store_value(href, store_array, access.get(harvested_by, NO_FEED), vector)
         values[variable_pk, timestep_field(time, reference_time)] = href
     return values
 
@@ -307,7 +331,8 @@ def publish_asset(asset) -> None:
     location = asset.location
     if location.is_store:
         access = feed_store_access([asset.harvested_by_id]).get(asset.harvested_by_id, NO_FEED)
-        _write_timestep(asset, _store_value(asset.href, asset.store_array, access))
+        vector = asset.variable.vector_components if not asset.store_array else None
+        _write_timestep(asset, _store_value(asset.href, asset.store_array, access, vector))
     elif asset.format != Asset.Format.COG:
         return
     elif location.is_remote:
