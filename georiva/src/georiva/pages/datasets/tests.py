@@ -638,6 +638,7 @@ class VariableOrderTests(TestCase):
             Asset.objects.create(item=cls.item, variable=variable, href=f"{slug}.tif")
         Asset.objects.filter(item=cls.item).update(format=Asset.Format.COG)
         Collection.objects.filter(pk=cls.collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+        # "forecast" is the tree's own Variable, named "Wind speed".
         cls.by_name = ["t2m", "tcc", "msl", "forecast"]
 
     def setUp(self):
