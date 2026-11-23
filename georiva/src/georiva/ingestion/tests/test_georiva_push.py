@@ -21,6 +21,7 @@ from georiva.core.storage import BucketType, get_bucket_config
 from georiva.ingestion import machine_senders
 from georiva.ingestion.models import PushFeed
 from georiva.ingestion.sender import georiva_push as gp
+from georiva.ingestion.testing import purge_silo_prefix_on_cleanup, silo_root_client
 from georiva.organisations.testing import dial_org, join_org, make_organisation
 
 SCRIPT = Path(gp.__file__)
@@ -451,8 +452,6 @@ class SendAgainstSiloTests(TestCase):
     def test_sends_into_the_feeds_area_and_is_refused_elsewhere(self):
         from urllib.parse import urlparse
 
-        from minio import Minio
-
         try:
             admin = machine_senders.get_admin()
             admin.user_list()
@@ -460,6 +459,8 @@ class SendAgainstSiloTests(TestCase):
             self.skipTest("silo is not reachable")
 
         suffix = uuid.uuid4().hex[:6]
+        root = silo_root_client()
+        purge_silo_prefix_on_cleanup(self, root, f"gp{suffix}")
         org = make_organisation(f"gp{suffix}")
         catalog = Catalog.objects.create(organisation=org, name="WRF", slug="wrf", file_format="netcdf")
         feed = PushFeed.objects.create(catalog=catalog, name="WRF", valid_time_format="CONTENT")
@@ -474,12 +475,6 @@ class SendAgainstSiloTests(TestCase):
             "region": machine_senders.SENDER_REGION,
             "dest": f"{bucket}/{catalog.storage_prefix}",
         }
-        root = Minio(
-            parsed.netloc,
-            access_key=settings.AWS_ACCESS_KEY_ID,
-            secret_key=settings.AWS_SECRET_ACCESS_KEY,
-            secure=parsed.scheme == "https",
-        )
         tmp = tempfile.mkdtemp()
         sent = []
         try:
@@ -498,11 +493,6 @@ class SendAgainstSiloTests(TestCase):
                 self.assertFalse(ctx.exception.retry)
         finally:
             feed.delete()
-            for name in sent:
-                try:
-                    root.remove_object(bucket, name)
-                except Exception:
-                    pass
             for name in os.listdir(tmp):
                 os.remove(os.path.join(tmp, name))
             os.rmdir(tmp)

@@ -19,6 +19,7 @@ from georiva.ingestion.models import (
     PushSenderRevoked,
     PushSenderRotated,
 )
+from georiva.ingestion.testing import purge_silo_prefix_on_cleanup, silo_root_client
 from georiva.organisations.testing import dial_org, join_org, make_organisation
 
 User = get_user_model()
@@ -274,8 +275,9 @@ class SenderAgainstSiloTests(TestCase):
 
         suffix = uuid.uuid4().hex[:6]
         feed = _feed(org=f"sp{suffix}", slug="wrf")
-        sender, secret = machine_senders.add_sender(feed, "ops", admin=admin)
         parsed = urlparse(settings.AWS_S3_ENDPOINT_URL)
+        purge_silo_prefix_on_cleanup(self, silo_root_client(), f"sp{suffix}")
+        sender, secret = machine_senders.add_sender(feed, "ops", admin=admin)
         client = Minio(
             parsed.netloc,
             access_key=sender.access_key,
@@ -285,36 +287,23 @@ class SenderAgainstSiloTests(TestCase):
         )
         bucket = get_bucket_config()[BucketType.INCOMING]["name"]
         prefix = feed.catalog.storage_prefix
-        try:
-            client.put_object(bucket, f"{prefix}/a.nc", io.BytesIO(b"abc"), 3)
-            with self.assertRaises(S3Error) as ctx:
-                client.put_object(bucket, f"sp{suffix}/other/a.nc", io.BytesIO(b"abc"), 3)
-            self.assertEqual(ctx.exception.code, "AccessDenied")
+        client.put_object(bucket, f"{prefix}/a.nc", io.BytesIO(b"abc"), 3)
+        with self.assertRaises(S3Error) as ctx:
+            client.put_object(bucket, f"sp{suffix}/other/a.nc", io.BytesIO(b"abc"), 3)
+        self.assertEqual(ctx.exception.code, "AccessDenied")
 
-            new = machine_senders.rotate_sender(sender, admin=admin)
-            with self.assertRaises(S3Error):
-                client.put_object(bucket, f"{prefix}/b.nc", io.BytesIO(b"abc"), 3)
-            client = Minio(
-                parsed.netloc,
-                access_key=sender.access_key,
-                secret_key=new,
-                secure=parsed.scheme == "https",
-                region=machine_senders.SENDER_REGION,
-            )
-            client.put_object(bucket, f"{prefix}/c.nc", io.BytesIO(b"abc"), 3)
+        new = machine_senders.rotate_sender(sender, admin=admin)
+        with self.assertRaises(S3Error):
+            client.put_object(bucket, f"{prefix}/b.nc", io.BytesIO(b"abc"), 3)
+        client = Minio(
+            parsed.netloc,
+            access_key=sender.access_key,
+            secret_key=new,
+            secure=parsed.scheme == "https",
+            region=machine_senders.SENDER_REGION,
+        )
+        client.put_object(bucket, f"{prefix}/c.nc", io.BytesIO(b"abc"), 3)
 
-            feed.delete()
-            with self.assertRaises(S3Error):
-                client.put_object(bucket, f"{prefix}/d.nc", io.BytesIO(b"abc"), 3)
-        finally:
-            root = Minio(
-                parsed.netloc,
-                access_key=settings.AWS_ACCESS_KEY_ID,
-                secret_key=settings.AWS_SECRET_ACCESS_KEY,
-                secure=parsed.scheme == "https",
-            )
-            for key in ("a.nc", "c.nc"):
-                try:
-                    root.remove_object(bucket, f"{prefix}/{key}")
-                except Exception:
-                    pass
+        feed.delete()
+        with self.assertRaises(S3Error):
+            client.put_object(bucket, f"{prefix}/d.nc", io.BytesIO(b"abc"), 3)

@@ -13,6 +13,7 @@ from minio.error import S3Error
 from minio.minioadmin import MinioAdmin
 
 from georiva.core.storage import BucketType, get_bucket_config
+from georiva.ingestion.testing import purge_silo_prefix_on_cleanup
 
 
 def _root_clients():
@@ -64,6 +65,7 @@ class SiloMachineSenderTests(SimpleTestCase):
             ],
         }
         policy_file = self._write_policy(policy)
+        purge_silo_prefix_on_cleanup(self, root, org)
 
         events, got_event = [], threading.Event()
 
@@ -110,11 +112,6 @@ class SiloMachineSenderTests(SimpleTestCase):
             for fn in (lambda: admin.user_remove(user), lambda: admin.policy_remove(policy_name)):
                 try:
                     fn()
-                except Exception:
-                    pass
-            for key in (f"{org}/{catalog}/a.nc", f"{org}/{catalog}/b.nc"):
-                try:
-                    root.remove_object(bucket, key)
                 except Exception:
                     pass
 

@@ -1,7 +1,13 @@
 """Helpers for tests that touch the ingestion app's live updates."""
 
+import time
 import uuid
 from unittest import mock
+from urllib.parse import urlparse
+
+from django.conf import settings
+from minio import Minio
+from minio.error import S3Error
 
 from georiva.ingestion import live_updates
 
@@ -18,3 +24,59 @@ def use_own_channel(test):
     patcher.start()
     test.addCleanup(patcher.stop)
     return channel
+
+
+#: How long a silo cleanup keeps looking for objects the live consumer may still
+#: be moving, and how many empty looks in a row count as settled.
+SILO_PURGE_DEADLINE = 15.0
+SILO_PURGE_QUIET_PASSES = 5
+SILO_PURGE_INTERVAL = 0.5
+
+
+def silo_root_client():
+    """A ``Minio`` client on the silo with the app's own (root) credentials."""
+    parsed = urlparse(settings.AWS_S3_ENDPOINT_URL)
+    return Minio(
+        parsed.netloc,
+        access_key=settings.AWS_ACCESS_KEY_ID,
+        secret_key=settings.AWS_SECRET_ACCESS_KEY,
+        secure=parsed.scheme == "https",
+    )
+
+
+def purge_silo_prefix_on_cleanup(test, client, prefix):
+    """Remove every object under ``prefix/`` from ``incoming`` and ``quarantine`` once ``test`` ends.
+
+    For a test that puts objects into the real silo on purpose (#767). Registered
+    with ``addCleanup``, so it runs whether the test passed or not. Both buckets,
+    because the live consumer hears the put too: under an organisation the dev
+    database has never heard of, it moves the object to ``quarantine``, and it
+    may still be moving one while the cleanup runs. So the cleanup keeps looking
+    until several looks in a row find nothing.
+    """
+    from georiva.core.storage import BucketType, get_bucket_config
+
+    config = get_bucket_config()
+    names = [config[bucket]["name"] for bucket in (BucketType.INCOMING, BucketType.QUARANTINE)]
+    test.addCleanup(_purge_silo_prefix, client, prefix, names)
+
+
+def _purge_silo_prefix(client, prefix, bucket_names):
+    """Remove objects under ``prefix/`` from ``bucket_names`` until several looks in a row find none."""
+    deadline = time.monotonic() + SILO_PURGE_DEADLINE
+    quiet = 0
+    while quiet < SILO_PURGE_QUIET_PASSES:
+        removed = 0
+        for name in bucket_names:
+            try:
+                for obj in client.list_objects(name, prefix=f"{prefix}/", recursive=True):
+                    client.remove_object(name, obj.object_name)
+                    removed += 1
+            except S3Error as e:
+                if e.code != "NoSuchBucket":
+                    raise
+        quiet = 0 if removed else quiet + 1
+        if time.monotonic() > deadline:
+            raise AssertionError(f"objects under {prefix}/ kept arriving for {SILO_PURGE_DEADLINE}s")
+        if quiet < SILO_PURGE_QUIET_PASSES:
+            time.sleep(SILO_PURGE_INTERVAL)
