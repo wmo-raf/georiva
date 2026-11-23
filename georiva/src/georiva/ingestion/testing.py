@@ -1,7 +1,13 @@
 """Helpers for tests that touch the ingestion app's live updates."""
 
+import time
 import uuid
 from unittest import mock
+from urllib.parse import urlparse
+
+from django.conf import settings
+from minio import Minio
+from minio.error import S3Error
 
 from georiva.ingestion import live_updates
 
@@ -23,8 +29,19 @@ def use_own_channel(test):
 #: How long a silo cleanup keeps looking for objects the live consumer may still
 #: be moving, and how many empty looks in a row count as settled.
 SILO_PURGE_DEADLINE = 15.0
-SILO_PURGE_QUIET_PASSES = 3
+SILO_PURGE_QUIET_PASSES = 5
 SILO_PURGE_INTERVAL = 0.5
+
+
+def silo_root_client():
+    """A ``Minio`` client on the silo with the app's own (root) credentials."""
+    parsed = urlparse(settings.AWS_S3_ENDPOINT_URL)
+    return Minio(
+        parsed.netloc,
+        access_key=settings.AWS_ACCESS_KEY_ID,
+        secret_key=settings.AWS_SECRET_ACCESS_KEY,
+        secure=parsed.scheme == "https",
+    )
 
 
 def purge_silo_prefix_on_cleanup(test, client, prefix):
@@ -41,14 +58,11 @@ def purge_silo_prefix_on_cleanup(test, client, prefix):
 
     config = get_bucket_config()
     names = [config[bucket]["name"] for bucket in (BucketType.INCOMING, BucketType.QUARANTINE)]
-    test.addCleanup(purge_silo_prefix, client, prefix, names)
+    test.addCleanup(_purge_silo_prefix, client, prefix, names)
 
 
-def purge_silo_prefix(client, prefix, bucket_names):
-    import time
-
-    from minio.error import S3Error
-
+def _purge_silo_prefix(client, prefix, bucket_names):
+    """Remove objects under ``prefix/`` from ``bucket_names`` until several looks in a row find none."""
     deadline = time.monotonic() + SILO_PURGE_DEADLINE
     quiet = 0
     while quiet < SILO_PURGE_QUIET_PASSES:

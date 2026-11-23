@@ -20,7 +20,7 @@ from georiva.core.storage import storage
 from georiva.core.storage.manager import BucketType
 
 
-class TestStoragesTests(SimpleTestCase):
+class SuiteStoragesFunctionTests(SimpleTestCase):
     def test_every_bucket_becomes_a_directory_under_the_root(self):
         configured = {
             "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -41,7 +41,7 @@ class TestStoragesTests(SimpleTestCase):
         self.assertEqual(result["georiva-assets"]["OPTIONS"]["location"], "/run/georiva-assets")
 
 
-class SuiteStorageTests(SimpleTestCase):
+class ThisProcessStorageTests(SimpleTestCase):
     """What the runner set up for this very process."""
 
     def test_the_backend_is_local(self):

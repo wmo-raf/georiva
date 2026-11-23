@@ -480,6 +480,14 @@ class StorageManager:
             self._buckets[bucket_type] = Bucket(bucket_type, storage_name)
         return self._buckets[bucket_type]
 
+    def forget_buckets(self) -> None:
+        """Drop every Bucket handle, so the next use resolves its backend from ``STORAGES`` again.
+
+        A handle keeps the backend it first resolved; only a process that changes
+        ``STORAGES`` after startup (the test runner does) needs this.
+        """
+        self._buckets.clear()
+
     # ---- Named bucket accessors ---------------------------------------------
 
     @property

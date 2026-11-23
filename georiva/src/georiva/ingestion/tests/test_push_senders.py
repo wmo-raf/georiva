@@ -19,7 +19,7 @@ from georiva.ingestion.models import (
     PushSenderRevoked,
     PushSenderRotated,
 )
-from georiva.ingestion.testing import purge_silo_prefix_on_cleanup
+from georiva.ingestion.testing import purge_silo_prefix_on_cleanup, silo_root_client
 from georiva.organisations.testing import dial_org, join_org, make_organisation
 
 User = get_user_model()
@@ -276,13 +276,7 @@ class SenderAgainstSiloTests(TestCase):
         suffix = uuid.uuid4().hex[:6]
         feed = _feed(org=f"sp{suffix}", slug="wrf")
         parsed = urlparse(settings.AWS_S3_ENDPOINT_URL)
-        root = Minio(
-            parsed.netloc,
-            access_key=settings.AWS_ACCESS_KEY_ID,
-            secret_key=settings.AWS_SECRET_ACCESS_KEY,
-            secure=parsed.scheme == "https",
-        )
-        purge_silo_prefix_on_cleanup(self, root, f"sp{suffix}")
+        purge_silo_prefix_on_cleanup(self, silo_root_client(), f"sp{suffix}")
         sender, secret = machine_senders.add_sender(feed, "ops", admin=admin)
         client = Minio(
             parsed.netloc,

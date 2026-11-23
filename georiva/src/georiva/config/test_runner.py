@@ -138,7 +138,7 @@ def use_test_storage(root):
     settings.GEORIVA_STORAGE_ROOT = root
     settings.STORAGES = suite_storages(settings.STORAGES, settings.GEORIVA_BUCKETS, root)
     setting_changed.send(sender=None, setting="STORAGES", value=settings.STORAGES, enter=True)
-    storage._buckets.clear()
+    storage.forget_buckets()
 
 
 def configure_test_settings():
