@@ -11,11 +11,15 @@ Tests that care about tenancy override ``GEORIVA_BASE_DOMAIN`` and provision
 their own organisations on top.
 
 It also swaps in a fast password hasher, builds the test-only tables (see
-``setup_databases``), and under ``--parallel`` gives each worker its own Redis
+``setup_databases``), puts every bucket in a directory of the run's own (see
+``use_test_storage``), and under ``--parallel`` gives each worker its own Redis
 database (see ``use_redis_database``).
 """
 
 import multiprocessing
+import os
+import shutil
+import tempfile
 from urllib.parse import urlsplit, urlunsplit
 
 from django.db import connection
@@ -94,6 +98,49 @@ def use_redis_database(url):
                 task._singleton_backend = None
 
 
+#: The environment variable naming the run's storage directory. The runner sets it
+#: before any worker starts, and a worker started from the forkserver inherits it.
+TEST_STORAGE_ROOT_ENV = "GEORIVA_TEST_STORAGE_ROOT"
+
+
+def suite_storages(configured, buckets, root):
+    """``configured`` with every bucket's backend a directory under ``root``.
+
+    The same shape ``GEORIVA_STORAGE_BACKEND=local`` gives in settings, so the
+    suite runs the code CI runs whatever ``.env`` says.
+    """
+    result = dict(configured)
+    for key, bucket in buckets.items():
+        name = bucket["name"]
+        result[f"georiva-{key}"] = {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": os.path.join(root, name), "base_url": f"/storage/{name}/"},
+        }
+    return result
+
+
+def use_test_storage(root):
+    """Point every bucket in this process at a directory under ``root``.
+
+    A test database is its own and so is a worker's Redis database, but the
+    buckets came from ``.env``: on a dev machine, the running stack's MinIO. Every
+    Collection a test saved wrote a ``.keep`` into the live ``incoming`` bucket,
+    whose notification the live consumer then acted on (#767). Django's storage
+    handler rebuilds on the ``setting_changed`` signal; the ``storage`` singleton's
+    buckets hold the backend they resolved, so they are dropped too.
+    """
+    from django.conf import settings
+    from django.test.signals import setting_changed
+
+    from georiva.core.storage import storage
+
+    settings.GEORIVA_STORAGE_BACKEND = "local"
+    settings.GEORIVA_STORAGE_ROOT = root
+    settings.STORAGES = suite_storages(settings.STORAGES, settings.GEORIVA_BUCKETS, root)
+    setting_changed.send(sender=None, setting="STORAGES", value=settings.STORAGES, enter=True)
+    storage._buckets.clear()
+
+
 def configure_test_settings():
     """The settings every process running tests needs, the runner's and each worker's."""
     from django.conf import settings
@@ -108,6 +155,10 @@ def configure_test_settings():
     # setting_changed signal, which plain assignment does not send.
     settings.PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     reset_hashers(setting="PASSWORD_HASHERS")
+    # The runner and each worker under a directory of their own, so two workers
+    # saving the same key (every test org is "kenya") never meet on disk.
+    worker = django_runner._worker_id
+    use_test_storage(os.path.join(os.environ[TEST_STORAGE_ROOT_ENV], f"worker-{worker}" if worker else "runner"))
 
 
 def _init_worker(counter, *args, **kwargs):
@@ -148,7 +199,14 @@ class GeoRivaTestRunner(DiscoverRunner):
 
     def setup_test_environment(self, **kwargs):
         super().setup_test_environment(**kwargs)
+        # Before any worker starts: they inherit the variable, not the setting.
+        self._storage_root = tempfile.mkdtemp(prefix="georiva-test-storage-")
+        os.environ[TEST_STORAGE_ROOT_ENV] = self._storage_root
         configure_test_settings()
+
+    def teardown_test_environment(self, **kwargs):
+        super().teardown_test_environment(**kwargs)
+        shutil.rmtree(self._storage_root, ignore_errors=True)
 
     def setup_databases(self, **kwargs):
         """Build the test database, add the test-only tables, then clone it per worker.
