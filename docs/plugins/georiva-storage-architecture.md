@@ -65,7 +65,10 @@ so a sender's later delivery under the same key (even with identical bytes) is a
 untouched. Other deletes there, such as quarantine moves and `.keep` removals, leave a noncurrent version and a delete
 marker behind. A lifecycle rule expires noncurrent versions a day after they stop being current, and removes delete
 markers once nothing is left behind them; current files never expire. `setup_minio` applies both, and the entrypoint
-runs it on every start, so an existing deployment picks them up on its next restart.
+runs it on every start, so an existing deployment picks them up on its next restart. If versioning cannot be turned
+on, or does not read back as `Enabled`, or the lifecycle rule cannot be set, `setup_minio` exits non-zero and the
+container stops, just as it does when MinIO is unreachable (#776). A bucket whose versioning was suspended by hand
+is turned back on at the next start.
 
 **Why separate buckets instead of directories?**
 
