@@ -23,11 +23,11 @@ class FolderBucket:
     def __init__(self, root: Path):
         self.root = root
 
-    def save(self, key: str, content: io.BufferedReader) -> str:
+    def put(self, key: str, content: io.BufferedReader) -> tuple[str, str]:
         path = self.root / key
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content.read())
-        return key
+        return key, f"receipt:{key}"
 
 
 class AssetWriterTests(SimpleTestCase):
@@ -37,9 +37,25 @@ class AssetWriterTests(SimpleTestCase):
         self.enterContext(override_settings(GEORIVA_TEMP_DIR=str(self.root)))
         self.writer = AssetWriter(FolderBucket(self.root))
 
-    def written(self, data, **kwargs):
-        key = self.writer.write_cog(data, "out/a.tif", (33.0, -5.0, 42.0, 5.0), **kwargs)
+    def written(self, data, key="out/a.tif", **kwargs):
+        key, _ = self.writer.write_cog(data, key, (33.0, -5.0, 42.0, 5.0), **kwargs)
         return rasterio.open(self.root / key)
+
+    def test_it_answers_the_receipt_of_its_write(self):
+        self.assertEqual(
+            self.writer.write_cog(np.ones((16, 16), dtype="float32"), "out/a.tif", (33.0, -5.0, 42.0, 5.0)),
+            ("out/a.tif", "receipt:out/a.tif"),
+        )
+
+    def test_two_writes_of_the_same_array_differ_in_their_bytes_alone(self):
+        # Each write is told apart by its bytes, so an S3 ETag — their MD5 —
+        # names one write, and a conditional delete takes no other (#771).
+        data = np.arange(16 * 16, dtype="float32").reshape(16, 16)
+
+        with self.written(data, key="out/a.tif", nodata=-1) as a, self.written(data, key="out/b.tif", nodata=-1) as b:
+            np.testing.assert_array_equal(a.read(), b.read())
+            self.assertEqual(a.profile, b.profile)
+        self.assertNotEqual((self.root / "out/a.tif").read_bytes(), (self.root / "out/b.tif").read_bytes())
 
     def test_every_band_is_written_in_its_own_dtype_with_the_nodata_given(self):
         data = np.arange(3 * 16 * 16, dtype="int16").reshape(3, 16, 16)

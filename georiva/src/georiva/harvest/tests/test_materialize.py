@@ -62,11 +62,8 @@ class KeptBucket:
         self.versions.pop(path, None)
         return self.written.pop(path, None) is not None
 
-    def version_of(self, path):
-        return self.versions.get(path)
-
-    def delete_if_version(self, path, version):
-        if version is None or self.versions.get(path) != version:
+    def delete_if_written(self, path, receipt):
+        if receipt is None or self.versions.get(path) != receipt:
             return False
         return self.delete(path)
 
@@ -82,7 +79,7 @@ class KeptWriter:
         #: The nodata value each object was written to declare, by key.
         self.nodata: dict = {}
         self.depths: list[int] = []
-        #: Which write each key holds: a count of writes, as `Bucket.version_of` tells writes apart.
+        #: Which write each key holds: a count of writes, as `Bucket.put`'s receipt tells writes apart.
         self.versions: dict[str, int] = {}
         self.bucket = KeptBucket(self.written, self.versions)
 
@@ -91,7 +88,7 @@ class KeptWriter:
         self.written[output_path] = numpy.array(data)
         self.nodata[output_path] = nodata
         self.versions[output_path] = len(self.depths)
-        return output_path
+        return output_path, self.versions[output_path]
 
 
 class MaterializeMixin(HarvestFeedMixin):

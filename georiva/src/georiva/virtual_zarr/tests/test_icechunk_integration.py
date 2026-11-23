@@ -37,7 +37,8 @@ def _write_cog(key: str, data: np.ndarray) -> str:
     from georiva.core.storage import storage
     from georiva.ingestion.asset_writer import AssetWriter
 
-    return AssetWriter(storage.assets).write_cog(data, key, BOUNDS)
+    path, _ = AssetWriter(storage.assets).write_cog(data, key, BOUNDS)
+    return path
 
 
 def _read_source(url: str) -> np.ndarray:

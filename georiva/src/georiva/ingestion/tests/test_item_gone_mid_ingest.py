@@ -58,7 +58,7 @@ class IngestionFixture(ItemGoneFixture):
     def setUp(self):
         super().setUp()
         self.writer = MagicMock(spec=["write_cog", "bucket"])
-        self.writer.write_cog.side_effect = lambda arr, path, *a, **k: path
+        self.writer.write_cog.side_effect = lambda arr, path, *a, **k: (path, f"receipt:{path}")
         self.writer.bucket.size.return_value = 10
 
         extractor = MagicMock()
@@ -113,9 +113,7 @@ class AnItemRetentionPrunedBetweenVariablesTests(IngestionFixture):
         self._process()
 
         second_href = self.writer.write_cog.call_args_list[1].args[1]
-        self.writer.bucket.delete_if_version.assert_called_once_with(
-            second_href, self.writer.bucket.version_of.return_value
-        )
+        self.writer.bucket.delete_if_written.assert_called_once_with(second_href, f"receipt:{second_href}")
         self.assertEqual(self.extracted, ["precip", "temp"])
 
 

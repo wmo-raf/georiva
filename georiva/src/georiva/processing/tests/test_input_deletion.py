@@ -35,7 +35,7 @@ _TIME = datetime(2020, 1, 1, tzinfo=UTC)
 def _mock_writer():
     w = MagicMock()
     w.bucket.save.side_effect = lambda path, data: path
-    w.write_cog.side_effect = lambda arr, path, *a, **k: path
+    w.write_cog.side_effect = lambda arr, path, *a, **k: (path, None)
     return w
 
 

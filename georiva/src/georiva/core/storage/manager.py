@@ -218,6 +218,59 @@ class Bucket:
         self.storage.delete(path)
         return True
 
+    def put(self, path: str, content) -> tuple[str, str | None]:
+        """Write ``content`` to ``path``; return the path stored and a receipt for
+        this write, which ``delete_if_written`` takes (#771).
+
+        On S3 one PUT, its receipt the ETag the PUT answered with: nothing is
+        asked after it, so no other write can be taken for this one. The ETag is
+        the content's MD5 — writes meant to be told apart must differ in their
+        bytes (``AssetWriter`` stamps each COG with a write id). Locally a save,
+        its receipt ``version_of`` as read just after.
+        """
+        if self.is_s3:
+            import mimetypes
+
+            params = {"Bucket": self.storage.bucket_name, "Key": path, "Body": content}
+            content_type, _ = mimetypes.guess_type(path)
+            if content_type:
+                params["ContentType"] = content_type
+            if acl := getattr(self.storage, "default_acl", None):
+                params["ACL"] = acl
+            response = self.storage.connection.meta.client.put_object(**params)
+            return path, response["ETag"]
+
+        stored = self.save(path, content)
+        return stored, self.version_of(stored)
+
+    def delete_if_written(self, path: str, receipt: str | None) -> bool:
+        """Delete ``path`` only while it holds the write ``put`` gave ``receipt``
+        for; True if deleted. Any other write under the key is kept.
+
+        On S3 one request, conditional on the ETag, so a write landing at any
+        moment is kept. Locally a check, then the delete — dev only.
+        """
+        if receipt is None:
+            return False
+
+        if self.is_s3:
+            from botocore.exceptions import ClientError
+
+            try:
+                self.storage.connection.meta.client.delete_object(
+                    Bucket=self.storage.bucket_name, Key=path, IfMatch=receipt
+                )
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") in ("PreconditionFailed", "404", "NoSuchKey", "NotFound"):
+                    return False
+                raise
+            return True
+
+        if self.version_of(path) != receipt:
+            return False
+        self.storage.delete(path)
+        return True
+
     def url(self, path: str) -> str:
         return self.storage.url(path)
 
