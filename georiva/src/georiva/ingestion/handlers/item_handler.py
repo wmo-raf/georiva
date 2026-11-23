@@ -66,7 +66,12 @@ class ItemHandler:
             },
         )
 
-        if not created:
+        if created:
+            # Counted as made, as a delete counts it out (``core.apps.on_item_delete``):
+            # one deleted before its assets landed — an empty one, or one pruned
+            # mid-ingest — leaves the count as it found it (#769).
+            self.increment_collection_item_count(collection)
+        else:
             logger.info("Item already exists for %s @ %s — updating assets", collection, ts_utc)
             update_fields = []
 
@@ -86,7 +91,7 @@ class ItemHandler:
         return item, created
 
     def increment_collection_item_count(self, collection: Collection) -> None:
-        """Atomically increment Collection.item_count after a new Item is created."""
+        """Atomically increment Collection.item_count as a new Item is created."""
         Collection.objects.filter(pk=collection.pk).update(item_count=F("item_count") + 1)
 
     def delete_orphan(self, item: Item) -> None:

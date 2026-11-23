@@ -126,7 +126,7 @@ class AnItemASiblingFileCleanedUpTests(IngestionFixture):
 
     def on_extract(self, n):
         if n == 1:
-            ItemHandler().delete_orphan(Item.objects.get(collection=self.collection))
+            ItemHandler().delete_orphan(Item.objects.get(collection=self.collection, time=self.ts))
 
     def test_the_item_is_made_again_and_holds_every_variable(self):
         item, assets, _, failed = self._process()
@@ -139,11 +139,15 @@ class AnItemASiblingFileCleanedUpTests(IngestionFixture):
         )
         self.assertEqual(len(assets), 3)
 
-    def test_the_new_item_is_counted_in_its_collection(self):
+    def test_the_collection_counts_the_items_it_holds(self):
+        # An earlier timestamp, already counted: a count clamped at zero would hide a drift.
+        Item.objects.create(collection=self.collection, time=datetime(2024, 4, 1, tzinfo=UTC), bounds=list(BOUNDS))
+        Collection.objects.filter(pk=self.collection.pk).update(item_count=1)
+
         self._process()
 
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.item_count, 1)
+        self.assertEqual(self.collection.item_count, Item.objects.filter(collection=self.collection).count())
 
 
 class TheEmptyItemCleanupTests(ItemGoneFixture):
