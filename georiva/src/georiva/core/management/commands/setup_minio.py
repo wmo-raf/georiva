@@ -10,6 +10,11 @@ Sets up:
     georiva-publications → no notifications, private (re-exported for foreign readers)
     georiva-quarantine   → no notifications, private, objects expire after 30 days
 
+A step that fails is reported and the rest carry on, except versioning and the
+lifecycle rules of a versioned bucket: if any of those fails, the command exits
+non-zero once every bucket is set up (#776). A source file's cleanup is only
+exact on a versioned incoming (#773).
+
 Usage:
     python manage.py setup_minio
 """
@@ -19,7 +24,7 @@ import json
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 # Bucket-specific configuration
 BUCKET_CONFIGS = {
@@ -116,6 +121,9 @@ class Command(BaseCommand):
         # IDENTIFIER must match MINIO_NOTIFY_REDIS_ENABLE_<IDENTIFIER> in docker-compose.
         redis_arn = getattr(settings, "MINIO_REDIS_ARN", "arn:minio:sqs::primary:redis")
 
+        # Required steps that failed, raised once every bucket has been set up.
+        required_failures = []
+
         for bucket_type, bucket_config in buckets.items():
             config = BUCKET_CONFIGS.get(bucket_type, {})
 
@@ -143,13 +151,23 @@ class Command(BaseCommand):
                     arn = getattr(settings, arn_setting, redis_arn)
                 self._set_redis_notification(s3, bucket_name, arn, dry_run)
 
+            # A versioned bucket cannot do without its versioning or its lifecycle rules.
+            required = config.get("versioned")
+
             # 4. Keep every write apart, where a delete must take one write only.
-            if config.get("versioned"):
-                self._enable_versioning(s3, bucket_name, dry_run)
+            if required and not self._enable_versioning(s3, bucket_name, dry_run):
+                required_failures.append(f"{bucket_name}: versioning")
 
             # 5. Expire what is only held for a while.
+            #    A versioned bucket needs its rule: without it, old versions pile up.
             if rules := self._lifecycle_rules(bucket_name, config):
-                self._set_lifecycle(s3, bucket_name, rules, dry_run)
+                if not self._set_lifecycle(s3, bucket_name, rules, dry_run) and required:
+                    required_failures.append(f"{bucket_name}: lifecycle rules")
+
+        if required_failures:
+            # Logging alone left a deployment running with #773's race (#776). The entrypoint
+            # runs this under ``set -e``, so the container stops, as when MinIO is unreachable.
+            raise CommandError(f"MinIO setup failed: {', '.join(required_failures)}")
 
         self.stdout.write(self.style.SUCCESS("\nMinIO setup complete."))
 
@@ -252,34 +270,48 @@ class Command(BaseCommand):
             )
         return rules
 
-    def _set_lifecycle(self, s3, bucket_name: str, rules: list[dict], dry_run: bool):
-        """Set ``rules`` as the bucket's lifecycle, replacing whatever was set before."""
+    def _set_lifecycle(self, s3, bucket_name: str, rules: list[dict], dry_run: bool) -> bool:
+        """Set ``rules`` as the bucket's lifecycle, replacing whatever was set before; False when it could not be."""
         names = ", ".join(rule["ID"] for rule in rules)
         if dry_run:
             self.stdout.write(f"  → Would set lifecycle rules: {names}")
-            return
+            return True
 
         try:
             s3.put_bucket_lifecycle_configuration(Bucket=bucket_name, LifecycleConfiguration={"Rules": rules})
-            self.stdout.write(self.style.SUCCESS(f"  ✓ Lifecycle rules set: {names}"))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"  ✗ Failed to set lifecycle rules: {e}"))
+            return False
+        self.stdout.write(self.style.SUCCESS(f"  ✓ Lifecycle rules set: {names}"))
+        return True
 
     # =========================================================================
     # Versioning
     # =========================================================================
 
-    def _enable_versioning(self, s3, bucket_name: str, dry_run: bool):
-        """Turn versioning on. It is never turned off here: a bucket once versioned can only be suspended."""
+    def _enable_versioning(self, s3, bucket_name: str, dry_run: bool) -> bool:
+        """Turn versioning on; False when it could not be. It is never turned off here: a
+        bucket once versioned can only be suspended."""
         if dry_run:
             self.stdout.write("  → Would enable versioning")
-            return
+            return True
 
         try:
             s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
-            self.stdout.write(self.style.SUCCESS("  ✓ Versioning enabled"))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"  ✗ Failed to enable versioning: {e}"))
+            return False
+        try:
+            # Read back, not taken on trust: what the bucket reports is what a delete gets.
+            status = s3.get_bucket_versioning(Bucket=bucket_name).get("Status")
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"  ✗ Could not read versioning back: {e}"))
+            return False
+        if status != "Enabled":
+            self.stdout.write(self.style.ERROR(f"  ✗ Versioning reads back as {status or 'never enabled'}"))
+            return False
+        self.stdout.write(self.style.SUCCESS("  ✓ Versioning enabled"))
+        return True
 
     # =========================================================================
     # Redis notifications
