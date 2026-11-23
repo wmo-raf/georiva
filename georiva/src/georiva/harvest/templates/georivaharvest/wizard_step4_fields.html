@@ -61,7 +61,8 @@
             font-weight: 600;
         }
 
-        .hwiz-unoffered {
+        .hwiz-unoffered,
+        .hwiz-vector {
             margin-top: 1em;
         }
 
@@ -168,6 +169,21 @@
                         {% endfor %}
                         </tbody>
                     </table>
+                    {% for pair in pairs %}
+                        {# Two fields that are one wind's parts: its speed and direction can be shown too (ADR 0048). #}
+                        <div class="hwiz-vector">
+                            <p class="hwiz-note">
+                                {% blocktrans with u=pair.u v=pair.v %}<strong>{{ u }}</strong> and <strong>{{ v }}</strong> are the two parts of one wind. GeoRiva can also show its speed and the direction it blows from, worked out from the two whenever they are shown.{% endblocktrans %}
+                            </p>
+                            {% for offer in pair.offers %}
+                                <label class="hwiz-check" for="{{ offer.name }}">
+                                    <input type="checkbox" name="{{ offer.name }}" id="{{ offer.name }}"
+                                           {% if offer.chosen %}checked{% endif %}>
+                                    <span>{% blocktrans with name=offer.label %}Also show {{ name }}{% endblocktrans %}</span>
+                                </label>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
                 </div>
             </div>
         {% endif %}

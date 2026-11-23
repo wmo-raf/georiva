@@ -38,6 +38,12 @@ class PlannedVariable:
     source_unit_id: int | None = None
     #: Whether its values are water, so that kg m-2 may be shown in mm (ADR 0046 §6).
     water: bool = False
+    #: For a vector over two of the store's arrays (ADR 0048): their paths, u then
+    #: v, and which quantity of them it is. It is not mapped: `asset_key` is empty.
+    components: tuple[str, str] | None = None
+    transform: str = ""
+    #: Its short name, for a vector; any other's is its asset key's.
+    slug: str = ""
 
 
 @dataclass(frozen=True)
@@ -72,7 +78,7 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
 
     if not plan.variables:
         raise SetupRefused(_("Choose at least one kind of image to show."))
-    slugs = [slugify(variable.asset_key)[:100] for variable in plan.variables]
+    slugs = [slugify(variable.slug or variable.asset_key)[:100] for variable in plan.variables]
     if "" in slugs or len(set(slugs)) < len(slugs):
         raise SetupRefused(_("Two of the chosen images would get the same short name. Choose one of them."))
 
@@ -102,7 +108,7 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                     collection=collection,
                     slug=slug,
                     defaults={
-                        "name": planned.name[:255] or planned.asset_key,
+                        "name": planned.name[:255] or planned.asset_key or slug,
                         "unit_id": planned.unit_id,
                         "source_unit_id": planned.source_unit_id or planned.unit_id,
                         "water": planned.water,
@@ -110,15 +116,32 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                         "value_max": planned.value_max,
                         "description": planned.description,
                         "sort_order": position,
+                        **_vector_fields(planned),
                     },
                 )
-                VariableMapping.objects.create(feed=feed, asset_key=planned.asset_key, variable=variable)
+                if planned.components is None:
+                    VariableMapping.objects.create(feed=feed, asset_key=planned.asset_key, variable=variable)
     except IntegrityError as clash:
         raise SetupRefused(_("This could not be saved: %(why)s") % {"why": clash}) from clash
     except ValidationError as refused:
         # A served unit the source unit cannot be shown in (ADR 0046 §4).
         raise SetupRefused(" ".join(refused.messages)) from refused
     return feed
+
+
+def _vector_fields(planned: PlannedVariable) -> dict:
+    """What makes a planned vector a vector Variable: its transform, and its u
+    and v named by their paths in the store (ADR 0048)."""
+    if planned.components is None:
+        return {}
+    u, v = planned.components
+    return {
+        "transform_type": planned.transform,
+        "sources": [
+            {"type": "u_component", "value": {"source_name": u}},
+            {"type": "v_component", "value": {"source_name": v}},
+        ],
+    }
 
 
 def _catalog(organisation, plan: FeedPlan):

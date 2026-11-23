@@ -683,6 +683,7 @@ def _step4_store(request, session):
             _save(request, session)
         if not errors:
             chosen, errors, unseen = _chosen_fields(ticked, posted, session["samples"])
+            vectors = _chosen_vectors(_vector_pairs(ticked), posted)
         if errors:
             for error in errors:
                 messages.error(request, error)
@@ -698,6 +699,7 @@ def _step4_store(request, session):
             session.update(
                 {
                     "chosen": chosen,
+                    "vectors": vectors,
                     "confirmed": [own] if own["proposed"] else [],
                     "chunk_places": {place["declared"]: place["region"] for place in allowed},
                     "declined_places": [place for place in places if place not in allowed],
@@ -708,13 +710,15 @@ def _step4_store(request, session):
 
     earlier = {field["key"]: field for field in session.get("chosen") or []}
     rows = _field_rows(offered, earlier, session.get("samples", {}), posted)
+    details = [row for row in rows if row["detailed"]]
     return render(
         request,
         "georivaharvest/wizard_step4_fields.html",
         {
             "session": session,
             "rows": rows,
-            "details": [row for row in rows if row["detailed"]],
+            "details": details,
+            "pairs": _offered_vectors(_vector_pairs(details), session.get("vectors") or [], posted),
             "unoffered": [array for array in store["arrays"] if not array["offered"]],
             "own": {
                 **own,
@@ -888,6 +892,116 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
             }
         )
     return chosen, errors, False
+
+
+# ── Step 4, for an Upstream store: wind speed and direction over a u and a v (ADR 0048) ──
+
+#: What a vector over two fields can be shown as: the word for it, and the transform that computes it.
+_VECTOR_KINDS = (
+    ("speed", "vector_magnitude"),
+    ("direction", "vector_direction"),
+)
+
+#: A path's word that names one part of a vector: `u` or `v`, with a height before or after (`10u`, `u10`).
+_PART = re.compile(r"^(\d*)([uU])(\d*)$")
+
+#: What separates the words of a path, kept when it is split.
+_SEPARATORS = re.compile(r"([_/.\-]+)")
+
+
+def _vector_pairs(fields: list[dict]) -> list[dict]:
+    """Each two of `fields` that are one vector's eastward and northward parts:
+    paths alike word for word but one, `u` in the first where the second has
+    `v` (`wind_u_10m` and `wind_v_10m`). With the path each of its quantities
+    is named by — the `u` read as the quantity's word (`wind_speed_10m`)."""
+    by_path = {field["path"]: field for field in fields}
+    pairs = []
+    for field in fields:
+        parts = _SEPARATORS.split(field["path"])
+        for at, word in enumerate(parts):
+            found = _PART.match(word)
+            if not found:
+                continue
+            v_path = "".join([*parts[:at], word.replace("u", "v").replace("U", "V"), *parts[at + 1 :]])
+            if v_path not in by_path:
+                continue
+            before, _part, after = found.groups()
+            named = {
+                kind: "".join([*parts[:at], "_".join(filter(None, [before, kind, after])), *parts[at + 1 :]])
+                for kind, _transform in _VECTOR_KINDS
+            }
+            pairs.append({"index": field["index"], "u": field["path"], "v": v_path, "named": named})
+            break
+    return pairs
+
+
+def _offered_vectors(pairs: list[dict], earlier: list[dict], posted) -> list[dict]:
+    """Each pair, with its quantities on offer: shown by name, and ticked as
+    posted, or as chosen on an earlier visit — never before the operator ticks it."""
+    chosen = {(vector["u"], vector["transform"]) for vector in earlier}
+    offered = []
+    for pair in pairs:
+        offers = []
+        for kind, transform in _VECTOR_KINDS:
+            name = f"{kind}_{pair['index']}"
+            offers.append(
+                {
+                    "kind": kind,
+                    "name": name,
+                    "label": _spelt(pair["named"][kind]),
+                    "chosen": bool(posted.get(name)) if posted is not None else (pair["u"], transform) in chosen,
+                }
+            )
+        offered.append({**pair, "offers": offers})
+    return offered
+
+
+def _chosen_vectors(pairs: list[dict], posted) -> list[dict]:
+    """The quantities an operator ticked, each to become a vector Variable over its pair."""
+    return [
+        {
+            "u": pair["u"],
+            "v": pair["v"],
+            "transform": transform,
+            "slug": pair["named"][kind],
+            "name": _spelt(pair["named"][kind]),
+        }
+        for pair in pairs
+        for kind, transform in _VECTOR_KINDS
+        if posted.get(f"{kind}_{pair['index']}")
+    ]
+
+
+def _planned_vectors(session: dict) -> list[PlannedVariable]:
+    """The vector Variables chosen in step 4. A speed is in its parts' units and
+    coloured from calm to the furthest either part reaches; a direction is in
+    degrees, all the way round."""
+    from georiva.core.models import Unit
+
+    parts = {field["key"]: field for field in session.get("chosen") or []}
+    planned = []
+    for vector in session.get("vectors") or []:
+        u, v = parts.get(vector["u"]), parts.get(vector["v"])
+        if u is None or v is None:
+            continue
+        if vector["transform"] == "vector_magnitude":
+            reach = max(abs(bound) for part in (u, v) for bound in (part["value_min"], part["value_max"]))
+            units = {"unit_id": u["unit_id"], "source_unit_id": u["source_unit_id"], "value_max": reach}
+        else:
+            degrees, _created = Unit.objects.get_or_create(symbol="°", defaults={"name": "Degrees"})
+            units = {"unit_id": degrees.pk, "source_unit_id": degrees.pk, "value_max": 360.0}
+        planned.append(
+            PlannedVariable(
+                asset_key="",
+                slug=vector["slug"],
+                name=vector["name"],
+                value_min=0.0,
+                components=(vector["u"], vector["v"]),
+                transform=vector["transform"],
+                **units,
+            )
+        )
+    return planned
 
 
 # ── Step 5: schedule and save ───────────────────────────────────────────────
@@ -1082,7 +1196,8 @@ def _store_plan(form: dict, session: dict, interval, catalog_id, start, end, day
                 description=field["description"],
             )
             for field in session["chosen"]
-        ],
+        ]
+        + _planned_vectors(session),
         interval_minutes=interval,
         window_start=start,
         window_end=end,
