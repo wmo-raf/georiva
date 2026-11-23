@@ -25,6 +25,7 @@ Flow:
 """
 
 import logging
+import mimetypes
 from datetime import datetime
 from typing import BinaryIO
 
@@ -38,6 +39,10 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Bucket Registry
 # =============================================================================
+
+
+#: The error codes S3 (and MinIO) answer a request about a key that does not exist with.
+_MISSING_KEY_CODES = ("404", "NoSuchKey", "NotFound")
 
 
 class BucketType:
@@ -183,7 +188,7 @@ class Bucket:
             try:
                 head = self.storage.connection.meta.client.head_object(Bucket=self.storage.bucket_name, Key=path)
             except ClientError as e:
-                if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                if e.response.get("Error", {}).get("Code") in _MISSING_KEY_CODES:
                     return None
                 raise
             return f"{head['ETag']}@{head['LastModified'].isoformat()}"
@@ -222,19 +227,24 @@ class Bucket:
         """Write ``content`` to ``path``; return the path stored and a receipt for
         this write, which ``delete_if_written`` takes (#771).
 
-        On S3 one PUT, its receipt the ETag the PUT answered with: nothing is
-        asked after it, so no other write can be taken for this one. The ETag is
-        the content's MD5 — writes meant to be told apart must differ in their
-        bytes (``AssetWriter`` stamps each COG with a write id). Locally a save,
+        On S3 one single-part PUT, its receipt the ETag the PUT answered with:
+        nothing is asked after it, so no other write can be taken for this one.
+        Single-part, its ETag is the content's MD5 — writes meant to be told
+        apart must differ in their bytes (``AssetWriter`` stamps each COG with a
+        write id) — and an object is at most 5 GB. It goes to the client, not
+        django-storages: ``path`` is the key exactly (no ``location`` prefix, an
+        existing key overwritten whatever ``file_overwrite`` says), with the
+        bucket's ACL and a content type guessed from the key. Locally a save,
         its receipt ``version_of`` as read just after.
         """
         if self.is_s3:
-            import mimetypes
-
-            params = {"Bucket": self.storage.bucket_name, "Key": path, "Body": content}
             content_type, _ = mimetypes.guess_type(path)
-            if content_type:
-                params["ContentType"] = content_type
+            params = {
+                "Bucket": self.storage.bucket_name,
+                "Key": path,
+                "Body": content,
+                "ContentType": content_type or "application/octet-stream",
+            }
             if acl := getattr(self.storage, "default_acl", None):
                 params["ACL"] = acl
             response = self.storage.connection.meta.client.put_object(**params)
@@ -261,7 +271,7 @@ class Bucket:
                     Bucket=self.storage.bucket_name, Key=path, IfMatch=receipt
                 )
             except ClientError as e:
-                if e.response.get("Error", {}).get("Code") in ("PreconditionFailed", "404", "NoSuchKey", "NotFound"):
+                if e.response.get("Error", {}).get("Code") in ("PreconditionFailed", *_MISSING_KEY_CODES):
                     return False
                 raise
             return True

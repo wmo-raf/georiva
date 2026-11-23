@@ -191,6 +191,7 @@ class MinioDeleteIfWrittenTests(SimpleTestCase):
 
     def setUp(self):
         self.bucket = storage.assets
+        # Under a root no organisation slug can spell (as ADR 0027's `_forti`), and removed after.
         self.key = f"_test-771/{uuid.uuid4().hex}.bin"
         self.addCleanup(self.bucket.delete, self.key)
 
