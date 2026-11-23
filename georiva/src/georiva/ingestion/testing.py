@@ -45,7 +45,8 @@ def silo_root_client():
 
 
 def purge_silo_prefix_on_cleanup(test, client, prefix):
-    """Remove every object under ``prefix/`` from ``incoming`` and ``quarantine`` once ``test`` ends.
+    """Remove every object, every version of it, under ``prefix/`` from ``incoming`` and ``quarantine`` once
+    ``test`` ends.
 
     For a test that puts objects into the real silo on purpose (#767). Registered
     with ``addCleanup``, so it runs whether the test passed or not. Both buckets,
@@ -69,8 +70,10 @@ def _purge_silo_prefix(client, prefix, bucket_names):
         removed = 0
         for name in bucket_names:
             try:
-                for obj in client.list_objects(name, prefix=f"{prefix}/", recursive=True):
-                    client.remove_object(name, obj.object_name)
+                # Every version: on versioned ``incoming`` a plain remove leaves the
+                # object behind a delete marker (#773).
+                for obj in client.list_objects(name, prefix=f"{prefix}/", recursive=True, include_version=True):
+                    client.remove_object(name, obj.object_name, version_id=obj.version_id)
                     removed += 1
             except S3Error as e:
                 if e.code != "NoSuchBucket":
