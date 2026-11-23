@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 from django.utils.functional import cached_property
@@ -62,6 +64,22 @@ class VariableSourceStreamBlock(StreamBlock):
             "u_component": {"max_num": 1},
             "v_component": {"max_num": 1},
         }
+
+
+@dataclass(frozen=True)
+class VectorComponents:
+    """What a vector Variable is computed from: the names of its eastward (`u`)
+    and northward (`v`) parts in its source, and which of the two quantities it
+    is (`transform`, a ``Variable.TransformType``). In a store collection the
+    names are array paths in the store (ADR 0048)."""
+
+    u: str
+    v: str
+    transform: str
+
+    @property
+    def arrays(self) -> tuple[str, str]:
+        return (self.u, self.v)
 
 
 class Variable(TimeStampedModel, ClusterableModel, Orderable):
@@ -395,6 +413,18 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def is_derived(self):
         return self.transform_type != self.TransformType.PASSTHROUGH
 
+    @property
+    def vector_components(self) -> VectorComponents | None:
+        """Its u and v and which quantity of them it is, for a vector Variable
+        that names both; ``None`` for any other."""
+        if self.transform_type not in VECTOR_TRANSFORMS or not self.sources:
+            return None
+        named = {block.block_type: block.value["source_name"] for block in self.sources}
+        u, v = named.get("u_component"), named.get("v_component")
+        if not u or not v:
+            return None
+        return VectorComponents(u=u, v=v, transform=self.transform_type)
+
     @cached_property
     def sources_param_list(self):
         """Return a list of source variable names for this variable."""
@@ -513,3 +543,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         """Set the range from served-unit numbers, stored in the source unit."""
         self.refresh_conversion()
         self.value_min, self.value_max = self.stored(value_min), self.stored(value_max)
+
+
+#: The transforms that compute a Variable from a u and a v.
+VECTOR_TRANSFORMS = (Variable.TransformType.VECTOR_MAGNITUDE, Variable.TransformType.VECTOR_DIRECTION)

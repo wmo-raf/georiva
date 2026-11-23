@@ -579,6 +579,19 @@ class StoreVariable:
     water: bool = False
 
 
+@dataclass(frozen=True)
+class StoreVector:
+    """A vector Variable over two arrays of a :class:`LocalStore` (ADR 0048):
+    their magnitude or direction, by `transform` (a ``Variable.TransformType``)."""
+
+    slug: str
+    u: str
+    v: str
+    transform: str
+    source_unit: str = "m/s"
+    unit: str = ""
+
+
 @dataclass
 class HarvestedStore:
     """The rows a store harvest of a :class:`LocalStore` would have made."""
@@ -745,12 +758,15 @@ class LocalStore:
         catalog_slug: str = "forecast",
         upstream_collection_id: str = "noaa-gfs-forecast-virtual",
         allow_http: bool = False,
+        vectors: list[StoreVector] = (),
     ) -> HarvestedStore:
         """The rows a store harvest would have made of this store, in a new catalog of `organisation`.
 
         A HarvestFeed at :attr:`href` pinning `pins`; its collection; a Variable
         (and mapping) per array in `variables`; an Item per run and step that
         any of those arrays holds; and on it a Store asset per array holding that step.
+        Each of `vectors` is a vector Variable over two of those arrays, with a
+        Store asset on every item where both are held.
         """
         from urllib.parse import urlsplit
 
@@ -792,6 +808,22 @@ class LocalStore:
                 water=wanted.water,
             )
             VariableMapping.objects.create(feed=feed, asset_key=path, variable=made[path])
+        vector_variables = []
+        for wanted in vectors:
+            vector_variables.append(
+                Variable.objects.create(
+                    collection=collection,
+                    slug=wanted.slug,
+                    name=wanted.slug.replace("-", " ").title(),
+                    source_unit=unit(wanted.source_unit),
+                    unit=unit(wanted.unit or wanted.source_unit),
+                    transform_type=wanted.transform,
+                    sources=[
+                        {"type": "u_component", "value": {"source_name": wanted.u}},
+                        {"type": "v_component", "value": {"source_name": wanted.v}},
+                    ],
+                )
+            )
 
         for run, reference_time in enumerate(self.runs):
             for step, lead in enumerate(self.leads):
@@ -815,4 +847,14 @@ class LocalStore:
                         roles=[Asset.Role.DATA],
                         harvested_by=feed,
                     )
+                for wanted, variable in zip(vectors, vector_variables, strict=True):
+                    if wanted.u in holding and wanted.v in holding:
+                        Asset.objects.create(
+                            item=item,
+                            variable=variable,
+                            format=Asset.Format.ZARR,
+                            href=self.href,
+                            roles=[Asset.Role.DATA],
+                            harvested_by=feed,
+                        )
         return HarvestedStore(feed=feed, collection=collection, variables=made)
