@@ -121,7 +121,7 @@ class Command(BaseCommand):
         # IDENTIFIER must match MINIO_NOTIFY_REDIS_ENABLE_<IDENTIFIER> in docker-compose.
         redis_arn = getattr(settings, "MINIO_REDIS_ARN", "arn:minio:sqs::primary:redis")
 
-        # Steps a bucket cannot do without, failed: raised once every bucket has been set up.
+        # Required steps that failed, raised once every bucket has been set up.
         required_failures = []
 
         for bucket_type, bucket_config in buckets.items():
@@ -151,14 +151,17 @@ class Command(BaseCommand):
                     arn = getattr(settings, arn_setting, redis_arn)
                 self._set_redis_notification(s3, bucket_name, arn, dry_run)
 
+            # A versioned bucket cannot do without its versioning or its lifecycle rules.
+            required = config.get("versioned")
+
             # 4. Keep every write apart, where a delete must take one write only.
-            if config.get("versioned") and not self._enable_versioning(s3, bucket_name, dry_run):
+            if required and not self._enable_versioning(s3, bucket_name, dry_run):
                 required_failures.append(f"{bucket_name}: versioning")
 
             # 5. Expire what is only held for a while.
             #    A versioned bucket needs its rule: without it, old versions pile up.
             if rules := self._lifecycle_rules(bucket_name, config):
-                if not self._set_lifecycle(s3, bucket_name, rules, dry_run) and config.get("versioned"):
+                if not self._set_lifecycle(s3, bucket_name, rules, dry_run) and required:
                     required_failures.append(f"{bucket_name}: lifecycle rules")
 
         if required_failures:
@@ -295,10 +298,14 @@ class Command(BaseCommand):
 
         try:
             s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"  ✗ Failed to enable versioning: {e}"))
+            return False
+        try:
             # Read back, not taken on trust: what the bucket reports is what a delete gets.
             status = s3.get_bucket_versioning(Bucket=bucket_name).get("Status")
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"  ✗ Failed to enable versioning: {e}"))
+            self.stdout.write(self.style.ERROR(f"  ✗ Could not read versioning back: {e}"))
             return False
         if status != "Enabled":
             self.stdout.write(self.style.ERROR(f"  ✗ Versioning reads back as {status or 'never enabled'}"))

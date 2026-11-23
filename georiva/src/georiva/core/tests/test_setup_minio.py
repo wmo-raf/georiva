@@ -11,11 +11,8 @@ BUCKETS = {
 }
 
 
-@override_settings(GEORIVA_STORAGE_BACKEND="s3", GEORIVA_BUCKETS=BUCKETS)
-class SetupMinioVersioningTests(SimpleTestCase):
-    """``incoming`` is versioned, so a source file's cleanup deletes the write it
-    ingested and no other; a lifecycle rule keeps the old versions and delete
-    markers every other delete leaves from piling up (#773)."""
+class MockedS3Mixin:
+    """``setup_minio`` over a mocked S3 client whose buckets read back as versioned."""
 
     def setUp(self):
         self.s3 = MagicMock()
@@ -23,6 +20,16 @@ class SetupMinioVersioningTests(SimpleTestCase):
         patcher = patch("georiva.core.management.commands.setup_minio.boto3.client", return_value=self.s3)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+
+@override_settings(GEORIVA_STORAGE_BACKEND="s3", GEORIVA_BUCKETS=BUCKETS)
+class SetupMinioVersioningTests(MockedS3Mixin, SimpleTestCase):
+    """``incoming`` is versioned, so a source file's cleanup deletes the write it
+    ingested and no other; a lifecycle rule keeps the old versions and delete
+    markers every other delete leaves from piling up (#773)."""
+
+    def setUp(self):
+        super().setUp()
         call_command("setup_minio", stdout=StringIO())
 
     def _versioned(self):
@@ -65,17 +72,10 @@ class SetupMinioVersioningTests(SimpleTestCase):
 
 
 @override_settings(GEORIVA_STORAGE_BACKEND="s3", GEORIVA_BUCKETS=BUCKETS)
-class SetupMinioFailsWithoutVersionedIncomingTests(SimpleTestCase):
+class SetupMinioFailsWithoutVersionedIncomingTests(MockedS3Mixin, SimpleTestCase):
     """A deployment whose ``incoming`` is not versioned is back to #773's race, so
     ``setup_minio`` fails rather than logging a line: the entrypoint runs it under
     ``set -e``, and the container stops (#776)."""
-
-    def setUp(self):
-        self.s3 = MagicMock()
-        self.s3.get_bucket_versioning.return_value = {"Status": "Enabled"}
-        patcher = patch("georiva.core.management.commands.setup_minio.boto3.client", return_value=self.s3)
-        patcher.start()
-        self.addCleanup(patcher.stop)
 
     def _setup(self):
         out = StringIO()
