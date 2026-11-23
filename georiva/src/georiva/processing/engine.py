@@ -547,7 +547,7 @@ def _retract(run, pos, tag, missing, origin, unit_total) -> UnitResult:
         item_id,
     )
     with transaction.atomic():
-        Item.objects.filter(pk=item_id).delete()
+        Item.objects.filter(pk=item_id).delete_locked()
         event = run.mark_retracted()
     _log_progress(origin, unit_total)
     return UnitResult(status="retracted", item_id=item_id, event_id=event.pk)

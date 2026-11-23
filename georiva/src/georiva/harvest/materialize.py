@@ -422,8 +422,9 @@ def _write(asset, feed, raster: _Raster, writer) -> bool:
     unless some asset already names it."""
     from georiva.core.models import Asset
     from georiva.core.storage import storage
+    from georiva.core.storage.asset_deletion import drop_unrecorded
     from georiva.ingestion.asset_writer import AssetWriter
-    from georiva.ingestion.materialization import AssetMaterializer, drop_unrecorded
+    from georiva.ingestion.materialization import AssetMaterializer
 
     item = asset.item
     materializer = AssetMaterializer(writer or AssetWriter(storage.assets))

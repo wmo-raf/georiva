@@ -5,7 +5,7 @@ Item: a spatiotemporal entry in a Collection — a plain table (ADR 0047)
 Asset: Individual files associated with an Item, linked to Variables
 """
 
-from django.db import models
+from django.db import models, transaction
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
@@ -22,7 +22,23 @@ from .base import AbstractAsset, AbstractSpatialItem, HarvestProvenance
 # =============================================================================
 
 
-class ItemManager(models.Manager):
+class ItemQuerySet(models.QuerySet):
+    def delete_locked(self):
+        """Delete these Items once no Asset is being recorded for them (#704).
+
+        Django deletes an Item by collecting its Assets first, then deleting
+        them, then the Item; an Asset committed in between names no Item and
+        fails the delete at commit. Locking the Items before collecting waits
+        out the writer, which holds the Item's row while it records
+        (``AssetMaterializer.record_cog``), so its Asset is collected too.
+        The filter is asked again by the delete, of the rows locked.
+        """
+        with transaction.atomic(using=self.db):
+            locked = list(self.select_for_update(of=("self",)).values_list("pk", flat=True))
+            return self.filter(pk__in=locked).delete()
+
+
+class ItemManager(models.Manager.from_queryset(ItemQuerySet)):
     """Custom manager for Item with common query patterns."""
 
     def for_collection(self, collection):

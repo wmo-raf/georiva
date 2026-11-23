@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional
 from django.db import transaction
 from django.db.models import F
 
-from georiva.core.models import Asset, Collection, Item
+from georiva.core.models import Collection, Item
 from georiva.ingestion.utils import ensure_utc, normalize_bounds
 
 if TYPE_CHECKING:
@@ -98,13 +98,12 @@ class ItemHandler:
 
         Another file may share the Item and have written assets to it
         meanwhile; then it is no orphan and is kept (#704). The row lock waits
-        out an Asset write in flight, which holds a key-share lock on it.
+        out an Asset being recorded, which holds the Item's row meanwhile.
         """
         with transaction.atomic():
-            locked = Item.objects.select_for_update().filter(pk=item.pk)
-            if not locked.exists():
+            if not Item.objects.select_for_update().filter(pk=item.pk).exists():
                 return
-            if Asset.objects.filter(item_id=item.pk).exists():
+            if item.assets.exists():
                 logger.info("Item %s holds assets another file wrote — kept", item.pk)
                 return
             logger.warning("No assets created for Item %s — deleting orphan item", item.pk)
