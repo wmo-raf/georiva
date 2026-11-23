@@ -454,9 +454,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                 % {"u": components[0], "v": components[1]}
             }
         if self.transform_type == self.TransformType.VECTOR_MAGNITUDE and self.source_unit_id != u.source_unit_id:
-            return {
-                "source_unit": _("A speed is stored in its parts' unit: %(unit)s.") % {"unit": u.source_unit}
-            }
+            return {"source_unit": _("A speed is stored in its parts' unit: %(unit)s.") % {"unit": u.source_unit}}
         return {}
 
     @property

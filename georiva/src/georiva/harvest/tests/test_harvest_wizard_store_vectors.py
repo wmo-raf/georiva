@@ -83,7 +83,8 @@ class WizardOffersWindTests(WindWizardMixin, TestCase):
             self.assertEqual(variable.collection, feed.collection)
             variable.clean()
         # In the parts' unit; from calm to the strongest part's own reach, as a length of both.
-        self.assertEqual((speed.source_unit, speed.unit, speed.name), (self.metres_per_second,) * 2 + ("Wind speed 10m",))
+        self.assertEqual((speed.source_unit, speed.unit), (self.metres_per_second, self.metres_per_second))
+        self.assertEqual(speed.name, "Wind speed 10m")
         self.assertEqual((speed.value_min, speed.value_max), (0.0, 30.0))
         self.assertEqual((direction.unit.symbol, direction.value_min, direction.value_max), ("°", 0.0, 360.0))
         # Only the arrays are mapped: the two are computed from them.
@@ -109,7 +110,8 @@ class WizardOffersWindTests(WindWizardMixin, TestCase):
 
         (pair,) = self.client.get(step(4)).context["pairs"]
 
-        self.assertEqual({offer["kind"]: offer["chosen"] for offer in pair["offers"]}, {"speed": False, "direction": True})
+        chosen = {offer["kind"]: offer["chosen"] for offer in pair["offers"]}
+        self.assertEqual(chosen, {"speed": False, "direction": True})
 
 
 class WizardRefusesMismatchedWindTests(WindWizardMixin, TestCase):

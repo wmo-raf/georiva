@@ -979,7 +979,10 @@ def _mismatched_vectors(vectors: list[dict], chosen: list[dict]) -> list[str]:
     units = {field["key"]: field["source_unit_id"] for field in chosen}
     pairs = {(vector["u"], vector["v"]) for vector in vectors if units.get(vector["u"]) != units.get(vector["v"])}
     return [
-        _("%(u)s and %(v)s are stored in different units, so GeoRiva cannot show a wind from them. Untick its speed and direction.")
+        _(
+            "%(u)s and %(v)s are stored in different units, so GeoRiva cannot show a wind from them. "
+            "Untick its speed and direction."
+        )
         % {"u": u, "v": v}
         for u, v in sorted(pairs)
     ]
