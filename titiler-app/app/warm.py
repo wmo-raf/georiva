@@ -256,11 +256,12 @@ def published_stores() -> dict[tuple[str, tuple[tuple[str, str], ...], bool], se
                 continue
             seen.add(value)
             try:
-                href, array, chunk_locations, allow_http = store.published_store(json.loads(value))
+                href, arrays, chunk_locations, allow_http = store.published_store(json.loads(value))
             except (ValueError, store.StoreError) as exc:
                 logger.debug("Not warming a published entry in %s: %s", key, exc)
                 continue
-            stores.setdefault((href, chunk_locations, allow_http), set()).add(array)
+            # A vector's entry names two arrays (ADR 0048): both are warmed.
+            stores.setdefault((href, chunk_locations, allow_http), set()).update(arrays)
     return stores
 
 

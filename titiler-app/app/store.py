@@ -35,6 +35,12 @@ raster, and from there renders exactly as a COG does: the same rescale,
 palette and crop. Every upstream read is bounded in time, and a failure is an
 error for the request in hand and nothing else.
 
+**It computes a vector field from two** (ADR 0048). Wind speed and direction
+are not arrays of a store: Django publishes a vector Variable's timestep as the
+store and its u and v, and the field drawn is their magnitude or the bearing
+the wind blows from, computed from the two fields read at the same step through
+the same open store. Both parts and the result are kept like any field.
+
 **It refreshes on a missing step, and never draws a blank one** (ADR 0044 §10).
 The store is kept open at the snapshot it was opened on, and an Upstream store
 commits several times a minute while a run arrives: a row can name a step that
@@ -79,7 +85,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TimedOut
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from time import monotonic
 
@@ -106,6 +112,10 @@ class StoreSlice:
     declares it with its region (empty where it has none), sorted, so that two
     requests naming the same pins share one open store. ``allow_http`` is the
     feed's word on whether a plain ``http`` store may be opened.
+
+    A vector field (ADR 0048) is computed from two arrays at the same step:
+    ``array`` is its eastward part, ``v_array`` its northward one, and
+    ``transform`` which of :data:`VECTOR_TRANSFORMS` it is.
     """
 
     store: str
@@ -114,24 +124,35 @@ class StoreSlice:
     time: datetime
     reftime: datetime | None = None
     allow_http: bool = False
+    v_array: str = ""
+    transform: str = ""
 
     @classmethod
     def published(cls, entry: dict, time: datetime, reftime: datetime | None) -> StoreSlice:
         """The slice a published entry names at this timestep. Raises
         :class:`StoreMisdescribed` for an entry that is not Django's shape."""
-        store, array, chunk_locations, allow_http = published_store(entry)
+        store, arrays, chunk_locations, allow_http = published_store(entry)
+        transform = entry["vector"]["transform"] if len(arrays) == 2 else ""
         return cls(
             store=store,
-            array=array,
+            array=arrays[0],
+            v_array=arrays[1] if transform else "",
+            transform=transform,
             chunk_locations=chunk_locations,
             time=time,
             reftime=reftime,
             allow_http=allow_http,
         )
 
+    def components(self) -> tuple[StoreSlice, StoreSlice]:
+        """The u and v fields a vector field is computed from."""
+        u = replace(self, v_array="", transform="")
+        return u, replace(u, array=self.v_array)
+
     def __str__(self) -> str:
         at = self.time.isoformat() if self.reftime is None else f"{self.reftime.isoformat()}+{self.time.isoformat()}"
-        return f"{self.store}#{self.array}@{at}"
+        arrays = f"{self.transform}({self.array},{self.v_array})" if self.transform else self.array
+        return f"{self.store}#{arrays}@{at}"
 
 
 def is_store_entry(value: str) -> bool:
@@ -142,16 +163,23 @@ def is_store_entry(value: str) -> bool:
     return value.startswith("{")
 
 
-def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...], bool]:
-    """The store, the array, the pins and whether plain HTTP is allowed, as a
-    published entry names them, the pins as every request spells them. Raises
+#: What a vector field may be computed as, from its u and v (ADR 0048). Django's
+#: ``Variable.TransformType`` values for them.
+VECTOR_TRANSFORMS = ("vector_magnitude", "vector_direction")
+
+
+def published_store(entry) -> tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], bool]:
+    """The store, the arrays read from it, the pins and whether plain HTTP is
+    allowed, as a published entry names them, the pins as every request spells
+    them. The arrays are one, or a vector's u and v. Raises
     :class:`StoreMisdescribed` for an entry that is not Django's shape, or for
     a plain ``http`` store its feed does not allow. What a tile reads and what
     the warm-up opens are both named here, so a warmed store is the one a tile finds."""
     if not isinstance(entry, dict):
         entry = {}
-    store, array, places = entry.get("store"), entry.get("array"), entry.get("chunk_locations") or {}
-    if not isinstance(store, str) or not isinstance(array, str) or not array or not isinstance(places, dict):
+    store, places = entry.get("store"), entry.get("chunk_locations") or {}
+    arrays = _published_arrays(entry)
+    if not isinstance(store, str) or arrays is None or not isinstance(places, dict):
         raise StoreMisdescribed("The published description of this upstream store is incomplete.")
     if not store.startswith(("https://", "http://")):
         raise StoreMisdescribed("The upstream store's address is not an http(s) URL.")
@@ -159,7 +187,21 @@ def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...], bool]
     allow_http = entry.get("allow_http") is True
     _may_open(store, allow_http)
     pins = tuple(sorted((str(prefix), str(region or "")) for prefix, region in places.items()))
-    return store, array, pins, allow_http
+    return store, arrays, pins, allow_http
+
+
+def _published_arrays(entry: dict) -> tuple[str, ...] | None:
+    """The array an entry names, or a vector entry's u and v; ``None`` for neither."""
+    vector = entry.get("vector")
+    if vector is None:
+        array = entry.get("array")
+        return (array,) if isinstance(array, str) and array else None
+    if not isinstance(vector, dict) or vector.get("transform") not in VECTOR_TRANSFORMS:
+        return None
+    u, v = vector.get("u"), vector.get("v")
+    if not isinstance(u, str) or not isinstance(v, str) or not u or not v:
+        return None
+    return (u, v)
 
 
 # ---------------------------------------------------------------------------
@@ -661,8 +703,30 @@ def forget_all() -> None:
 
 
 def read_field(target: StoreSlice) -> Field:
-    """The field ``target`` names: kept by this process, or decoded now and kept."""
-    return _fields.kept_or_read(target, _decode)
+    """The field ``target`` names: kept by this process, or decoded now and kept.
+    A vector field is computed from its u and v, each read as any field is."""
+    return _fields.kept_or_read(target, _computed if target.transform else _decode)
+
+
+def _computed(target: StoreSlice) -> Field:
+    """A vector field, from its u and v at the same step (ADR 0048): the speed
+    or the bearing the wind blows from. The same arithmetic as core's
+    ``geoprocessing.wind``, across the process boundary."""
+    u, v = (read_field(part) for part in target.components())
+    if u.values.shape != v.values.shape or (u.west, u.north, u.x_resolution, u.y_resolution) != (
+        v.west,
+        v.north,
+        v.x_resolution,
+        v.y_resolution,
+    ):
+        raise StoreMisdescribed(f"The upstream arrays “{target.array}” and “{target.v_array}” are not on one grid.")
+    with np.errstate(invalid="ignore"):
+        if target.transform == "vector_magnitude":
+            values = np.hypot(u.values, v.values)
+        else:
+            values = np.mod(np.degrees(np.arctan2(u.values, v.values)) + 180.0, 360.0)
+            values = np.where(values >= 360.0, 0.0, values)
+    return replace(u, values=np.asarray(values))
 
 
 def _decode(target: StoreSlice) -> Field:
