@@ -19,18 +19,12 @@ import zarr
 from app import store as store_reader
 from app import warm
 
-from tests.test_store_tiles import (  # noqa: F401 — fixtures, used by name
-    FIELD,
-    LATITUDES,
-    LEADS_HOURS,
-    LONGITUDES,
-    RUNS,
-    point,
-    producer,
-    publish,
-    rendering,
-    tile,
-)
+from tests import test_store_tiles
+from tests.test_store_tiles import FIELD, LATITUDES, LEADS_HOURS, LONGITUDES, RUNS, point, publish, tile
+
+# The store tests' fixtures, shared: the stand-in producer and the rendering config.
+producer = test_store_tiles.producer
+rendering = test_store_tiles.rendering
 
 U, V = "wind_u_10m", "wind_v_10m"
 
@@ -146,4 +140,3 @@ class TestAVectorIsComputedWhenDrawn:
         stores = warm.published_stores()
 
         assert list(stores.values()) == [{U, V}]
-

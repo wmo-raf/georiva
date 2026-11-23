@@ -424,10 +424,9 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         named = {block.block_type: block.value["source_name"] for block in self.sources or []}
         missing = {"u_component", "v_component"} - set(named)
         if missing:
-            return {
-                "sources": f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."
-            }
-        unmapped = [name for kind, name in sorted(named.items()) if kind in ("u_component", "v_component") and name not in arrays]
+            return {"sources": f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."}
+        components = [named["u_component"], named["v_component"]]
+        unmapped = [name for name in components if name not in arrays]
         if unmapped:
             return {
                 "sources": _(
