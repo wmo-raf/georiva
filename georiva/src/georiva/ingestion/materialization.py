@@ -30,6 +30,7 @@ from wagtail import hooks
 
 from georiva.core.models import Asset, Item
 from georiva.core.storage import storage
+from georiva.core.storage.asset_deletion import drop_unrecorded
 from georiva.ingestion.asset_writer import FROM_DTYPE, AssetWriter
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 from georiva.ingestion.utils import compute_stats, normalize_bounds
@@ -39,6 +40,12 @@ if TYPE_CHECKING:
     from georiva.ingestion.clipper import BoundaryClipper
 
 logger = logging.getLogger(__name__)
+
+
+class ItemGone(Exception):
+    """The Item an asset was being recorded for was deleted meanwhile — by
+    forecast retention, or by a sibling file's empty-Item cleanup (#704).
+    Nothing was recorded, and the object written for it has been removed."""
 
 
 @dataclass(frozen=True)
@@ -229,16 +236,29 @@ class AssetMaterializer:
         # provenance) — never clobber an existing one with "".
         if checksum:
             cog_defaults["checksum"] = checksum
-        try:
-            data_asset, _ = Asset.objects.update_or_create(
-                item=item,
-                variable=variable,
-                format=Asset.Format.COG,
-                defaults=cog_defaults,
-            )
-        except Exception as e:
-            logger.error("COG save failed for %s: %s", variable.slug, e)
-            raise
+        # The Item row is locked until the Asset commits: a delete arriving
+        # meanwhile (``Item.objects.delete_locked``) waits and then takes the
+        # Asset and its object with it, and one that came first is seen here,
+        # not as an IntegrityError at commit. Ingestion writes its Item and each Asset in separate
+        # transactions, so the Item may be gone already (#704).
+        with transaction.atomic():
+            item_gone = not Item.objects.select_for_update().filter(pk=item.pk).exists()
+            if not item_gone:
+                try:
+                    data_asset, _ = Asset.objects.update_or_create(
+                        item=item,
+                        variable=variable,
+                        format=Asset.Format.COG,
+                        defaults=cog_defaults,
+                    )
+                except Exception as e:
+                    logger.error("COG save failed for %s: %s", variable.slug, e)
+                    raise
+        if item_gone:
+            # After the lock, when no caller holds a transaction open (ingestion
+            # does not): no storage call while the Item row is locked.
+            drop_unrecorded(self.writer.bucket, written.href)
+            raise ItemGone(f"Item {item.pk} is gone; {variable.slug} not recorded")
         self._after_save_asset(data_asset)
 
         self.extent_handler.expand(item.collection, timestamp, written.bounds)

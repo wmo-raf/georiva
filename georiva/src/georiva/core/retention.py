@@ -46,14 +46,14 @@ def _latest_reference_time(collection) -> datetime | None:
 
 def prune(collection, now: datetime) -> int:
     """Delete the Items of ``collection`` that retention does not keep; return how many."""
-    deleted, _ = Item.objects.filter(collection=collection, time__lt=now).delete()
+    deleted, _ = Item.objects.filter(collection=collection, time__lt=now).delete_locked()
 
     if collection.retain_latest_run_only:
         latest = _latest_reference_time(collection)
         if latest:
             stale, _ = Item.objects.filter(
                 collection=collection, reference_time__isnull=False, reference_time__lt=latest
-            ).delete()
+            ).delete_locked()
             deleted += stale
     return deleted
 

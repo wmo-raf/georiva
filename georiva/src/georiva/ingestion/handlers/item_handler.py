@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
+from django.db import transaction
 from django.db.models import F
 
 from georiva.core.models import Collection, Item
@@ -94,6 +95,16 @@ class ItemHandler:
 
         Called by IngestionHandler when every variable in a timestamp fails
         to produce any output — keeps the catalog free of empty shells.
+
+        Another file may share the Item and have written assets to it
+        meanwhile; then it is no orphan and is kept (#704). The row lock waits
+        out an Asset being recorded, which holds the Item's row meanwhile.
         """
-        logger.warning("No assets created for Item %s — deleting orphan item", item.pk)
-        item.delete()
+        with transaction.atomic():
+            if not Item.objects.select_for_update().filter(pk=item.pk).exists():
+                return
+            if item.assets.exists():
+                logger.info("Item %s holds assets another file wrote — kept", item.pk)
+                return
+            logger.warning("No assets created for Item %s — deleting orphan item", item.pk)
+            item.delete()

@@ -15,6 +15,7 @@ from georiva.core.models import Asset, Collection, Item
 from georiva.ingestion.handlers.asset_handler import AssetHandler
 from georiva.ingestion.handlers.context import IngestionContext
 from georiva.ingestion.handlers.item_handler import ItemHandler
+from georiva.ingestion.materialization import ItemGone
 from georiva.ingestion.utils import ensure_utc, normalize_bounds
 
 if TYPE_CHECKING:
@@ -62,7 +63,8 @@ class IngestionHandler:
         Returns:
             (item, assets, clip_info, failed_variables)
 
-        item is None if every variable failed (orphan Item is deleted).
+        item is None if every variable failed (orphan Item is deleted), or if
+        the Item was deleted while its variables were being written.
         clip_info holds original_size / clipped_size for the first variable.
         failed_variables holds one "<slug>: <reason>" entry per failed variable,
         so the reason reaches the ingestion's failure record.
@@ -152,6 +154,12 @@ class IngestionHandler:
                 assets.extend(variable_assets)
                 if progress is not None:
                     progress.increment(state=f"{variable.slug}: succeeded")
+            except ItemGone:
+                # Retention or a sibling file's empty-Item cleanup deleted the
+                # Item meanwhile, and its assets with it (#704). Nothing is
+                # left to add to: the timestamp ends here, failing nothing.
+                logger.info("Item %s of %s @ %s is gone — stopping this timestamp", item.pk, collection, ts_utc)
+                return None, [], clip_info, failed_variables
             except Exception as e:
                 logger.error(
                     "Variable %s failed: %s\n%s",
