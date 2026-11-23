@@ -123,20 +123,22 @@ def delete_objects(hrefs, deleted_at, *, bucket=None) -> dict:
     return summary
 
 
-def drop_unrecorded(bucket, key: str) -> None:
+def drop_unrecorded(bucket, key: str, version: str | None) -> None:
     """Remove at once an object written for a row that never came to be — its
-    Item or Asset went while the bytes were uploading — unless an asset names
-    it: another materialization of the same asset may have written it too.
+    Item or Asset went while the bytes were uploading — while it is still the
+    write ``version`` names (``Bucket.version_of``) and no asset names it.
 
-    No row was deleted, so nothing here waits on a commit; the object is ours
-    alone. What this misses (a failed delete) is ``cleanup_asset_orphans``'s.
+    Keys are deterministic, so another writer may have put its own object
+    under the same key meanwhile — a re-ingest of the same timestamp — and
+    that one is kept (#769). No row was deleted, so nothing here waits on a
+    commit. What this misses (a failed delete) is ``cleanup_asset_orphans``'s.
     """
     from georiva.core.models import Asset
 
     if Asset.objects.filter(href=key).exists():
         return
     try:
-        bucket.delete(key)
+        bucket.delete_if_version(key, version)
     except Exception:
         logger.warning("Could not remove the unrecorded object %s", key)
 

@@ -51,14 +51,24 @@ from .support import ASSET_HOST, HarvestFeedMixin, RemoteCollectionMixin, day, r
 class KeptBucket:
     """The assets bucket behind a `KeptWriter`."""
 
-    def __init__(self, written):
+    def __init__(self, written, versions):
         self.written = written
+        self.versions = versions
 
     def size(self, path):
         return 4096
 
     def delete(self, path):
+        self.versions.pop(path, None)
         return self.written.pop(path, None) is not None
+
+    def version_of(self, path):
+        return self.versions.get(path)
+
+    def delete_if_version(self, path, version):
+        if version is None or self.versions.get(path) != version:
+            return False
+        return self.delete(path)
 
 
 class KeptWriter:
@@ -72,12 +82,15 @@ class KeptWriter:
         #: The nodata value each object was written to declare, by key.
         self.nodata: dict = {}
         self.depths: list[int] = []
-        self.bucket = KeptBucket(self.written)
+        #: Which write each key holds: a count of writes, as `Bucket.version_of` tells writes apart.
+        self.versions: dict[str, int] = {}
+        self.bucket = KeptBucket(self.written, self.versions)
 
     def write_cog(self, data, output_path, bounds, crs="EPSG:4326", nodata=None):
         self.depths.append(len(connection.savepoint_ids))
         self.written[output_path] = numpy.array(data)
         self.nodata[output_path] = nodata
+        self.versions[output_path] = len(self.depths)
         return output_path
 
 

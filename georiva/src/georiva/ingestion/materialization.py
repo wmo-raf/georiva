@@ -61,6 +61,9 @@ class WrittenCog:
     bands: int = 1
     #: The nodata value it declares, when its caller gave one to keep.
     nodata: float | int | None = None
+    #: Which write of ``href`` this is (``Bucket.version_of``): an object this
+    #: write never recorded is removed only while it is still this write (#769).
+    version: str | None = None
 
 
 class AssetMaterializer:
@@ -198,6 +201,7 @@ class AssetMaterializer:
             stats=stats,
             bands=bands,
             nodata=nodata if keep else None,
+            version=self.writer.bucket.version_of(stored),
         )
 
     def record_cog(
@@ -257,7 +261,7 @@ class AssetMaterializer:
         if item_gone:
             # After the lock, when no caller holds a transaction open (ingestion
             # does not): no storage call while the Item row is locked.
-            drop_unrecorded(self.writer.bucket, written.href)
+            drop_unrecorded(self.writer.bucket, written.href, written.version)
             raise ItemGone(f"Item {item.pk} is gone; {variable.slug} not recorded")
         self._after_save_asset(data_asset)
 

@@ -6,17 +6,23 @@ Item between them. The timestamp then ends with no Item: no Asset rows, no
 objects left behind, and the variables it never reached are not failures.
 """
 
+import shutil
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
+from django.core.files.storage import FileSystemStorage
 from django.test import TestCase
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+from georiva.core.storage.manager import Bucket, BucketType
+from georiva.ingestion.asset_writer import AssetWriter
 from georiva.ingestion.handlers.context import IngestionContext
 from georiva.ingestion.handlers.ingestion_handler import IngestionHandler
 from georiva.ingestion.handlers.item_handler import ItemHandler
+from georiva.ingestion.materialization import AssetMaterializer, ItemGone
 from georiva.organisations.testing import make_organisation
 
 BOUNDS = (10.0, -5.0, 20.0, 5.0)
@@ -90,7 +96,9 @@ class AnItemDeletedBetweenVariablesTests(ItemGoneFixture):
         self._process()
 
         second_href = self.writer.write_cog.call_args_list[1].args[1]
-        self.writer.bucket.delete.assert_called_once_with(second_href)
+        self.writer.bucket.delete_if_version.assert_called_once_with(
+            second_href, self.writer.bucket.version_of.return_value
+        )
         self.assertEqual(self.extracted, ["precip", "temp"])
 
 
@@ -114,3 +122,51 @@ class TheEmptyItemCleanupTests(ItemGoneFixture):
         ItemHandler().delete_orphan(item)
 
         self.assertFalse(Item.objects.filter(pk=item.pk).exists())
+
+
+class TheObjectWrittenForAGoneItemTests(ItemGoneFixture):
+    """What ``record_cog`` removes when its Item is gone: its own write, and
+    not a write landed under the same key since — a re-ingest of the same
+    timestamp names its COG as this one did (#769)."""
+
+    def setUp(self):
+        super().setUp()
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        self.bucket = Bucket(BucketType.ASSETS, "georiva-assets")
+        self.bucket._storage = FileSystemStorage(location=root)
+        self.materializer = AssetMaterializer(AssetWriter(self.bucket))
+        self.item = self._item()
+        self.variable = self.collection.variables.get(slug="precip")
+
+    def _write(self):
+        return self.materializer.write_cog(
+            item=self.item,
+            variable=self.variable,
+            data=np.ones((4, 4), dtype="float32"),
+            bounds=BOUNDS,
+            crs="EPSG:4326",
+            timestamp=self.ts,
+        )
+
+    def _record(self, written):
+        with self.assertRaises(ItemGone):
+            self.materializer.record_cog(item=self.item, variable=self.variable, written=written, timestamp=self.ts)
+
+    def test_its_own_write_is_removed(self):
+        written = self._write()
+        Item.objects.filter(pk=self.item.pk).delete()
+
+        self._record(written)
+
+        self.assertFalse(self.bucket.exists(written.href))
+
+    def test_a_write_landed_under_the_same_key_since_is_kept(self):
+        written = self._write()
+        Item.objects.filter(pk=self.item.pk).delete()
+        self.bucket.delete(written.href)
+        self.bucket.save(written.href, b"the re-ingest's COG")
+
+        self._record(written)
+
+        self.assertEqual(self.bucket.read_bytes(written.href), b"the re-ingest's COG")
