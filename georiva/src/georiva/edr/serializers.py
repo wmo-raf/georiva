@@ -29,7 +29,7 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from georiva.core.machine_plane.render_contract import render_contract
-from georiva.core.models import Collection, Item
+from georiva.core.models import Collection, Item, Variable
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 from .ids import edr_collection_href, edr_collection_id
@@ -293,7 +293,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             collection.variables.filter(is_active=True)
             .select_related("unit")
             .prefetch_related("styles__ramp")
-            .order_by("sort_order")
+            .order_by(*Variable.display_order())
         )
 
         for variable in variables:
@@ -458,7 +458,7 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
             collection.variables.filter(is_active=True)
             .select_related("unit")
             .prefetch_related("styles__ramp")
-            .order_by("sort_order")
+            .order_by(*Variable.display_order())
         )
         for variable in variables:
             parameter_names[variable.slug] = {

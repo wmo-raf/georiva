@@ -26,7 +26,7 @@ from rest_framework import serializers
 from georiva.core.machine_plane import titiler_encoded_preview_url, titiler_preview_url
 from georiva.core.machine_plane.palette_cache import build_colormap_256
 from georiva.core.machine_plane.render_contract import render_contract
-from georiva.core.models import visible_visibilities
+from georiva.core.models import Variable, visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 #: The standard Render extension (ADR 0023): named styles are discovered
@@ -737,7 +737,7 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
         # here announced every internal collection's name and structure and
         # invited a fetch that 404s; private ones would have followed (#273).
         for collection in self._served_collections(obj):
-            active_variables = list(collection.variables.filter(is_active=True))
+            active_variables = list(collection.variables.filter(is_active=True).order_by(*Variable.display_order()))
             variable_count = len(active_variables)
             for variable in active_variables:
                 title = f"{collection.name} - {variable.name}" if variable_count > 1 else variable.name

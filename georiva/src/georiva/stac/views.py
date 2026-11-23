@@ -259,7 +259,7 @@ class STACCollectionListView(STACAPIView):
             )
             .select_related("collection", "collection__catalog")
             .prefetch_related("styles")
-            .order_by("collection__sort_order", "sort_order")
+            .order_by("collection__sort_order", "collection__slug", *Variable.display_order())
         )
 
         data = STACVariableCollectionListSerializer(

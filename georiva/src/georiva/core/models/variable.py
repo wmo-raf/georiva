@@ -245,6 +245,22 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def __str__(self):
         return f"{self.collection.slug}:{self.slug}"
 
+    @staticmethod
+    def display_order(through: str = "") -> tuple:
+        """The order Variables are shown in: the operator's `sort_order`, then
+        by name, then by slug. `sort_order` is often unset (a harvested
+        collection's Variables had none before #763), and a tie would otherwise
+        fall to the rows' physical order, which a dump and restore changes.
+
+        `through` is the path to the Variable when ordering another model by
+        it, e.g. ``"variable__"`` for Assets.
+        """
+        return (
+            models.F(f"{through}sort_order").asc(nulls_last=True),
+            f"{through}name",
+            f"{through}slug",
+        )
+
     @property
     def units(self):
         return self.unit.symbol

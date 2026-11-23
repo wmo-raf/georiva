@@ -11,7 +11,7 @@ from wagtail.admin.ui.tables import BooleanColumn, ButtonsColumnMixin, Table, Ti
 from wagtail.admin.views.generic import IndexView
 from wagtail.admin.widgets import Button, ButtonWithDropdown
 
-from georiva.core.models import Catalog, Collection, Item
+from georiva.core.models import Catalog, Collection, Item, Variable
 from georiva.organisations.access import get_org_object_or_404
 
 from .tables import LinkColumnWithIcon
@@ -187,7 +187,9 @@ def collection_items_list(request, collection_pk):
     # ------------------------------------------------------------------
     # Variables
     # ------------------------------------------------------------------
-    variable_list = list(collection.variables.filter(is_active=True).prefetch_related("styles"))
+    variable_list = list(
+        collection.variables.filter(is_active=True).prefetch_related("styles").order_by(*Variable.display_order())
+    )
 
     # ------------------------------------------------------------------
     # Active variable tab

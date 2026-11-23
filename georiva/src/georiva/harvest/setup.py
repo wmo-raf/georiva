@@ -95,8 +95,9 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                 pinned_chunk_locations=dict(plan.pinned_chunk_locations),
             )
             collection = feed.ensure_collection()
-            for slug, planned in zip(slugs, plan.variables, strict=True):
+            for position, (slug, planned) in enumerate(zip(slugs, plan.variables, strict=True)):
                 # get_or_create: a Variable curated here before is the operator's, as it stands.
+                # A new one takes its place in the order the operator chose (#763).
                 variable, _created = Variable.objects.get_or_create(
                     collection=collection,
                     slug=slug,
@@ -108,6 +109,7 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                         "value_min": planned.value_min,
                         "value_max": planned.value_max,
                         "description": planned.description,
+                        "sort_order": position,
                     },
                 )
                 VariableMapping.objects.create(feed=feed, asset_key=planned.asset_key, variable=variable)
