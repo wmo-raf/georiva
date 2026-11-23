@@ -712,8 +712,10 @@ class CollectionItemListingTests(TestCase):
                 # Only the other Variable.
                 Asset.objects.create(item=item, variable=rain, href=f"rain-{hour}.tif", format=Asset.Format.COG)
             elif kind == 1:
-                # The active Variable, but in nothing Titiler draws.
+                # The active Variable, but in nothing Titiler draws — beside a
+                # drawable asset of another: the conditions hold on one asset.
                 Asset.objects.create(item=item, variable=t2m, href=f"t2m-{hour}.tif", format=Asset.Format.GEOTIFF)
+                Asset.objects.create(item=item, variable=rain, href=f"rain-{hour}.tif", format=Asset.Format.COG)
             elif kind == 2:
                 # Two drawable assets for the active Variable: still one card.
                 Asset.objects.create(item=item, variable=t2m, href=f"t2m-{hour}.tif", format=Asset.Format.COG)
@@ -739,12 +741,16 @@ class CollectionItemListingTests(TestCase):
     def test_the_items_with_a_drawable_asset_for_the_variable_are_listed_once_newest_first(self):
         first, second = self._get()["items"], self._get(p=2)["items"]
 
+        from georiva.pages.datasets.models import ITEMS_PER_PAGE
+
         self.assertEqual(len(self.listed), 30)
         self.assertEqual(first.paginator.count, 30)
-        self.assertEqual(first.paginator.num_pages, 2)
+        self.assertEqual(first.paginator.num_pages, -(-30 // ITEMS_PER_PAGE))
         self.assertEqual([item.pk for item in first] + [item.pk for item in second], self.listed)
 
-    def test_the_page_asks_for_its_items_without_distinct(self):
+    def test_the_listing_and_its_count_do_not_deduplicate_whole_items(self):
+        # DISTINCT over every Item column is what forced the sort of every
+        # matching row; a forecast's DISTINCT over its run times is not this.
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
 
@@ -752,5 +758,5 @@ class CollectionItemListingTests(TestCase):
             self._get()
 
         item_table = Item._meta.db_table
-        distinct_items = [q["sql"] for q in queries if f'DISTINCT "{item_table}".' in q["sql"]]
+        distinct_items = [q["sql"] for q in queries if f'DISTINCT "{item_table}"."id"' in q["sql"]]
         self.assertEqual(distinct_items, [])
