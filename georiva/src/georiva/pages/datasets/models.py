@@ -14,7 +14,7 @@ from georiva.core.machine_plane import (
     org_slug_of,
     titiler_encoded_preview_url,
 )
-from georiva.core.models import Asset, Catalog, Collection, Item, visible_visibilities
+from georiva.core.models import Asset, Catalog, Collection, Item, Variable, visible_visibilities
 from georiva.core.storage.asset_location import drawable_q, store_q
 from georiva.core.topics import topics_of
 from georiva.core.utils import get_full_url_by_request
@@ -214,7 +214,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         catalog = self._org_catalog(request, catalog_slug)
         collection = self._org_collection(request, catalog, collection_slug)
 
-        variables = list(collection.variables.filter(is_active=True).order_by("sort_order"))
+        variables = list(collection.variables.filter(is_active=True).order_by(*Variable.display_order()))
 
         # --- Filters ---
         active_var_slug = request.GET.get("variable", "").strip()
@@ -349,7 +349,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             item.assets.filter(drawable_q(), variable__is_active=True)
             .select_related("variable", "variable__unit")
             .prefetch_related("variable__styles")
-            .order_by("variable__sort_order")
+            .order_by(*Variable.display_order(through="variable__"))
         )
 
         # Encoded texture URLs by variable — derived on demand by Titiler, from
@@ -369,7 +369,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 variable__is_active=True,
             )
             .select_related("variable")
-            .order_by("variable__sort_order", "format")
+            .order_by(*Variable.display_order(through="variable__"), "format")
         )
 
         # Store assets: how to open the field instead of downloading it — the
@@ -377,7 +377,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         store_assets = (
             item.assets.filter(store_q(), variable__is_active=True)
             .select_related("variable")
-            .order_by("variable__sort_order")
+            .order_by(*Variable.display_order(through="variable__"))
         )
 
         # Resolve active variable from ?variable= param

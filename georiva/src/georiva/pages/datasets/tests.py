@@ -610,3 +610,62 @@ class StoreBackedCollectionPageTests(TestCase):
         body = self._item_page(self.cog_item)
         self.assertIn("gr-download-btn", body)
         self.assertNotIn("read from the provider", body)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class VariableOrderTests(TestCase):
+    """Variables with no `sort_order` — every harvested collection's, before
+    #763 — are listed by name, not in whatever order Postgres finds the rows,
+    which a dump and restore or a VACUUM FULL changes (#763)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organisation = provision_organisation(name="Kenya Met", slug="kenya")
+        from georiva.pages.datasets.models import DatasetsIndexPage
+
+        cls.index = DatasetsIndexPage.objects.descendant_of(cls.organisation.site.root_page).get()
+        tree = make_org_tree(cls.organisation, name="Wind speed")
+        cls.catalog, cls.collection, cls.item = tree["catalog"], tree["collection"], tree["item"]
+        unit = tree["variable"].unit
+
+        from georiva.core.models import Variable
+
+        # Inserted in neither name nor slug order, every `sort_order` NULL.
+        for name, slug in (("Pressure", "msl"), ("Air temperature", "t2m"), ("Cloud cover", "tcc")):
+            variable = Variable.objects.create(
+                collection=cls.collection, name=name, slug=slug, source_unit=unit, unit=unit, value_min=0, value_max=1
+            )
+            Asset.objects.create(item=cls.item, variable=variable, href=f"{slug}.tif")
+        Asset.objects.filter(item=cls.item).update(format=Asset.Format.COG)
+        Collection.objects.filter(pk=cls.collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+        cls.by_name = ["t2m", "tcc", "msl", "forecast"]
+
+    def setUp(self):
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def _get(self, suffix=""):
+        response = self.client.get(f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/{suffix}")
+        self.assertEqual(response.status_code, 200)
+        return response.context
+
+    def test_the_collection_page_lists_variables_by_name_and_defaults_to_the_first(self):
+        context = self._get()
+
+        self.assertEqual([v.slug for v in context["variables"]], self.by_name)
+        self.assertEqual(context["active_var_slug"], "t2m")
+
+    def test_a_sort_order_still_comes_first(self):
+        from georiva.core.models import Variable
+
+        Variable.objects.filter(slug="msl").update(sort_order=0)
+
+        context = self._get()
+
+        self.assertEqual([v.slug for v in context["variables"]], ["msl", "t2m", "tcc", "forecast"])
+        self.assertEqual(context["active_var_slug"], "msl")
+
+    def test_the_item_page_draws_variables_by_name_and_defaults_to_the_first(self):
+        context = self._get(f"items/{self.item.pk}/")
+
+        self.assertEqual([a.variable.slug for a in context["map_assets"]], self.by_name)
+        self.assertEqual(context["active_var_slug"], "t2m")
