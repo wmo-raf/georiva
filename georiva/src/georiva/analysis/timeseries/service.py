@@ -270,19 +270,8 @@ class TimeseriesService:
             self._assets(variable, time_start, time_end)
             .filter(remote_q())
             .order_by("item__time", "item__reference_time")
-            # A Store asset is read as the field its run, step and array name, and
-            # a vector one as its Variable's u and v (ADR 0048): all loaded here,
-            # not by each of the series' reading threads.
-            .select_related("item", "variable")
-            .only(
-                "href",
-                "format",
-                "store_array",
-                "harvested_by_id",
-                "variable",
-                "item__time",
-                "item__reference_time",
-            )[: limit + 1]
+            .select_related("item")
+            .only("href", "format", "variable_id", "item__time")[: limit + 1]
         )
         if len(rows) > limit:
             raise RemoteRangeTooLarge(

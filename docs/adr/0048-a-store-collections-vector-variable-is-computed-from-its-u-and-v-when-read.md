@@ -14,7 +14,7 @@ On a COG collection, wind speed and direction are Variables with `transform_type
 
 A store harvest (ADR 0044) runs no extraction. It maps one upstream array to one Variable, and a Store asset names
 one array. So a harvested store such as dynamical.org's AIFS, which holds `wind_u_10m` and `wind_v_10m`, could never
-carry wind speed or direction: its map, point and timeseries readers saw only the components.
+carry wind speed or direction: its map and point readers saw only the components.
 
 ADR 0046's rule is that values are stored as produced and converted when read. A vector's magnitude and direction are
 the same kind of thing as a unit conversion: a function of bytes that stay upstream, applied on the way out.
@@ -33,7 +33,9 @@ every step where both are held, and its values are computed from the two when it
 
 2. **Both parts must be mapped arrays of the feed.** `Variable.clean()` refuses a vector Variable of a store collection
    that lacks either part, or names an array the feed's Variable mapping does not hold
-   (`Collection.mapped_store_arrays`). The vector itself is not mapped: it is no array of the store.
+   (`Collection.store_mapping`), or whose parts are stored in different units; a speed is stored in its parts' unit.
+   The vector itself is not mapped: it is no array of the store. A Variable the feed does map shows its array as it
+   is and takes no transform, and the feed's form refuses to unmap an array a vector names.
 
 3. **The collection editor offers the transform and its sources on a store collection's Variables**, which other
    harvested and derived collections still hide.
@@ -48,8 +50,8 @@ every step where both are held, and its values are computed from the two when it
 
 5. **A vector Variable has a Store asset wherever both its arrays are held.** The harvest adds it beside its parts on
    the step's item: the store's href, `format` Zarr, and an empty `store_array` — it names no array of its own; its
-   Variable names two. So STAC, the runs API, WMTS and timeseries list it like any Variable, and nothing is computed
-   until it is read.
+   Variable names two. So STAC, the runs API and WMTS list it like any Variable, and nothing is computed until it is
+   read. The timeseries API offers no store Variable yet, vector or not (wmo-raf/georiva#780).
 
 6. **It is judged with its parts.** It counts as mapped: a step where one of its parts is no longer held loses its
    row, a run closes only when the vector holds every step both its parts are expected at, and a vector declared
@@ -80,7 +82,8 @@ every step where both are held, and its values are computed from the two when it
   held, so a map of u, v and speed at one step decodes each part once.
 - The two arithmetic implementations — core's `geoprocessing.wind` and Titiler's `app/store.py` — must agree; each
   side's tests pin the same 3-4-5 values.
-- Boundary statistics and virtual-Zarr manifests still do not follow a Store asset (ADR 0044), vector or not.
+- Boundary statistics, virtual-Zarr manifests and the timeseries API still do not follow a Store asset (ADR 0044),
+  vector or not; the last is wmo-raf/georiva#780.
 
 ## Out of scope
 
@@ -95,6 +98,6 @@ every step where both are held, and its values are computed from the two when it
 - **A second key on the Variable mapping row.** Puts a Variable's meaning on the feed, where the collection editor
   cannot show it.
 - **No asset for the vector; readers resolve it from its parts' assets.** Every surface that lists a Variable's
-  assets — STAC, runs, WMTS dimensions, timeseries — would need to learn the rule.
+  assets — STAC, runs, WMTS dimensions — would need to learn the rule.
 - **Compute and store the vector at harvest.** A store harvest reads no pixels (ADR 0042 §10), and the bytes would no
   longer be "as produced".
