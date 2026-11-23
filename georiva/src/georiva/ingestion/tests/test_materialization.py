@@ -26,7 +26,7 @@ from georiva.virtual_zarr.models import VirtualZarrManifest
 
 
 def _mock_writer():
-    w = MagicMock(spec=["write_cog"])
+    w = MagicMock(spec=["write_cog", "bucket"])
     w.write_cog.side_effect = lambda arr, path, *a, **k: path
     return w
 
@@ -366,4 +366,4 @@ class AnItemGoneBeforeItsAssetIsRecordedTests(MaterializerFixture):
 
         self.assertFalse(Asset.objects.filter(item_id=self.item.pk).exists())
         (href,) = self.writer.write_cog.call_args.args[1:2]
-        self.writer.bucket.delete.assert_called_once_with(href)
+        self.writer.bucket.delete_if_version.assert_called_once_with(href, self.writer.bucket.version_of.return_value)
