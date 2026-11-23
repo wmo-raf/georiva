@@ -245,7 +245,7 @@ STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast
 GFS = "s3://noaa-gfs-bdp-pds/"
 
 
-class EditStoreFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
+class StoreFeedFormMixin(HarvestFeedAdminMixin, HarvestFeedMixin):
     """A feed over a forecast Upstream store, as the wizard saves one (ADR 0044 §1, §7)."""
 
     def make_feed(self, organisation=None, **fields):
@@ -259,14 +259,16 @@ class EditStoreFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
             **fields,
         )
 
+    def edit(self, mappings=(), **fields):
+        fields.setdefault("rolling_window_days", "3")
+        return self.client.post(form_url("edit", pk=self.feed.pk), self.posted(mappings, **fields))
+
+
+class EditStoreFeedTests(StoreFeedFormMixin, TestCase):
     def setUp(self):
         super().setUp()
         self.collection = self.feed.ensure_collection()
         self.temperature = self.make_variable(self.collection, slug="temperature_2m")
-
-    def edit(self, mappings=(), **fields):
-        fields.setdefault("rolling_window_days", "3")
-        return self.client.post(form_url("edit", pk=self.feed.pk), self.posted(mappings, **fields))
 
     def form(self):
         return self.client.get(form_url("edit", pk=self.feed.pk)).context["form"]
@@ -365,3 +367,62 @@ class EditStoreFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
         self.assertContains(page, STORE)
         self.assertContains(page, "Rolling: runs from the last 3 days")
         self.assertContains(page, GFS)
+
+
+class EditStoreFeedWithWindTests(StoreFeedFormMixin, TestCase):
+    """A store feed whose collection shows a wind's speed from two mapped arrays (ADR 0048)."""
+
+    def setUp(self):
+        super().setUp()
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(
+            surveyed_assets=[{"key": "wind_u_10m"}, {"key": "wind_v_10m"}]
+        )
+        self.feed.refresh_from_db()
+        collection = self.feed.ensure_collection()
+        self.u = self.make_variable(collection, slug="wind_u_10m")
+        self.v = self.make_variable(collection, slug="wind_v_10m")
+        self.rows = [
+            VariableMapping.objects.create(feed=self.feed, asset_key=key, variable=variable)
+            for key, variable in (("wind_u_10m", self.u), ("wind_v_10m", self.v))
+        ]
+        Variable.objects.create(
+            collection=collection,
+            slug="wind_speed_10m",
+            name="Wind speed 10m",
+            source_unit=self.u.source_unit,
+            unit=self.u.unit,
+            transform_type=Variable.TransformType.VECTOR_MAGNITUDE,
+            sources=[
+                {"type": "u_component", "value": {"source_name": "wind_u_10m"}},
+                {"type": "v_component", "value": {"source_name": "wind_v_10m"}},
+            ],
+        )
+
+    def posted_rows(self, **v_row):
+        u_row, v_row_saved = self.rows
+        return [
+            {"id": u_row.pk, "asset_key": "wind_u_10m", "variable": self.u.pk},
+            {"id": v_row_saved.pk, "asset_key": "wind_v_10m", "variable": self.v.pk, **v_row},
+        ]
+
+    def test_both_parts_stay_mapped_when_the_feed_is_saved(self):
+        response = self.edit(self.posted_rows())
+
+        self.assertRedirects(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
+
+    def test_an_array_a_wind_is_computed_from_cannot_be_unmapped(self):
+        response = self.edit(self.posted_rows(DELETE="on"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Wind speed 10m", self.errors(response))
+        self.assertEqual(VariableMapping.objects.count(), 2)
+
+    def test_nor_mapped_to_another_array(self):
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(
+            surveyed_assets=[{"key": "wind_u_10m"}, {"key": "wind_v_10m"}, {"key": "wind_v_100m"}]
+        )
+
+        response = self.edit(self.posted_rows(asset_key="wind_v_100m"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Wind speed 10m", self.errors(response))

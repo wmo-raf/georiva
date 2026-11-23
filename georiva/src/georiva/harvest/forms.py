@@ -142,3 +142,28 @@ class HarvestFeedForm(DataFeedForm):
                 row.add_error("variable", _("This Variable does not belong to the feed's collection."))
             if offered is not None and row_cleaned.get("asset_key") not in offered:
                 row.add_error("asset_key", _("This is not an array the upstream store offers for mapping."))
+        if self.instance.is_store and collection is not None:
+            self._check_vector_parts(formset, collection)
+
+    def _check_vector_parts(self, formset, collection):
+        """An array a vector Variable is computed from stays mapped while the
+        vector names it (ADR 0048): unmapped, the vector would quietly go blank."""
+        from georiva.core.models import Variable
+        from georiva.core.models.variable import VECTOR_TRANSFORMS
+
+        kept = set()
+        for row in formset.forms:
+            row_cleaned = getattr(row, "cleaned_data", None) or {}
+            if row_cleaned.get("asset_key") and not row_cleaned.get("DELETE"):
+                kept.add(row_cleaned["asset_key"])
+        for variable in Variable.objects.filter(collection=collection, transform_type__in=VECTOR_TRANSFORMS):
+            components = variable.vector_components
+            if components is None:
+                continue
+            lost = [array for array in components.arrays if array not in kept]
+            if lost:
+                self.add_error(
+                    None,
+                    _("“%(name)s” is computed from %(arrays)s. Keep it mapped, or change “%(name)s” first.")
+                    % {"name": variable.name, "arrays": ", ".join(lost)},
+                )
