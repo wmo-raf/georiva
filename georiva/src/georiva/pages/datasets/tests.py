@@ -695,17 +695,18 @@ class CollectionItemListingTests(TestCase):
 
         from georiva.core.models import Variable
 
+        def variable(name, slug):
+            return Variable.objects.create(
+                collection=cls.collection, name=name, slug=slug, source_unit=unit, unit=unit, value_min=0, value_max=1
+            )
+
         # "Air temperature" sorts first, so it is the page's default Variable.
-        t2m = Variable.objects.create(
-            collection=cls.collection, name="Air temperature", slug="t2m", source_unit=unit, unit=unit, value_min=0, value_max=1
-        )
-        rain = Variable.objects.create(
-            collection=cls.collection, name="Rainfall", slug="rain", source_unit=unit, unit=unit, value_min=0, value_max=1
-        )
+        t2m, rain = variable("Air temperature", "t2m"), variable("Rainfall", "rain")
 
         cls.listed = []
         for hour in range(50):
-            item = Item.objects.create(collection=cls.collection, time=datetime(2026, 3, 1, tzinfo=UTC) + timedelta(hours=hour))
+            time = datetime(2026, 3, 1, tzinfo=UTC) + timedelta(hours=hour)
+            item = Item.objects.create(collection=cls.collection, time=time)
             kind = hour % 5
             if kind == 0:
                 # Only the other Variable.
