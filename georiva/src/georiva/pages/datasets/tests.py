@@ -5,7 +5,7 @@ derivation intermediates, read by the engine but never served.
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from adminboundarymanager.models import AdminBoundary
 from django.contrib.gis.geos import MultiPolygon, Polygon
@@ -670,3 +670,86 @@ class VariableOrderTests(TestCase):
 
         self.assertEqual([a.variable.slug for a in context["map_assets"]], self.by_name)
         self.assertEqual(context["active_var_slug"], "t2m")
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class CollectionItemListingTests(TestCase):
+    """The collection page lists the Items that have an asset Titiler can draw
+    for the active Variable — each once, newest first, 24 to a page (#764).
+
+    Asked as "has such an asset" rather than joined to the assets, so Postgres
+    can read Item in `(collection_id, time)` order and stop at the page's end
+    instead of sorting every matching row."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organisation = provision_organisation(name="Kenya Met", slug="kenya")
+        from georiva.pages.datasets.models import DatasetsIndexPage
+
+        cls.index = DatasetsIndexPage.objects.descendant_of(cls.organisation.site.root_page).get()
+        tree = make_org_tree(cls.organisation, name="Wind speed")
+        cls.catalog, cls.collection = tree["catalog"], tree["collection"]
+        tree["item"].delete()
+        Collection.objects.filter(pk=cls.collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+        unit = tree["variable"].unit
+
+        from georiva.core.models import Variable
+
+        # "Air temperature" sorts first, so it is the page's default Variable.
+        t2m = Variable.objects.create(
+            collection=cls.collection, name="Air temperature", slug="t2m", source_unit=unit, unit=unit, value_min=0, value_max=1
+        )
+        rain = Variable.objects.create(
+            collection=cls.collection, name="Rainfall", slug="rain", source_unit=unit, unit=unit, value_min=0, value_max=1
+        )
+
+        cls.listed = []
+        for hour in range(50):
+            item = Item.objects.create(collection=cls.collection, time=datetime(2026, 3, 1, tzinfo=UTC) + timedelta(hours=hour))
+            kind = hour % 5
+            if kind == 0:
+                # Only the other Variable.
+                Asset.objects.create(item=item, variable=rain, href=f"rain-{hour}.tif", format=Asset.Format.COG)
+            elif kind == 1:
+                # The active Variable, but in nothing Titiler draws.
+                Asset.objects.create(item=item, variable=t2m, href=f"t2m-{hour}.tif", format=Asset.Format.GEOTIFF)
+            elif kind == 2:
+                # Two drawable assets for the active Variable: still one card.
+                Asset.objects.create(item=item, variable=t2m, href=f"t2m-{hour}.tif", format=Asset.Format.COG)
+                Asset.objects.create(
+                    item=item, variable=t2m, href=STORE, format=Asset.Format.ZARR, store_array="temperature_2m"
+                )
+                cls.listed.append(item.pk)
+            else:
+                Asset.objects.create(item=item, variable=t2m, href=f"t2m-{hour}.tif", format=Asset.Format.COG)
+                Asset.objects.create(item=item, variable=rain, href=f"rain-{hour}.tif", format=Asset.Format.COG)
+                cls.listed.append(item.pk)
+        # Newest first.
+        cls.listed.reverse()
+
+    def setUp(self):
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def _get(self, **params):
+        response = self.client.get(f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/", params)
+        self.assertEqual(response.status_code, 200)
+        return response.context
+
+    def test_the_items_with_a_drawable_asset_for_the_variable_are_listed_once_newest_first(self):
+        first, second = self._get()["items"], self._get(p=2)["items"]
+
+        self.assertEqual(len(self.listed), 30)
+        self.assertEqual(first.paginator.count, 30)
+        self.assertEqual(first.paginator.num_pages, 2)
+        self.assertEqual([item.pk for item in first] + [item.pk for item in second], self.listed)
+
+    def test_the_page_asks_for_its_items_without_distinct(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as queries:
+            self._get()
+
+        item_table = Item._meta.db_table
+        distinct_items = [q["sql"] for q in queries if f'DISTINCT "{item_table}".' in q["sql"]]
+        self.assertEqual(distinct_items, [])

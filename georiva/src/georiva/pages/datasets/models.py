@@ -1,5 +1,6 @@
 from django.core.paginator import Paginator
 from django.db import models
+from django.db.models import Exists, OuterRef
 from django.shortcuts import render
 from django.utils.dateparse import parse_date, parse_datetime
 from wagtail.admin.paginator import WagtailPaginator
@@ -272,13 +273,20 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
         # --- Item queryset ---
         # Only items that have an asset Titiler can draw for the active variable.
+        # Asked as a semi-join, not a join: a join needs DISTINCT, which stops
+        # Postgres reading Item in (collection_id, time) order and stopping at
+        # the page's end, so it sorts every matching row instead (#764).
         items_qs = (
             base_items_qs.filter(
-                drawable_q("assets__"),
-                assets__variable__slug=active_var_slug,
-                assets__variable__is_active=True,
+                Exists(
+                    Asset.objects.filter(
+                        drawable_q(),
+                        item=OuterRef("pk"),
+                        variable__slug=active_var_slug,
+                        variable__is_active=True,
+                    )
+                )
             )
-            .distinct()
             # Each card's thumbnail is a Titiler URL, and Titiler URLs open with
             # the owning organisation — read from the item rather than from the
             # page context, so the chain is walked once per page, not per card.
