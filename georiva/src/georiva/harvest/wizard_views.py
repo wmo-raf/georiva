@@ -684,6 +684,7 @@ def _step4_store(request, session):
         if not errors:
             chosen, errors, unseen = _chosen_fields(ticked, posted, session["samples"])
             vectors = _chosen_vectors(_vector_pairs(ticked), posted)
+            errors = _mismatched_vectors(vectors, chosen) if not errors else errors
         if errors:
             for error in errors:
                 messages.error(request, error)
@@ -969,6 +970,18 @@ def _chosen_vectors(pairs: list[dict], posted) -> list[dict]:
         for pair in pairs
         for kind, transform in _VECTOR_KINDS
         if posted.get(f"{kind}_{pair['index']}")
+    ]
+
+
+def _mismatched_vectors(vectors: list[dict], chosen: list[dict]) -> list[str]:
+    """Why a chosen speed or direction cannot be shown: its parts are stored in
+    different units, so they are not one vector's (ADR 0048)."""
+    units = {field["key"]: field["source_unit_id"] for field in chosen}
+    pairs = {(vector["u"], vector["v"]) for vector in vectors if units.get(vector["u"]) != units.get(vector["v"])}
+    return [
+        _("%(u)s and %(v)s are stored in different units, so GeoRiva cannot show a wind from them. Untick its speed and direction.")
+        % {"u": u, "v": v}
+        for u, v in sorted(pairs)
     ]
 
 

@@ -18,12 +18,15 @@ U, V = "wind_u_10m", "wind_v_10m"
 
 
 class WindWizardMixin(StoreWizardMixin):
+    #: The unit the store says its v is in.
+    v_unit = "m/s"
+
     def setUp(self):
         super().setUp()
         self.arrays = {
             "temperature_2m": self.arrays["temperature_2m"],
             U: (RUN_STEP_GRID, WHOLE_FIELD, {"title": "10 metre U wind component", "unit": "m/s"}),
-            V: (RUN_STEP_GRID, WHOLE_FIELD, {"title": "10 metre V wind component", "unit": "m/s"}),
+            V: (RUN_STEP_GRID, WHOLE_FIELD, {"title": "10 metre V wind component", "unit": self.v_unit}),
         }
         self.upstream.field_ranges.update({U: (-8.3, 17.9), V: (-21.4, 6.0)})
         self.store()
@@ -107,3 +110,13 @@ class WizardOffersWindTests(WindWizardMixin, TestCase):
         (pair,) = self.client.get(step(4)).context["pairs"]
 
         self.assertEqual({offer["kind"]: offer["chosen"] for offer in pair["offers"]}, {"speed": False, "direction": True})
+
+
+class WizardRefusesMismatchedWindTests(WindWizardMixin, TestCase):
+    v_unit = "km/h"
+
+    def test_parts_stored_in_different_units_are_not_one_wind(self):
+        page = self.choose_wind(speed_1="on")
+
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "different units")

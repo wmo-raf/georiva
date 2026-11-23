@@ -314,8 +314,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         # ingested files; a harvested or recipe-written one has no bands to name.
         if self._reads_from_files():
             errors.update(self._sources_errors())
-        elif self.transform_type in VECTOR_TRANSFORMS:
-            errors.update(self._vector_errors())
+        else:
+            errors.update(self._store_errors())
 
         if errors:
             raise ValidationError(errors)
@@ -411,22 +411,34 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                     )
         return errors
 
-    def _vector_errors(self) -> dict:
-        """A vector Variable of a store collection names two of the arrays its
-        feed maps (ADR 0048). Of any other collection not read from files there
-        is nothing to check it against."""
+    def _store_errors(self) -> dict:
+        """A Variable of a store collection (ADR 0048): one its feed maps shows
+        its array as it is, and a vector names two of the arrays the feed maps,
+        both stored in one unit — a speed's own. Of any other collection not
+        read from files there is nothing to check."""
         try:
-            arrays = self.collection.mapped_store_arrays()
+            mapping = self.collection.store_mapping()
         except ObjectDoesNotExist:
             return {}
-        if arrays is None:
+        if mapping is None:
+            return {}
+        if self.pk is not None and any(variable.pk == self.pk for variable in mapping.values()):
+            if self.transform_type != self.TransformType.PASSTHROUGH:
+                return {
+                    "transform_type": _(
+                        "This Variable shows an array of the store as it is. Add a new Variable to compute "
+                        "something from it."
+                    )
+                }
+            return {}
+        if self.transform_type not in VECTOR_TRANSFORMS:
             return {}
         named = {block.block_type: block.value["source_name"] for block in self.sources or []}
         missing = {"u_component", "v_component"} - set(named)
         if missing:
             return {"sources": f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."}
         components = [named["u_component"], named["v_component"]]
-        unmapped = [name for name in components if name not in arrays]
+        unmapped = [name for name in components if name not in mapping]
         if unmapped:
             return {
                 "sources": _(
@@ -434,6 +446,16 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                     "then name it here by its path in the store."
                 )
                 % {"names": ", ".join(unmapped)}
+            }
+        u, v = (mapping[name] for name in components)
+        if u.source_unit_id != v.source_unit_id:
+            return {
+                "sources": _("%(u)s and %(v)s are stored in different units, so they are not one vector's parts.")
+                % {"u": components[0], "v": components[1]}
+            }
+        if self.transform_type == self.TransformType.VECTOR_MAGNITUDE and self.source_unit_id != u.source_unit_id:
+            return {
+                "source_unit": _("A speed is stored in its parts' unit: %(unit)s.") % {"unit": u.source_unit}
             }
         return {}
 

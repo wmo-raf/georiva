@@ -89,7 +89,7 @@ def _not_file_read_variable_form(form_class, collection):
 
     A store collection's Variable keeps them: it may be a vector over two of
     the store's arrays, named as its u and v sources (ADR 0048)."""
-    keeps_transform = collection.mapped_store_arrays() is not None
+    keeps_transform = collection.store_mapping() is not None
 
     class NotFileReadVariableForm(form_class):
         def __init__(self, *args, **kwargs):
@@ -358,9 +358,9 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         """
         return self.harvested_by_id is None and not self.derived_by_recipe
 
-    def mapped_store_arrays(self) -> frozenset[str] | None:
-        """The arrays of its Upstream store that its harvest feed maps, for a
-        collection harvested from a store; ``None`` for any other.
+    def store_mapping(self) -> dict | None:
+        """The arrays of its Upstream store that its harvest feed maps, each to
+        its Variable, for a collection harvested from a store; ``None`` for any other.
 
         A vector Variable of such a collection is computed from two of them
         (ADR 0048). Asked of the harvest app by model label: core is not built on it.
@@ -376,7 +376,7 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         feed = feeds.objects.filter(pk=self.harvested_by_id).first()
         if feed is None or not feed.is_store:
             return None
-        return frozenset(feed.variable_mappings.values_list("asset_key", flat=True))
+        return {row.asset_key: row.variable for row in feed.variable_mappings.select_related("variable")}
 
     @property
     def spatial_extent(self) -> list | None:

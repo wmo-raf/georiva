@@ -198,6 +198,37 @@ class VectorVariableCleanTests(VectorFeedMixin, TestCase):
     def test_a_passthrough_variable_of_a_store_collection_still_needs_no_source(self):
         self.unsaved([], transform=Variable.TransformType.PASSTHROUGH).clean()
 
+    def test_a_mapped_variable_cannot_be_made_a_vector(self):
+        # It shows its own array as it is: a transform on it would be ignored by every reader.
+        self.u.transform_type = Variable.TransformType.VECTOR_MAGNITUDE
+        self.u.sources = [
+            {"type": "u_component", "value": {"source_name": U}},
+            {"type": "v_component", "value": {"source_name": V}},
+        ]
+
+        with self.assertRaises(ValidationError) as refused:
+            self.u.clean()
+
+        self.assertIn("transform_type", refused.exception.message_dict)
+
+    def test_one_over_parts_stored_in_different_units_is_refused(self):
+        kelvin, _ = Unit.objects.get_or_create(symbol="K", defaults={"name": "Kelvin"})
+        Variable.objects.filter(pk=self.v.pk).update(source_unit=kelvin)
+
+        for transform in (Variable.TransformType.VECTOR_MAGNITUDE, Variable.TransformType.VECTOR_DIRECTION):
+            with self.subTest(transform):
+                said = self.errors(self.unsaved([("u_component", U), ("v_component", V)], transform=transform))
+                self.assertIn("unit", said)
+
+    def test_a_speed_stored_in_another_unit_than_its_parts_is_refused(self):
+        speed = self.unsaved([("u_component", U), ("v_component", V)])
+        speed.source_unit = speed.unit = Unit.objects.get_or_create(symbol="K", defaults={"name": "Kelvin"})[0]
+
+        with self.assertRaises(ValidationError) as refused:
+            speed.clean()
+
+        self.assertIn("source_unit", refused.exception.message_dict)
+
 
 class StoreCollectionEditorTests(VectorFeedMixin, TestCase):
     """The collection editor offers a store collection's Variables a transform and its u and v."""
