@@ -253,6 +253,7 @@ class Command(BaseCommand):
         return rules
 
     def _set_lifecycle(self, s3, bucket_name: str, rules: list[dict], dry_run: bool):
+        """Set ``rules`` as the bucket's lifecycle, replacing whatever was set before."""
         names = ", ".join(rule["ID"] for rule in rules)
         if dry_run:
             self.stdout.write(f"  → Would set lifecycle rules: {names}")

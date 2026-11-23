@@ -31,11 +31,13 @@ class SetupMinioVersioningTests(SimpleTestCase):
             if c.kwargs["VersioningConfiguration"] == {"Status": "Enabled"}
         }
 
-    def _rules(self, bucket_name):
+    def _lifecycles(self, bucket_name):
         configured = self.s3.put_bucket_lifecycle_configuration.call_args_list
-        calls = [c for c in configured if c.kwargs["Bucket"] == bucket_name]
-        self.assertEqual(len(calls), 1, f"one lifecycle configuration for {bucket_name}")
-        return calls[0].kwargs["LifecycleConfiguration"]["Rules"]
+        return [c.kwargs["LifecycleConfiguration"] for c in configured if c.kwargs["Bucket"] == bucket_name]
+
+    def _rules(self, bucket_name):
+        (lifecycle,) = self._lifecycles(bucket_name)
+        return lifecycle["Rules"]
 
     def test_incoming_alone_is_versioned(self):
         self.assertEqual(self._versioned(), {"georiva-incoming"})
@@ -58,5 +60,4 @@ class SetupMinioVersioningTests(SimpleTestCase):
         self.assertEqual(rule["Expiration"], {"Days": 30})
 
     def test_sources_has_no_lifecycle(self):
-        with self.assertRaises(AssertionError):
-            self._rules("georiva-sources")
+        self.assertEqual(self._lifecycles("georiva-sources"), [])

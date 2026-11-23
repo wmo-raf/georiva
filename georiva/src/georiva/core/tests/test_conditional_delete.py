@@ -44,6 +44,18 @@ class LocalConditionalDeleteTests(SimpleTestCase):
         self.assertFalse(self.bucket.delete_if_version(KEY, "anything"))
 
 
+def incoming_over(test, client, bucket_name):
+    """The incoming Bucket, its S3 storage replaced by ``client`` on ``bucket_name`` for ``test``."""
+    s3 = type("S3", (), {})()
+    s3.bucket_name = bucket_name
+    s3.bucket = object()
+    s3.connection = type("Conn", (), {"meta": type("Meta", (), {"client": client})()})()
+    patcher = patch.object(Bucket, "storage", new_callable=PropertyMock, return_value=s3)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return Bucket(BucketType.INCOMING, "incoming")
+
+
 class S3StubMixin:
     """A Bucket over a stubbed S3 client."""
 
@@ -53,14 +65,7 @@ class S3StubMixin:
         self.stub.activate()
         self.addCleanup(self.stub.deactivate)
 
-        storage = type("S3", (), {})()
-        storage.bucket_name = "georiva-incoming"
-        storage.bucket = object()
-        storage.connection = type("Conn", (), {"meta": type("Meta", (), {"client": self.client})()})()
-        self.bucket = Bucket(BucketType.INCOMING, "incoming")
-        patcher = patch.object(Bucket, "storage", new_callable=PropertyMock, return_value=storage)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.bucket = incoming_over(self, self.client, "georiva-incoming")
 
 
 class S3ConditionalDeleteTests(S3StubMixin, SimpleTestCase):
@@ -124,16 +129,14 @@ class S3ConditionalDeleteTests(S3StubMixin, SimpleTestCase):
 
 class S3VersionedDeleteTests(S3StubMixin, SimpleTestCase):
     """On a versioned bucket (``incoming``) a write is named by its VersionId, and
-    the delete removes that version and no other, whatever its bytes (#773)."""
+    the delete removes that version, and any older one behind it, but never a
+    later one, whatever its bytes (#773)."""
 
-    def _head(self, etag, modified, version_id=None, *, asked_version=None):
+    def _head(self, etag, modified, version_id=None):
         response = {"ETag": etag, "LastModified": modified, "ContentLength": 3}
         if version_id is not None:
             response["VersionId"] = version_id
-        params = {"Bucket": "georiva-incoming", "Key": KEY}
-        if asked_version is not None:
-            params["VersionId"] = asked_version
-        self.stub.add_response("head_object", response, params)
+        self.stub.add_response("head_object", response, {"Bucket": "georiva-incoming", "Key": KEY})
 
     def test_a_versioned_write_is_named_by_its_version_id(self):
         self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
@@ -142,13 +145,55 @@ class S3VersionedDeleteTests(S3StubMixin, SimpleTestCase):
 
         self.assertNotEqual(first, self.bucket.version_of(KEY))
 
-    def test_the_version_read_is_deleted_by_its_id_whatever_is_current(self):
+    def _listing(self, *version_ids):
+        """The key's versions, newest first, as S3 lists them."""
+        versions = [
+            {"Key": KEY, "VersionId": vid, "IsLatest": i == 0, "LastModified": datetime(2026, 1, 1, 6, tzinfo=UTC)}
+            for i, vid in enumerate(version_ids)
+        ]
+        self.stub.add_response(
+            "list_object_versions", {"Versions": versions}, {"Bucket": "georiva-incoming", "Prefix": KEY}
+        )
+
+    def _expect_delete(self, version_id):
+        self.stub.add_response("delete_object", {}, {"Bucket": "georiva-incoming", "Key": KEY, "VersionId": version_id})
+
+    def test_the_version_read_is_deleted_by_its_id_and_a_later_one_kept(self):
         self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
         version = self.bucket.version_of(KEY)
 
-        # The same bytes delivered again are v2 by now; v1 alone is asked after and deleted.
-        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1", asked_version="v1")
-        self.stub.add_response("delete_object", {}, {"Bucket": "georiva-incoming", "Key": KEY, "VersionId": "v1"})
+        # The same bytes delivered again are v2 by now; v1 alone is deleted.
+        self._listing("v2", "v1")
+        self._expect_delete("v1")
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, version))
+        self.stub.assert_no_pending_responses()
+
+    def test_writes_older_than_the_one_read_go_with_it(self):
+        # v0 kept by a partial ingest, then overwritten: deleting v1 alone would make v0 current again.
+        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
+        version = self.bucket.version_of(KEY)
+
+        self._listing("v2", "v1", "v0")
+        self._expect_delete("v1")
+        self._expect_delete("v0")
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, version))
+        self.stub.assert_no_pending_responses()
+
+    def test_another_key_sharing_the_prefix_is_untouched(self):
+        self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
+        version = self.bucket.version_of(KEY)
+
+        at = datetime(2026, 1, 1, tzinfo=UTC)
+        this_key = {"Key": KEY, "VersionId": "v1", "IsLatest": True, "LastModified": at}
+        longer_key = {"Key": f"{KEY}.idx", "VersionId": "x0", "IsLatest": True, "LastModified": at}
+        self.stub.add_response(
+            "list_object_versions",
+            {"Versions": [this_key, longer_key]},
+            {"Bucket": "georiva-incoming", "Prefix": KEY},
+        )
+        self._expect_delete("v1")
 
         self.assertTrue(self.bucket.delete_if_version(KEY, version))
         self.stub.assert_no_pending_responses()
@@ -156,7 +201,8 @@ class S3VersionedDeleteTests(S3StubMixin, SimpleTestCase):
     def test_a_version_already_gone_deletes_nothing(self):
         self._head('"e1"', datetime(2026, 1, 1, 6, tzinfo=UTC), "v1")
         version = self.bucket.version_of(KEY)
-        self.stub.add_client_error("head_object", service_error_code="404", http_status_code=404)
+
+        self._listing("v2")
 
         self.assertFalse(self.bucket.delete_if_version(KEY, version))
         self.stub.assert_no_pending_responses()
@@ -299,14 +345,7 @@ class MinioVersionedDeleteTests(SimpleTestCase):
             self.skipTest("silo is not reachable")
         self.addCleanup(self._remove_bucket)
 
-        s3 = type("S3", (), {})()
-        s3.bucket_name = self.bucket_name
-        s3.bucket = object()
-        s3.connection = type("Conn", (), {"meta": type("Meta", (), {"client": self.client})()})()
-        self.bucket = Bucket(BucketType.INCOMING, "incoming")
-        patcher = patch.object(Bucket, "storage", new_callable=PropertyMock, return_value=s3)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.bucket = incoming_over(self, self.client, self.bucket_name)
 
     def _remove_bucket(self):
         listing = self.client.list_object_versions(Bucket=self.bucket_name)
@@ -334,6 +373,19 @@ class MinioVersionedDeleteTests(SimpleTestCase):
         self.assertEqual(self._current(), b"the run")
         self.assertEqual(len(self._versions()), 1)
         self.assertNotEqual(self.bucket.version_of(KEY), read)
+
+    def test_a_write_older_than_the_one_read_does_not_come_back(self):
+        # A partial ingest kept the first write; the sender overwrote it; the second is ingested.
+        self._version()
+        self.bucket.put(KEY, b"kept by a partial ingest")
+        self.bucket.put(KEY, b"the run")
+        read = self.bucket.version_of(KEY)
+        self.bucket.put(KEY, b"the run")
+
+        self.assertTrue(self.bucket.delete_if_version(KEY, read))
+
+        self.assertEqual(self._current(), b"the run")
+        self.assertEqual(len(self._versions()), 1)
 
     def test_the_write_read_is_deleted_outright(self):
         self._version()
