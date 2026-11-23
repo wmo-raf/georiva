@@ -8,9 +8,13 @@ a single timestamp without running the full pipeline.
 import logging
 import traceback
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from django.utils import timezone
+
+from georiva.core import retention
 from georiva.core.models import Asset, Collection, Item
 from georiva.ingestion.handlers.asset_handler import AssetHandler
 from georiva.ingestion.handlers.context import IngestionContext
@@ -64,7 +68,9 @@ class IngestionHandler:
             (item, assets, clip_info, failed_variables)
 
         item is None if every variable failed (orphan Item is deleted), or if
-        the Item was deleted while its variables were being written.
+        retention (or anyone, with this file's assets in it) deleted the Item
+        while its variables were being written. An Item a sibling file deleted
+        as empty before this one recorded anything is made again (#769).
         clip_info holds original_size / clipped_size for the first variable.
         failed_variables holds one "<slug>: <reason>" entry per failed variable,
         so the reason reaches the ingestion's failure record.
@@ -121,7 +127,8 @@ class IngestionHandler:
         bounds = normalize_bounds(bounds)
 
         # ── Item ──────────────────────────────────────────────────────────────
-        item, created = self.item_handler.get_or_create(
+        make_item = partial(
+            self.item_handler.get_or_create,
             collection=collection,
             timestamp=ts_utc,
             reference_time=ctx.reference_time,
@@ -132,44 +139,55 @@ class IngestionHandler:
             height=height,
             crs=crs,
         )
+        item, created = make_item()
 
         # ── Per-variable asset processing ─────────────────────────────────────
         assets: list[Asset] = []
         failed_variables: list[str] = []
 
         for variable in variables:
-            try:
-                variable_assets = self.asset_handler.process_variable(
-                    item=item,
-                    variable=variable,
-                    local_path=local_path,
-                    timestamp=ts_utc,
-                    bounds=bounds,
-                    crs=crs,
-                    width=width,
-                    height=height,
-                    clipper=clipper,
-                    clip_window=clip_window,
-                )
-                assets.extend(variable_assets)
-                if progress is not None:
-                    progress.increment(state=f"{variable.slug}: succeeded")
-            except ItemGone:
-                # Retention or a sibling file's empty-Item cleanup deleted the
-                # Item meanwhile, and its assets with it (#704). Nothing is
-                # left to add to: the timestamp ends here, failing nothing.
-                logger.info("Item %s of %s @ %s is gone — stopping this timestamp", item.pk, collection, ts_utc)
-                return None, [], clip_info, failed_variables
-            except Exception as e:
-                logger.error(
-                    "Variable %s failed: %s\n%s",
-                    variable.slug,
-                    e,
-                    traceback.format_exc(),
-                )
-                failed_variables.append(f"{variable.slug}: {e}")
-                if progress is not None:
-                    progress.increment(state=f"{variable.slug}: failed — {e}")
+            made_again = False
+            while True:
+                try:
+                    variable_assets = self.asset_handler.process_variable(
+                        item=item,
+                        variable=variable,
+                        local_path=local_path,
+                        timestamp=ts_utc,
+                        bounds=bounds,
+                        crs=crs,
+                        width=width,
+                        height=height,
+                        clipper=clipper,
+                        clip_window=clip_window,
+                    )
+                    assets.extend(variable_assets)
+                    if progress is not None:
+                        progress.increment(state=f"{variable.slug}: succeeded")
+                except ItemGone:
+                    if made_again or not self._may_make_again(collection, ts_utc, assets):
+                        # Retention removed the Item, or someone removed it with
+                        # this file's assets in it (#704): nothing is left to add
+                        # to, and the timestamp ends here, failing nothing.
+                        logger.info("Item %s of %s @ %s is gone — stopping this timestamp", item.pk, collection, ts_utc)
+                        return None, [], clip_info, failed_variables
+                    # A sibling file for this timestamp deleted it as empty
+                    # before this one recorded anything in it (#769).
+                    logger.info("Item %s of %s @ %s is gone — making it again", item.pk, collection, ts_utc)
+                    item, created = make_item()
+                    made_again = True
+                    continue
+                except Exception as e:
+                    logger.error(
+                        "Variable %s failed: %s\n%s",
+                        variable.slug,
+                        e,
+                        traceback.format_exc(),
+                    )
+                    failed_variables.append(f"{variable.slug}: {e}")
+                    if progress is not None:
+                        progress.increment(state=f"{variable.slug}: failed — {e}")
+                break
 
         # Extent expansion happens per successful variable inside the shared
         # AssetMaterializer, so an all-failed run no longer widens the extent.
@@ -184,3 +202,16 @@ class IngestionHandler:
 
         logger.info("Created Item %s with %d asset(s)", item.pk, len(assets))
         return item, assets, clip_info, failed_variables
+
+    def _may_make_again(self, collection: Collection, timestamp: datetime, assets: list[Asset]) -> bool:
+        """Whether an Item found gone mid-timestamp is made again: only while
+        this file has recorded nothing in it — ``delete_orphan`` deletes only
+        an empty Item — and retention does not remove the timestamp."""
+        if assets:
+            return False
+        return not retention.retires(
+            collection,
+            valid_time_end=timestamp,
+            reference_time=self.ctx.reference_time,
+            now=timezone.now(),
+        )

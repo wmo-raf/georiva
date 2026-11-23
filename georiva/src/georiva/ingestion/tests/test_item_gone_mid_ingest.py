@@ -51,7 +51,10 @@ class ItemGoneFixture(TestCase):
         )
 
 
-class AnItemDeletedBetweenVariablesTests(ItemGoneFixture):
+class IngestionFixture(ItemGoneFixture):
+    """A handler over a mocked writer and extractor; ``on_extract(n)`` runs as
+    the n-th variable is read."""
+
     def setUp(self):
         super().setUp()
         self.writer = MagicMock(spec=["write_cog", "bucket"])
@@ -64,9 +67,7 @@ class AnItemDeletedBetweenVariablesTests(ItemGoneFixture):
 
         def extract(variable, *args, **kwargs):
             self.extracted.append(variable.slug)
-            if len(self.extracted) == 2:
-                # Retention prunes the Item while the second variable is read.
-                Item.objects.filter(collection=self.collection).delete()
+            self.on_extract(len(self.extracted))
             return np.ones((4, 4), dtype="float32")
 
         extractor.extract.side_effect = extract
@@ -76,6 +77,9 @@ class AnItemDeletedBetweenVariablesTests(ItemGoneFixture):
         )
         self.handler = IngestionHandler(ctx)
 
+    def on_extract(self, n):
+        pass
+
     def _process(self):
         return self.handler.process_timestamp(
             collection=self.collection,
@@ -83,6 +87,19 @@ class AnItemDeletedBetweenVariablesTests(ItemGoneFixture):
             timestamp=self.ts,
             source_file="sources:file.tif",
         )
+
+
+class AnItemRetentionPrunedBetweenVariablesTests(IngestionFixture):
+    def setUp(self):
+        super().setUp()
+        # A forecast whose past valid times retention prunes: self.ts is long past.
+        Collection.objects.filter(pk=self.collection.pk).update(is_forecast=True, retain_past_forecasts=False)
+        self.collection.refresh_from_db()
+
+    def on_extract(self, n):
+        if n == 2:
+            # Retention prunes the Item while the second variable is read.
+            Item.objects.filter(collection=self.collection).delete()
 
     def test_the_timestamp_ends_with_no_item_no_assets_and_no_failures(self):
         item, assets, _, failed = self._process()
@@ -100,6 +117,33 @@ class AnItemDeletedBetweenVariablesTests(ItemGoneFixture):
             second_href, self.writer.bucket.version_of.return_value
         )
         self.assertEqual(self.extracted, ["precip", "temp"])
+
+
+class AnItemASiblingFileCleanedUpTests(IngestionFixture):
+    """Another file for the same timestamp failed every variable and deleted
+    the Item as empty while this one read its first variable (#769). The
+    timestamp is not one retention removes, so this file's data still lands."""
+
+    def on_extract(self, n):
+        if n == 1:
+            ItemHandler().delete_orphan(Item.objects.get(collection=self.collection))
+
+    def test_the_item_is_made_again_and_holds_every_variable(self):
+        item, assets, _, failed = self._process()
+
+        self.assertIsNotNone(item)
+        self.assertEqual(failed, [])
+        self.assertEqual(
+            sorted(Asset.objects.filter(item=item).values_list("variable__slug", flat=True)),
+            ["precip", "temp", "wind"],
+        )
+        self.assertEqual(len(assets), 3)
+
+    def test_the_new_item_is_counted_in_its_collection(self):
+        self._process()
+
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.item_count, 1)
 
 
 class TheEmptyItemCleanupTests(ItemGoneFixture):
