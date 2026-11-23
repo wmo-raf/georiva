@@ -624,7 +624,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
 
     def test_the_document_costs_the_same_queries_however_many_collections_it_lists(self):
         """#682: two queries per collection, each planned across every chunk of
-        the Item hypertable, made an 11 s document of two store collections.
+        what was then the Item hypertable, made an 11 s document of two store collections.
         What the document reads must not grow with what it lists."""
         url = reverse("wmts:capabilities", args=[self.organisation.slug])
         with CaptureQueriesContext(connection) as before:

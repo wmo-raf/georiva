@@ -20,8 +20,8 @@ class Migration(migrations.Migration):
                 ('recipe_version', models.CharField(max_length=50)),
                 ('input_hash', models.CharField(max_length=64)),
                 ('created', models.DateTimeField(auto_now_add=True)),
-                ('derived_item', models.ForeignKey(db_constraint=False, help_text='The Published item this lineage edge describes', on_delete=django.db.models.deletion.CASCADE, related_name='derivation_links', to='georivacore.item')),
-                ('source_published_item', models.ForeignKey(blank=True, db_constraint=False, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='derived_into', to='georivacore.item')),
+                ('derived_item', models.ForeignKey(help_text='The Published item this lineage edge describes', on_delete=django.db.models.deletion.CASCADE, related_name='derivation_links', to='georivacore.item')),
+                ('source_published_item', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='derived_into', to='georivacore.item')),
                 ('source_staging_item', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='derived_into', to='georivastaging.stagingitem')),
             ],
             options={

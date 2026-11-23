@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
                 ('started_at', models.DateTimeField(blank=True, null=True)),
                 ('completed_at', models.DateTimeField(blank=True, null=True)),
                 ('error', models.TextField(blank=True)),
-                ('produced_item', models.ForeignKey(blank=True, db_constraint=False, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='derivation_runs', to='georivacore.item')),
+                ('produced_item', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='derivation_runs', to='georivacore.item')),
             ],
             options={
                 'indexes': [models.Index(fields=['recipe_type', 'status'], name='georivaproc_recipe__8b72b1_idx'), models.Index(fields=['status', 'locked_at'], name='georivaproc_status_8f5dd0_idx')],

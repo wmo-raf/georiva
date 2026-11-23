@@ -82,7 +82,7 @@ class Migration(migrations.Migration):
                 ('stats_std', models.FloatField(blank=True, null=True)),
                 ('extra_fields', models.JSONField(blank=True, default=dict)),
                 ('variable', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='staging_assets', to='georivacore.variable')),
-                ('item', modelcluster.fields.ParentalKey(db_constraint=False, on_delete=django.db.models.deletion.CASCADE, related_name='assets', to='georivastaging.stagingitem')),
+                ('item', modelcluster.fields.ParentalKey(on_delete=django.db.models.deletion.CASCADE, related_name='assets', to='georivastaging.stagingitem')),
             ],
             options={
                 'ordering': ['sort_order'],

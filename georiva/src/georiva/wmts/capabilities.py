@@ -229,10 +229,11 @@ def layer_dimensions(variables):
     :func:`visible_variables` — because the assets are read by their ids alone
     (ADR 0018: a query narrowed on already-scoped ids is scoped).
 
-    One query for the whole document, whatever it lists (#682). Item is a
-    hypertable, and a query on it that names no time is planned across every
-    chunk — close to a second each on a store-backed instance — so a document
-    asking twice per collection took eleven. The rows come back unordered and
+    One query for the whole document, whatever it lists (#682). When Item was a
+    hypertable, every query on it was planned across every chunk — close to a
+    second each on a store-backed instance — so a document asking twice per
+    collection took eleven; a cost that grows with the collections listed stays
+    worth avoiding on the plain table (ADR 0047). The rows come back unordered and
     duplicated (a step may hold a COG and a Store asset of one Variable), and
     are sorted and deduplicated here instead, which costs nothing beside that.
     """

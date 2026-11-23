@@ -6,7 +6,6 @@ import django_extensions.db.fields
 import georiva.core.models.collection
 import georiva.core.unit_utils
 import modelcluster.fields
-import timescale.db.models.fields
 import wagtail.fields
 from django.db import migrations, models
 
@@ -127,8 +126,8 @@ class Migration(migrations.Migration):
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('created', django_extensions.db.fields.CreationDateTimeField(auto_now_add=True, verbose_name='created')),
                 ('modified', django_extensions.db.fields.ModificationDateTimeField(auto_now=True, verbose_name='modified')),
-                ('time', timescale.db.models.fields.TimescaleDateTimeField(interval='1 day')),
-                ('reference_time', models.DateTimeField(blank=True, db_index=True, help_text='When data was produced (model run time for forecasts)', null=True)),
+                ('time', models.DateTimeField()),
+                ('reference_time', models.DateTimeField(blank=True, help_text='When data was produced (model run time for forecasts)', null=True)),
                 ('source_file', models.CharField(blank=True, db_index=True, help_text='Original source file path', max_length=500)),
                 ('bounds', django.contrib.postgres.fields.ArrayField(base_field=models.FloatField(), blank=True, help_text='Bounding box [west, south, east, north]', null=True, size=4)),
                 ('geometry', models.JSONField(blank=True, help_text='GeoJSON geometry for non-rectangular footprints', null=True)),
@@ -138,7 +137,7 @@ class Migration(migrations.Migration):
                 ('resolution_y', models.FloatField(blank=True, null=True)),
                 ('crs', models.CharField(default='EPSG:4326', max_length=50)),
                 ('properties', models.JSONField(blank=True, default=dict)),
-                ('collection', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='items', to='georivacore.collection')),
+                ('collection', models.ForeignKey(db_index=False, on_delete=django.db.models.deletion.CASCADE, related_name='items', to='georivacore.collection')),
             ],
             options={
                 'ordering': ['-time'],
@@ -201,7 +200,7 @@ class Migration(migrations.Migration):
                 ('stats_mean', models.FloatField(blank=True, null=True)),
                 ('stats_std', models.FloatField(blank=True, null=True)),
                 ('extra_fields', models.JSONField(blank=True, default=dict)),
-                ('item', modelcluster.fields.ParentalKey(db_constraint=False, on_delete=django.db.models.deletion.CASCADE, related_name='assets', to='georivacore.item')),
+                ('item', modelcluster.fields.ParentalKey(on_delete=django.db.models.deletion.CASCADE, related_name='assets', to='georivacore.item')),
                 ('variable', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='assets', to='georivacore.variable')),
             ],
             options={
@@ -211,10 +210,6 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='item',
             index=models.Index(fields=['collection', 'time'], name='georivacore_collect_b09451_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='item',
-            index=models.Index(fields=['collection', '-time'], name='georivacore_collect_866446_idx'),
         ),
         migrations.AddIndex(
             model_name='item',

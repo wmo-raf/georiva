@@ -1,7 +1,7 @@
 """
 GeoRiva Item and Asset Models
 
-Item: TimescaleDB hypertable for time-series raster data
+Item: a spatiotemporal entry in a Collection — a plain table (ADR 0047)
 Asset: Individual files associated with an Item, linked to Variables
 """
 
@@ -11,283 +11,11 @@ from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
-from timescale.db.models.models import TimescaleModel
 from wagtail.models import Orderable
 
 from georiva.core.utils import iso_utc_z
 
 from .base import AbstractAsset, AbstractSpatialItem, HarvestProvenance
-
-
-class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedModel, ClusterableModel):
-    """
-    A single spatiotemporal entry in a Collection.
-
-    Uses TimescaleDB hypertable for efficient time-series queries.
-    The 'time' field from TimescaleModel serves as valid_time.
-
-    Spatial/raster fields (source_file, bounds, geometry, width, height,
-    resolution_x/y, crs, properties) are inherited from AbstractSpatialItem.
-    """
-
-    # Excluded from Wagtail's reference index: an Item is machine-generated data
-    # written on every ingestion/derivation, not editorial content whose usage or
-    # delete-protection matters. Snippet registration would otherwise enrol it,
-    # making every save run update_reference_index_task inline in the pipeline
-    # workers. See core/test_reference_index_exclusion.py.
-    wagtail_reference_index_ignore = True
-
-    ORGANISATION_LOOKUP = "collection__catalog__organisation"
-
-    collection = models.ForeignKey(
-        "georivacore.Collection",
-        on_delete=models.CASCADE,
-        related_name="items",
-    )
-
-    # Time dimensions
-    # 'time' from TimescaleModel = valid_time (what time data represents)
-    reference_time = models.DateTimeField(
-        null=True,
-        blank=True,
-        db_index=True,
-        help_text=_("When data was produced (model run time for forecasts)"),
-    )
-
-    class Meta:
-        ordering = ["-time"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["collection", "time"],
-                name="unique_time_per_collection",
-                condition=models.Q(reference_time__isnull=True),
-            ),
-            models.UniqueConstraint(
-                fields=["collection", "time", "reference_time"],
-                name="unique_time_collection_reference",
-                condition=models.Q(reference_time__isnull=False),
-            ),
-        ]
-        indexes = [
-            models.Index(fields=["collection", "time"]),
-            models.Index(fields=["collection", "-time"]),
-            models.Index(fields=["collection", "reference_time", "time"]),
-        ]
-
-    def __str__(self):
-        return f"{self.collection.slug} @ {self.time}"
-
-    # =========================================================================
-    # Time Properties
-    # =========================================================================
-
-    @property
-    def valid_time(self):
-        """Alias for TimescaleModel's time field."""
-        return self.time
-
-    @property
-    def horizon(self):
-        """Forecast horizon as timedelta."""
-        if self.reference_time:
-            return self.time - self.reference_time
-        return None
-
-    @property
-    def horizon_hours(self):
-        """Forecast horizon in hours."""
-        if self.horizon:
-            return self.horizon.total_seconds() / 3600
-        return None
-
-    @property
-    def is_forecast(self):
-        """True if this is forecast data (has reference_time)."""
-        return self.reference_time is not None
-
-    # =========================================================================
-    # Asset Access Helpers
-    # =========================================================================
-
-    def get_asset(self, variable_slug: str) -> "Asset":
-        """Get asset for a specific variable."""
-        return self.assets.filter(variable__slug=variable_slug).first()
-
-    def get_asset_by_role(self, role: str) -> "Asset":
-        """Get asset by role."""
-        return self.assets.filter(roles__contains=[role]).first()
-
-    @property
-    def data_assets(self):
-        """Get all data assets."""
-        return self.assets.filter(roles__contains=["data"])
-
-    @property
-    def time_iso(self) -> str:
-        """ISO 8601 UTC string with Z suffix, for use in API URLs and templates."""
-        return iso_utc_z(self.time)
-
-    @property
-    def reference_time_iso(self) -> str | None:
-        """ISO 8601 UTC string with Z suffix for reference_time, or None."""
-        if self.reference_time:
-            return iso_utc_z(self.reference_time)
-        return None
-
-    def display_time(self, time_resolution: str = "") -> str:
-        """
-        Format valid_time according to the collection's time resolution.
-        """
-        formats = {
-            "sub_hourly": "%d %b %Y %H:%M",
-            "hourly": "%d %b %Y %H:%M",
-            "3hourly": "%d %b %Y %H:%M",
-            "6hourly": "%d %b %Y %H:%M",
-            "12hourly": "%d %b %Y %H:%M",
-            "daily": "%d %b %Y",
-            "pentadal": "%d %b %Y",
-            "dekadal": "%d %b %Y",
-            "monthly": "%b %Y",
-            "sub_seasonal": "%d %b %Y",
-            "seasonal": "%b %Y",
-            "annual": "%Y",
-            "climatology": "%b %Y",
-        }
-        fmt = formats.get(time_resolution, "%d %b %Y %H:%M")
-        return self.time.strftime(fmt)
-
-
-class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
-    """
-    A stored data file for a specific Variable within an Item.
-
-    Links Item (when/where) to Variable (what) with the actual file (href).
-
-    File/classification/stats fields and the Role/Format enums are inherited
-    from AbstractAsset; only the tier-specific relations live here.
-    """
-
-    ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
-
-    # Parent Item
-    item = ParentalKey(
-        Item,
-        on_delete=models.CASCADE,
-        related_name="assets",
-        db_constraint=False,
-    )
-
-    # Link to Variable (carries units, styling, visualization config)
-    variable = models.ForeignKey(
-        "georivacore.Variable",
-        on_delete=models.CASCADE,
-        related_name="assets",
-    )
-
-    # Kept beside the harvest Provenance, and like it outlives the feed (ADR 0044 §3).
-    store_array = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        editable=False,
-        help_text=_(
-            "For a Store asset: the full path, in the upstream store its href names, of the array it is a "
-            "slice of. Which slice is its item's reference time and valid time."
-        ),
-    )
-
-    class Meta:
-        ordering = ["sort_order"]
-        constraints = [
-            models.UniqueConstraint(fields=["item", "variable", "format"], name="unique_format_per_variable_per_item"),
-        ]
-        indexes = [
-            models.Index(fields=["item"]),
-            models.Index(fields=["item", "variable"]),
-        ]
-
-    def __str__(self):
-        return f"{self.item} / {self.variable.slug} - {self.format}"
-
-    # =========================================================================
-    # Properties from Variable (convenience accessors)
-    # =========================================================================
-
-    @property
-    def name(self):
-        return self.variable.name
-
-    @property
-    def unit(self):
-        return self.variable.unit.symbol if self.variable.unit else ""
-
-    # =========================================================================
-    # Format checks
-    # =========================================================================
-
-    @property
-    def is_visual(self) -> bool:
-        return self.format in (self.Format.PNG, self.Format.WEBP, self.Format.JPEG)
-
-    @property
-    def is_data(self) -> bool:
-        return self.format in (self.Format.COG, self.Format.GEOTIFF, self.Format.ZARR)
-
-    @property
-    def is_cog(self) -> bool:
-        return self.format == self.Format.COG
-
-    @property
-    def is_zarr(self) -> bool:
-        return self.format == self.Format.ZARR
-
-    @property
-    def is_drawable(self) -> bool:
-        """Whether Titiler can draw this asset — a COG or a Store asset (#686).
-        Its queryset half is ``storage.asset_location.drawable_q``."""
-        return self.location.is_drawable
-
-    # =========================================================================
-    # Extra fields accessors
-    # =========================================================================
-
-    @property
-    def overviews(self):
-        """For COG: overview levels."""
-        return self.extra_fields.get("overviews", [])
-
-    @property
-    def compression(self):
-        """For COG: compression method."""
-        return self.extra_fields.get("compression")
-
-    @property
-    def nodata(self):
-        """Nodata value."""
-        return self.extra_fields.get("nodata")
-
-    # =========================================================================
-    # URL Generation
-    # =========================================================================
-    @property
-    def location(self):
-        """Where this asset's bytes are: our bucket, or upstream (ADR 0043 §1)."""
-        from georiva.core.storage.asset_location import AssetLocation
-
-        return AssetLocation(self.href, self.format)
-
-    @cached_property
-    def url(self) -> str:
-        """Public URL to this asset — the upstream href itself for a Remote asset."""
-        return self.location.public_url()
-
-    @property
-    def preview_url(self) -> str:
-        """TiTiler preview URL for this asset."""
-        from georiva.core.machine_plane import titiler_preview_url
-
-        return titiler_preview_url(self.item, self.variable)
-
 
 # =============================================================================
 # Custom Manager
@@ -435,5 +163,274 @@ class ItemManager(models.Manager):
         return self.prefetch_related("assets", "assets__variable")
 
 
-Item.objects = ItemManager()
-Item.objects.contribute_to_class(Item, "objects")
+class Item(AbstractSpatialItem, HarvestProvenance, TimeStampedModel, ClusterableModel):
+    """
+    A single spatiotemporal entry in a Collection.
+
+    A plain table with a primary key, not a hypertable: its reads name a
+    collection, not a time window, and a hypertable's planning cost on every
+    query bought nothing (ADR 0047). ``time`` is the valid time.
+
+    Spatial/raster fields (source_file, bounds, geometry, width, height,
+    resolution_x/y, crs, properties) are inherited from AbstractSpatialItem.
+    """
+
+    # Excluded from Wagtail's reference index: an Item is machine-generated data
+    # written on every ingestion/derivation, not editorial content whose usage or
+    # delete-protection matters. Snippet registration would otherwise enrol it,
+    # making every save run update_reference_index_task inline in the pipeline
+    # workers. See core/test_reference_index_exclusion.py.
+    wagtail_reference_index_ignore = True
+
+    ORGANISATION_LOOKUP = "collection__catalog__organisation"
+
+    objects = ItemManager()
+
+    collection = models.ForeignKey(
+        "georivacore.Collection",
+        on_delete=models.CASCADE,
+        related_name="items",
+        db_index=False,  # (collection, time) leads with it
+    )
+
+    # Time dimensions
+    # valid time: what time the data represents
+    time = models.DateTimeField()
+    reference_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When data was produced (model run time for forecasts)"),
+    )
+
+    class Meta:
+        ordering = ["-time"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["collection", "time"],
+                name="unique_time_per_collection",
+                condition=models.Q(reference_time__isnull=True),
+            ),
+            models.UniqueConstraint(
+                fields=["collection", "time", "reference_time"],
+                name="unique_time_collection_reference",
+                condition=models.Q(reference_time__isnull=False),
+            ),
+        ]
+        indexes = [
+            # Also serves ``collection = …`` alone, and ``-time`` by a backward scan.
+            models.Index(fields=["collection", "time"]),
+            models.Index(fields=["collection", "reference_time", "time"]),
+        ]
+
+    def __str__(self):
+        return f"{self.collection.slug} @ {self.time}"
+
+    # =========================================================================
+    # Time Properties
+    # =========================================================================
+
+    @property
+    def valid_time(self):
+        """Alias for the ``time`` field."""
+        return self.time
+
+    @property
+    def horizon(self):
+        """Forecast horizon as timedelta."""
+        if self.reference_time:
+            return self.time - self.reference_time
+        return None
+
+    @property
+    def horizon_hours(self):
+        """Forecast horizon in hours."""
+        if self.horizon:
+            return self.horizon.total_seconds() / 3600
+        return None
+
+    @property
+    def is_forecast(self):
+        """True if this is forecast data (has reference_time)."""
+        return self.reference_time is not None
+
+    # =========================================================================
+    # Asset Access Helpers
+    # =========================================================================
+
+    def get_asset(self, variable_slug: str) -> "Asset":
+        """Get asset for a specific variable."""
+        return self.assets.filter(variable__slug=variable_slug).first()
+
+    def get_asset_by_role(self, role: str) -> "Asset":
+        """Get asset by role."""
+        return self.assets.filter(roles__contains=[role]).first()
+
+    @property
+    def data_assets(self):
+        """Get all data assets."""
+        return self.assets.filter(roles__contains=["data"])
+
+    @property
+    def time_iso(self) -> str:
+        """ISO 8601 UTC string with Z suffix, for use in API URLs and templates."""
+        return iso_utc_z(self.time)
+
+    @property
+    def reference_time_iso(self) -> str | None:
+        """ISO 8601 UTC string with Z suffix for reference_time, or None."""
+        if self.reference_time:
+            return iso_utc_z(self.reference_time)
+        return None
+
+    def display_time(self, time_resolution: str = "") -> str:
+        """
+        Format valid_time according to the collection's time resolution.
+        """
+        formats = {
+            "sub_hourly": "%d %b %Y %H:%M",
+            "hourly": "%d %b %Y %H:%M",
+            "3hourly": "%d %b %Y %H:%M",
+            "6hourly": "%d %b %Y %H:%M",
+            "12hourly": "%d %b %Y %H:%M",
+            "daily": "%d %b %Y",
+            "pentadal": "%d %b %Y",
+            "dekadal": "%d %b %Y",
+            "monthly": "%b %Y",
+            "sub_seasonal": "%d %b %Y",
+            "seasonal": "%b %Y",
+            "annual": "%Y",
+            "climatology": "%b %Y",
+        }
+        fmt = formats.get(time_resolution, "%d %b %Y %H:%M")
+        return self.time.strftime(fmt)
+
+
+class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
+    """
+    A stored data file for a specific Variable within an Item.
+
+    Links Item (when/where) to Variable (what) with the actual file (href).
+
+    File/classification/stats fields and the Role/Format enums are inherited
+    from AbstractAsset; only the tier-specific relations live here.
+    """
+
+    ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
+
+    # Parent Item
+    item = ParentalKey(
+        Item,
+        on_delete=models.CASCADE,
+        related_name="assets",
+    )
+
+    # Link to Variable (carries units, styling, visualization config)
+    variable = models.ForeignKey(
+        "georivacore.Variable",
+        on_delete=models.CASCADE,
+        related_name="assets",
+    )
+
+    # Kept beside the harvest Provenance, and like it outlives the feed (ADR 0044 §3).
+    store_array = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_(
+            "For a Store asset: the full path, in the upstream store its href names, of the array it is a "
+            "slice of. Which slice is its item's reference time and valid time."
+        ),
+    )
+
+    class Meta:
+        ordering = ["sort_order"]
+        constraints = [
+            models.UniqueConstraint(fields=["item", "variable", "format"], name="unique_format_per_variable_per_item"),
+        ]
+        indexes = [
+            models.Index(fields=["item"]),
+            models.Index(fields=["item", "variable"]),
+        ]
+
+    def __str__(self):
+        return f"{self.item} / {self.variable.slug} - {self.format}"
+
+    # =========================================================================
+    # Properties from Variable (convenience accessors)
+    # =========================================================================
+
+    @property
+    def name(self):
+        return self.variable.name
+
+    @property
+    def unit(self):
+        return self.variable.unit.symbol if self.variable.unit else ""
+
+    # =========================================================================
+    # Format checks
+    # =========================================================================
+
+    @property
+    def is_visual(self) -> bool:
+        return self.format in (self.Format.PNG, self.Format.WEBP, self.Format.JPEG)
+
+    @property
+    def is_data(self) -> bool:
+        return self.format in (self.Format.COG, self.Format.GEOTIFF, self.Format.ZARR)
+
+    @property
+    def is_cog(self) -> bool:
+        return self.format == self.Format.COG
+
+    @property
+    def is_zarr(self) -> bool:
+        return self.format == self.Format.ZARR
+
+    @property
+    def is_drawable(self) -> bool:
+        """Whether Titiler can draw this asset — a COG or a Store asset (#686).
+        Its queryset half is ``storage.asset_location.drawable_q``."""
+        return self.location.is_drawable
+
+    # =========================================================================
+    # Extra fields accessors
+    # =========================================================================
+
+    @property
+    def overviews(self):
+        """For COG: overview levels."""
+        return self.extra_fields.get("overviews", [])
+
+    @property
+    def compression(self):
+        """For COG: compression method."""
+        return self.extra_fields.get("compression")
+
+    @property
+    def nodata(self):
+        """Nodata value."""
+        return self.extra_fields.get("nodata")
+
+    # =========================================================================
+    # URL Generation
+    # =========================================================================
+    @property
+    def location(self):
+        """Where this asset's bytes are: our bucket, or upstream (ADR 0043 §1)."""
+        from georiva.core.storage.asset_location import AssetLocation
+
+        return AssetLocation(self.href, self.format)
+
+    @cached_property
+    def url(self) -> str:
+        """Public URL to this asset — the upstream href itself for a Remote asset."""
+        return self.location.public_url()
+
+    @property
+    def preview_url(self) -> str:
+        """TiTiler preview URL for this asset."""
+        from georiva.core.machine_plane import titiler_preview_url
+
+        return titiler_preview_url(self.item, self.variable)

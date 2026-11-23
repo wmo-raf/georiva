@@ -25,7 +25,8 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
         "georivacore.Item",
         on_delete=models.CASCADE,
         related_name="zonal_stats",
-        db_constraint=False,  # hypertable FK — same pattern as Asset
+        # Constrained: a hypertable may reference a plain table, and Item is one
+        # (ADR 0047). A row for an Item deleted since dispatch fails at commit.
         help_text=_("Source item (carries valid_time and reference_time)."),
     )
     variable = models.ForeignKey(

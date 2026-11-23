@@ -203,8 +203,9 @@ def collection_items_list(request, collection_pk):
     # ------------------------------------------------------------------
     # Items queryset
     # Use a Subquery for asset_count rather than annotate(Count(...)).
-    # annotate + COUNT triggers GROUP BY which conflicts with TimescaleModel's
-    # extra fields (created, modified) on PostgreSQL.
+    # annotate + COUNT triggered a GROUP BY that conflicted with the extra
+    # fields (created, modified) while Item was a hypertable without a primary
+    # key; kept as it is since Item became a plain table (ADR 0047).
     # ------------------------------------------------------------------
     from georiva.core.models import Asset
 

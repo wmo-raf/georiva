@@ -40,10 +40,10 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
 
     Retries up to 3 times on transient failures (network, MinIO or upstream timeout).
     """
-    from django.db import InterfaceError, OperationalError
+    from django.db import IntegrityError, InterfaceError, OperationalError, transaction
     from rasterio.errors import RasterioError
 
-    from georiva.core.models import Asset
+    from georiva.core.models import Asset, Item
 
     from .service import (
         compute_stats_from_band,
@@ -82,21 +82,30 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         # below — unless it is Remote and the error is I/O, which is retried
         # like any I/O failure on the way.
         band = read_band(asset.location)
-        for level, boundaries in boundaries_by_level.items():
-            stats_rows = compute_stats_from_band(band, boundaries)
-
-            count = persist_stats(
-                item=asset.item,
-                variable=asset.variable,
-                stats_rows=stats_rows,
-            )
-
-            logger.info(
-                "compute_boundary_zonal_stats: %d row(s) at level %d for asset %d",
-                count,
-                level,
-                asset_id,
-            )
+        # One transaction for every level, so an Item deleted since dispatch
+        # leaves no level's rows behind. Its FK is checked at commit (Django's
+        # are DEFERRABLE INITIALLY DEFERRED), which is why the IntegrityError
+        # is caught out here and not around a single write.
+        counts = {}
+        with transaction.atomic():
+            for level, boundaries in boundaries_by_level.items():
+                stats_rows = compute_stats_from_band(band, boundaries)
+                counts[level] = persist_stats(
+                    item=asset.item,
+                    variable=asset.variable,
+                    stats_rows=stats_rows,
+                )
+    except IntegrityError:
+        if Item.objects.filter(pk=asset.item_id).exists():
+            raise
+        # Retention or a re-ingest removed the Item while this task waited:
+        # there is nothing left to describe, so the task is done, not failed.
+        logger.info(
+            "compute_boundary_zonal_stats: item %d of asset %d is gone — nothing to write",
+            asset.item_id,
+            asset_id,
+        )
+        return
     except RasterioError as exc:
         if asset.location.is_remote and isinstance(exc, OSError):
             # An Upstream that does not answer — a 5xx, a timeout — is not a bad
@@ -117,6 +126,14 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         # sweep_missing_boundary_stats picks the asset up.
         logger.warning("compute_boundary_zonal_stats: asset %d failed (will retry): %s", asset_id, exc)
         raise self.retry(exc=exc) from exc
+
+    for level, count in counts.items():
+        logger.info(
+            "compute_boundary_zonal_stats: %d row(s) at level %d for asset %d",
+            count,
+            level,
+            asset_id,
+        )
 
 
 def loaded_levels(collection) -> list[int]:
