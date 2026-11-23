@@ -12,7 +12,7 @@ from django.contrib.gis.geos import MultiPolygon, Polygon
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from georiva.core.models import Asset, Catalog, Collection, Item
+from georiva.core.models import Asset, Catalog, Collection, Item, Variable
 from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.provisioning import provision_organisation
 from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
@@ -605,6 +605,27 @@ class StoreBackedCollectionPageTests(TestCase):
         self.assertIn(STORE, body)
         self.assertIn("temperature_2m", body)
         self.assertIn("read from the provider", body)
+
+    def test_a_vector_store_asset_names_the_two_arrays_it_is_computed_from(self):
+        speed = Variable.objects.create(
+            collection=self.collection,
+            slug="wind_speed_10m",
+            name="Wind speed 10m",
+            source_unit=self.variable.source_unit,
+            unit=self.variable.unit,
+            transform_type=Variable.TransformType.VECTOR_MAGNITUDE,
+            sources=[
+                {"type": "u_component", "value": {"source_name": "wind_u_10m"}},
+                {"type": "v_component", "value": {"source_name": "wind_v_10m"}},
+            ],
+        )
+        Asset.objects.create(item=self.store_item, variable=speed, href=STORE, format=Asset.Format.ZARR)
+
+        body = self._item_page(self.store_item)
+
+        self.assertIn("Computed from", body)
+        self.assertIn("wind_u_10m", body)
+        self.assertIn("wind_v_10m", body)
 
     def test_a_cog_is_still_a_download(self):
         body = self._item_page(self.cog_item)
