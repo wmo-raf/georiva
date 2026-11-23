@@ -17,7 +17,7 @@ from georiva.organisations.testing import make_organisation
 
 def _mock_writer_cls():
     writer = MagicMock()
-    writer.write_cog.side_effect = lambda arr, path, *a, **k: path
+    writer.write_cog.side_effect = lambda arr, path, *a, **k: (path, None)
     cls = MagicMock(return_value=writer)
     return cls, writer
 

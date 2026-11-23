@@ -457,7 +457,7 @@ def _write(asset, feed, raster: _Raster, writer) -> bool:
                 extra_fields={**local.extra_fields, UPSTREAM_HISTORY: _history(upstream)},
             )
     if upstream is None:
-        drop_unrecorded(materializer.writer.bucket, written.href, written.version)
+        drop_unrecorded(materializer.writer.bucket, written.href, written.receipt)
         return False
     logger.info("Harvest %s: asset %s is kept locally from now on", feed.name, asset.pk)
     return True

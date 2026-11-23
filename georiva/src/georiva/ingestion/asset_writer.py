@@ -1,5 +1,6 @@
 import logging
 import tempfile
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 #: Passed as ``nodata``: derive one from the array's dtype (``AssetWriter.default_nodata``).
 #: Any other value, None included, is declared as given.
 FROM_DTYPE = object()
+
+#: The COG dataset tag holding the id of the write that made it (#771).
+WRITE_ID_TAG = "GEORIVA_WRITE"
 
 
 class AssetWriter:
@@ -51,7 +55,7 @@ class AssetWriter:
         bounds: tuple,
         crs: str = "EPSG:4326",
         nodata=FROM_DTYPE,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """
         Write a numpy array to storage as a Cloud-Optimized GeoTIFF: a 2D
         array as one band, a 3D one (bands, rows, columns) band by band.
@@ -78,7 +82,8 @@ class AssetWriter:
                          (the default) derives one from the dtype.
 
         Returns:
-            Final stored path.
+            The stored path, and the receipt for this write
+            (``Bucket.put``) that ``Bucket.delete_if_written`` takes.
         """
         bands = data if data.ndim == 3 else data[np.newaxis]
         count, height, width = bands.shape
@@ -141,10 +146,14 @@ class AssetWriter:
                 nodata=_nodata,
                 forward_band_tags=True,  # preserve band-level CF metadata
                 quiet=True,  # suppress progress bar in production
+                # Each write's own id, so no two writes share their bytes —
+                # nor, on S3, their ETag: a delete conditional on it takes
+                # this write and no other under the key (#771).
+                additional_cog_metadata={WRITE_ID_TAG: uuid.uuid4().hex},
             )
 
             with open(cog_path, "rb") as f:
-                return self.bucket.save(output_path, f)
+                return self.bucket.put(output_path, f)
 
         finally:
             # Always clean up temp files — even if an exception is raised.
