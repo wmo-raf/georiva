@@ -41,6 +41,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ItemGone(Exception):
+    """The Item an asset was being recorded for was deleted meanwhile — by
+    forecast retention, or by a sibling file's empty-Item cleanup (#704).
+    Nothing was recorded, and the object written for it has been removed."""
+
+
 @dataclass(frozen=True)
 class WrittenCog:
     """A COG ``AssetMaterializer.write_cog`` has put in storage, and what its row will say of it."""
@@ -229,16 +235,25 @@ class AssetMaterializer:
         # provenance) — never clobber an existing one with "".
         if checksum:
             cog_defaults["checksum"] = checksum
-        try:
-            data_asset, _ = Asset.objects.update_or_create(
-                item=item,
-                variable=variable,
-                format=Asset.Format.COG,
-                defaults=cog_defaults,
-            )
-        except Exception as e:
-            logger.error("COG save failed for %s: %s", variable.slug, e)
-            raise
+        # The Item row is locked until the Asset commits: a delete arriving
+        # meanwhile waits and then takes the Asset (and its object) with it,
+        # and one that came first is seen here, not as an IntegrityError at
+        # commit. Ingestion writes its Item and each Asset in separate
+        # transactions, so the Item may be gone already (#704).
+        with transaction.atomic():
+            if not Item.objects.select_for_update().filter(pk=item.pk).exists():
+                drop_unrecorded(self.writer.bucket, written.href)
+                raise ItemGone(f"Item {item.pk} is gone; {variable.slug} not recorded")
+            try:
+                data_asset, _ = Asset.objects.update_or_create(
+                    item=item,
+                    variable=variable,
+                    format=Asset.Format.COG,
+                    defaults=cog_defaults,
+                )
+            except Exception as e:
+                logger.error("COG save failed for %s: %s", variable.slug, e)
+                raise
         self._after_save_asset(data_asset)
 
         self.extent_handler.expand(item.collection, timestamp, written.bounds)
@@ -287,6 +302,17 @@ class AssetMaterializer:
             return int(self.writer.bucket.size(path))
         except Exception:
             return None
+
+
+def drop_unrecorded(bucket, key: str) -> None:
+    """Remove an object written for a row that is gone, unless an asset names
+    it: another materialization of the same asset may have written it too."""
+    if Asset.objects.filter(href=key).exists():
+        return
+    try:
+        bucket.delete(key)
+    except Exception:
+        logger.warning("Materialization: could not remove the unrecorded object %s", key)
 
 
 def mask_fill(dtype) -> float | int:

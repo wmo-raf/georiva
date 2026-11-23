@@ -20,7 +20,7 @@ from wagtail import hooks
 from georiva.analysis.zonal_stats import tasks as zonal_tasks
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
-from georiva.ingestion.materialization import AssetMaterializer
+from georiva.ingestion.materialization import AssetMaterializer, ItemGone
 from georiva.organisations.testing import make_organisation
 from georiva.virtual_zarr.models import VirtualZarrManifest
 
@@ -346,3 +346,24 @@ class AfterSaveAssetHookTests(MaterializerFixture):
             self._materialize()
 
         delay.assert_not_called()
+
+
+class AnItemGoneBeforeItsAssetIsRecordedTests(MaterializerFixture):
+    """Retention or a sibling file may delete the Item between its creation and
+    an asset's write (#704): no row is recorded and the object is removed."""
+
+    def setUp(self):
+        super().setUp()
+        self.writer = MagicMock(spec=["write_cog", "bucket"])
+        self.writer.write_cog.side_effect = lambda arr, path, *a, **k: path
+        self.materializer = AssetMaterializer(self.writer)
+
+    def test_no_asset_is_recorded_and_the_written_object_is_removed(self):
+        Item.objects.filter(pk=self.item.pk).delete()
+
+        with self.assertRaises(ItemGone):
+            self._materialize()
+
+        self.assertFalse(Asset.objects.filter(item_id=self.item.pk).exists())
+        (href,) = self.writer.write_cog.call_args.args[1:2]
+        self.writer.bucket.delete.assert_called_once_with(href)

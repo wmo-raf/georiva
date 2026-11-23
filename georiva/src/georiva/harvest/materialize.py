@@ -423,7 +423,7 @@ def _write(asset, feed, raster: _Raster, writer) -> bool:
     from georiva.core.models import Asset
     from georiva.core.storage import storage
     from georiva.ingestion.asset_writer import AssetWriter
-    from georiva.ingestion.materialization import AssetMaterializer
+    from georiva.ingestion.materialization import AssetMaterializer, drop_unrecorded
 
     item = asset.item
     materializer = AssetMaterializer(writer or AssetWriter(storage.assets))
@@ -456,7 +456,7 @@ def _write(asset, feed, raster: _Raster, writer) -> bool:
                 extra_fields={**local.extra_fields, UPSTREAM_HISTORY: _history(upstream)},
             )
     if upstream is None:
-        _drop_unrecorded(materializer.writer.bucket, written.href)
+        drop_unrecorded(materializer.writer.bucket, written.href)
         return False
     logger.info("Harvest %s: asset %s is kept locally from now on", feed.name, asset.pk)
     return True
@@ -474,19 +474,6 @@ def _history(upstream: dict) -> dict:
         "updated": extra.get(UPSTREAM_UPDATED),
     }
     return {key: value for key, value in said.items() if value not in (None, "")}
-
-
-def _drop_unrecorded(bucket, key: str) -> None:
-    """Remove an object written for a row that is gone, unless an asset names
-    it: another materialization of the same asset may have written it too."""
-    from georiva.core.models import Asset
-
-    if Asset.objects.filter(href=key).exists():
-        return
-    try:
-        bucket.delete(key)
-    except Exception:
-        logger.warning("Materialization: could not remove the unrecorded object %s", key)
 
 
 def _judged_by(feed) -> dict:
