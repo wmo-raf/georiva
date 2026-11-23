@@ -5,9 +5,9 @@ The data layer has two tiers that mirror the same STAC spec but play different
 roles (see docs/adr/0004-staging-tier-and-abstract-stac-models.md):
 
 - Published — the concrete ``Collection`` / ``Item`` / ``Asset`` in this app
-  (product-grained, served, ``Item`` is a TimescaleDB hypertable).
+  (product-grained, served; ``Item`` is one row per timestep, a plain table — ADR 0047).
 - Staging — ``StagingCollection`` / ``StagingItem`` / ``StagingAsset`` in the
-  ``staging`` app (source-grained, not served, no hypertable).
+  ``staging`` app (source-grained, not served).
 
 These abstract bases hold only the **non-relational** fields the two tiers
 share. The relational fields differ per tier (different ``collection`` targets,

@@ -6,8 +6,9 @@ unit. Never one per Item. Recorded for ``internal`` Intermediate products too,
 with the visibility tier snapshotted so the record says what the tier was when
 it happened.
 
-References to Published Items are plain id columns: Item is a hypertable and is
-removed by retention, so a foreign key would either block that or dangle.
+References to Published Items are plain id columns: an event outlives the Item
+it names, which retention or a re-ingest may remove, so a foreign key would
+either block that or cascade the record away (ADR 0047).
 """
 
 from django.db import models

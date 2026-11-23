@@ -108,7 +108,6 @@ class DerivationRun(TimeStampedModel):
         null=True,
         blank=True,
         related_name="derivation_runs",
-        db_constraint=False,  # Item is a hypertable (see Asset.item)
     )
 
     class Meta:
@@ -300,8 +299,8 @@ class DerivationAttemptFinished(DomainEvent):
     ``DerivationRun`` keeps an attempt count and the latest retry reason and
     nothing about the attempts before it; this is the record of each. The unit's
     identity is snapshotted, so the event stays true after the next attempt has
-    overwritten the row. ``produced_item_id`` is a plain column: Item is a
-    hypertable and is removed by retention.
+    overwritten the row. ``produced_item_id`` is a plain column: the event
+    outlives the Item, which retention may remove (ADR 0047).
     """
 
     label = "Derivation attempt"

@@ -1,5 +1,9 @@
 # Staging Tier and Abstract STAC Models
 
+> **Superseded in part by [ADR-0047](0047-item-is-a-plain-table-only-zonal-stats-is-a-hypertable.md).**
+> A Published `Item` is still one row per timestep, but a plain table with a primary key, not a `TimescaleModel`
+> hypertable. Read "hypertable" below as the reason the tiers' storage differed then.
+
 > **Amended by [ADR-0010](0010-pinned-collection-bindings-for-derived-products.md).**
 > `StagingCollection` gains a nullable `collection` FK to its published-tier
 > `core.Collection` (same catalog + slug), set at registration, so an arriving

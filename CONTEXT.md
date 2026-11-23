@@ -11,13 +11,13 @@ formats, and indexes it as STAC-compliant catalogs for African National Meteorol
 Fetched or uploaded raw artifacts held as STAC-shaped, **source-grained**, **not-served** data — inputs that still
 require a transform before they can be served. Mirrors the STAC *spec* (Collection/Item/Asset) but follows the
 **source/acquisition** shape, not the product shape. Lives in a dedicated `staging` data app. Raw-ness is expressed
-as the asset role `source`, not by the tier name. A `StagingItem` is **not** a TimescaleDB hypertable; it carries a
+as the asset role `source`, not by the tier name. A `StagingItem` carries a
 flexible STAC temporal extent (nullable `datetime` plus optional `start_datetime`/`end_datetime`).
 _Avoid_: Raw (as a tier name), Raw tier
 
 **Published**:
 Product-grained, **served** STAC data — the existing `core` `Collection`/`Item`/`Asset`. "Served" always means
-Published. A published `Item` is a TimescaleDB hypertable (one row per timestep). Reached either directly
+Published. A published `Item` is one row per timestep, in a plain table (ADR 0047). Reached either directly
 (Direct → Published, for ready products needing only inline normalization) or via Derivation from Staging.
 A Published `Collection` carries a `visibility` (`public | private | internal`) — see **Visibility tier**.
 _Avoid_: Processed tier, Analysis-ready (as a tier name — those are MinIO buckets, not tiers)

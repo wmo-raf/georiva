@@ -3,7 +3,7 @@ Staging data tier — source-grained, not-served STAC models.
 
 Mirrors the Published STAC spec (Collection/Item/Asset) but follows the
 source/acquisition shape: one ``StagingItem`` per raw file (no timestep
-shredding), a flexible temporal extent (no TimescaleDB hypertable), and assets
+shredding), a flexible temporal extent, and assets
 carrying the ``source`` role.
 
 See docs/adr/0004-staging-tier-and-abstract-stac-models.md.
@@ -69,7 +69,7 @@ class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
     """
     One staged raw file held as a STAC-shaped item.
 
-    Not a TimescaleDB hypertable. Carries a flexible STAC temporal extent:
+    Carries a flexible STAC temporal extent:
     a nullable single ``datetime`` (one slice) and/or a ``start_datetime`` /
     ``end_datetime`` range (multi-temporal file). These are approximate
     Gregorian index bounds for selection only — the authoritative time and
@@ -141,7 +141,6 @@ class StagingAsset(AbstractAsset, TimeStampedModel, Orderable):
         StagingItem,
         on_delete=models.CASCADE,
         related_name="assets",
-        db_constraint=False,
     )
 
     variable = models.ForeignKey(
@@ -178,13 +177,10 @@ class DerivationLink(models.Model):
 
     ORGANISATION_LOOKUP = "derived_item__collection__catalog__organisation"
 
-    # FKs to Item use db_constraint=False because Item is a TimescaleDB
-    # hypertable with no simple unique PK to reference (same as Asset.item).
     derived_item = models.ForeignKey(
         "georivacore.Item",
         on_delete=models.CASCADE,
         related_name="derivation_links",
-        db_constraint=False,
         help_text=_("The Published item this lineage edge describes"),
     )
 
@@ -201,7 +197,6 @@ class DerivationLink(models.Model):
         null=True,
         blank=True,
         related_name="derived_into",
-        db_constraint=False,
     )
 
     recipe_id = models.CharField(max_length=100)

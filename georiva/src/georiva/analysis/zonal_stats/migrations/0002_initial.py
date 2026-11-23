@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='boundaryzonalstats',
             name='item',
-            field=models.ForeignKey(db_constraint=False, help_text='Source item (carries valid_time and reference_time).', on_delete=django.db.models.deletion.CASCADE, related_name='zonal_stats', to='georivacore.item'),
+            field=models.ForeignKey(help_text='Source item (carries valid_time and reference_time).', on_delete=django.db.models.deletion.CASCADE, related_name='zonal_stats', to='georivacore.item'),
         ),
         migrations.AddField(
             model_name='boundaryzonalstats',
