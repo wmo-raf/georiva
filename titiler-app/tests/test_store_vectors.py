@@ -11,6 +11,7 @@ served over local HTTP by the same stand-in the store tests use.
 
 import json
 import os
+import time as clock
 
 import icechunk
 import numpy
@@ -38,6 +39,12 @@ NORTHWARD[0] = 0.0
 @pytest.fixture
 def wind_store(tmp_path, producer):
     """A forecast store holding u and v at the newest run's second step; ``.href`` is its address."""
+    return _wind_store(tmp_path, producer, {U: EASTWARD, V: NORTHWARD})
+
+
+def _wind_store(tmp_path, producer, held):
+    """A forecast store whose arrays `held` names hold their values at the newest
+    run's second step; u and v are both laid out. ``.repository`` writes to it."""
     _handler, base = producer
     folder = os.path.join(tmp_path, "wind", "v0.1.0.icechunk")
     repository = icechunk.Repository.create(icechunk.local_filesystem_storage(folder))
@@ -51,7 +58,7 @@ def wind_store(tmp_path, producer):
     lead_time.attrs.update({"units": "seconds"})
     zarr.create_array(root, name="latitude", shape=(5,), dtype="f8", dimension_names=["latitude"])[:] = LATITUDES
     zarr.create_array(root, name="longitude", shape=(8,), dtype="f8", dimension_names=["longitude"])[:] = LONGITUDES
-    for path, values in ((U, EASTWARD), (V, NORTHWARD)):
+    for path in (U, V):
         array = zarr.create_array(
             root,
             name=path,
@@ -61,12 +68,14 @@ def wind_store(tmp_path, producer):
             fill_value=numpy.nan,
             dimension_names=["init_time", "lead_time", "latitude", "longitude"],
         )
-        array[1, 1] = values
+        if path in held:
+            array[1, 1] = held[path]
     session.commit("build")
 
     class Built:
         href = f"{base}/wind/v0.1.0.icechunk"
 
+    Built.repository = repository
     return Built()
 
 
@@ -140,3 +149,43 @@ class TestAVectorIsComputedWhenDrawn:
         stores = warm.published_stores()
 
         assert list(stores.values()) == [{U, V}]
+
+
+class TestAVectorIsReadAsOne:
+    """Both parts of a vector field come from one snapshot of the store, within one timeout."""
+
+    def test_a_reopen_for_one_part_reads_the_other_again_from_the_same_snapshot(
+        self, client, rendering, tmp_path, producer
+    ):
+        # The worker opened the store when it held only u, as 30 east; then u was
+        # corrected to 3 and v written as 4, in one commit.
+        built = _wind_store(tmp_path, producer, {U: numpy.full((5, 8), 30.0)})
+        store_reader.opened_store(built.href, (), True)
+        session = built.repository.writable_session("main")
+        zarr.open_array(session.store, path=U)[1, 1] = EASTWARD
+        zarr.open_array(session.store, path=V)[1, 1] = NORTHWARD
+        session.commit("correct u, add v")
+        publish(rendering, {FIELD: vector_entry(built.href)})
+
+        response = point(client, 0.5, 0.5)
+
+        assert response.status_code == 200, response.text
+        # hypot(3, 4) — never the old u with the new v, hypot(30, 4).
+        assert response.json()["values"] == [pytest.approx(5.0)]
+
+    def test_both_parts_are_read_within_one_timeout(self, client, rendering, wind_store, monkeypatch):
+        monkeypatch.setattr(store_reader, "STORE_READ_TIMEOUT", 1.0)
+        field = store_reader.OpenStore.field
+
+        def slow(self, path, *at):
+            clock.sleep(0.7)
+            return field(self, path, *at)
+
+        monkeypatch.setattr(store_reader.OpenStore, "field", slow)
+        publish(rendering, {FIELD: vector_entry(wind_store.href)})
+
+        response = point(client, 0.5, 0.5)
+
+        # Each part alone answers in time; the two together do not.
+        assert response.status_code == 504
+        assert "did not answer within" in response.json()["detail"]

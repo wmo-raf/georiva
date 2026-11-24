@@ -704,15 +704,27 @@ def forget_all() -> None:
 
 def read_field(target: StoreSlice) -> Field:
     """The field ``target`` names: kept by this process, or decoded now and kept.
-    A vector field is computed from its u and v, each read as any field is."""
+    A vector field is computed from its u and v."""
     return _fields.kept_or_read(target, _computed if target.transform else _decode)
 
 
 def _computed(target: StoreSlice) -> Field:
     """A vector field, from its u and v at the same step (ADR 0048): the speed
     or the bearing the wind blows from. The same arithmetic as core's
-    ``geoprocessing.wind``, across the process boundary."""
-    u, v = (read_field(part) for part in target.components())
+    ``geoprocessing.wind``, across the process boundary.
+
+    Both parts kept already are used as they are. Otherwise both are decoded
+    together — from one opening of the store, within one ``STORE_READ_TIMEOUT``
+    — so a reopen for one part never pairs it with the other from an older
+    snapshot; and both are kept, for a map of either."""
+    parts = target.components()
+    kept = [_fields.get(part) for part in parts]
+    if None in kept:
+        generation = _fields.generation(_store_key(target))
+        kept = _decode_together(parts, missing=target)
+        for part, found in zip(parts, kept, strict=True):
+            _fields.put(part, found, forgets=generation)
+    u, v = kept
     if u.values.shape != v.values.shape or (u.west, u.north, u.x_resolution, u.y_resolution) != (
         v.west,
         v.north,
@@ -730,24 +742,36 @@ def _computed(target: StoreSlice) -> Field:
 
 
 def _decode(target: StoreSlice) -> Field:
-    """Decode the field ``target`` names: opening the store if this process
-    has not yet, reopening it once if the step is not held, and reading the
-    field, all within one ``STORE_READ_TIMEOUT``."""
+    """Decode the field ``target`` names (see :func:`_decode_together`)."""
+    (found,) = _decode_together((target,), missing=target)
+    return found
 
-    def read() -> Field:
+
+def _decode_together(parts: tuple[StoreSlice, ...], missing: StoreSlice) -> tuple[Field, ...]:
+    """Decode the fields ``parts`` name, all of one store and step: opening the
+    store if this process has not yet, reopening it once if a step is not held
+    and reading every part again from the reopened one, all within one
+    ``STORE_READ_TIMEOUT``. A step a reopen did not find is remembered as
+    ``missing`` — the field asked for."""
+    key = _store_key(missing)
+
+    def read_all(opened: OpenStore) -> tuple[Field, ...]:
+        return tuple(opened.field(part.array, part.time, part.reftime) for part in parts)
+
+    def read() -> tuple[Field, ...]:
         with _opened.lock:
-            forgets = _opened.forgets.get(_store_key(target), 0)
-        opened = opened_store(*_store_key(target))
+            forgets = _opened.forgets.get(key, 0)
+        opened = opened_store(*key)
         try:
-            return opened.field(target.array, target.time, target.reftime)
+            return read_all(opened)
         except StoreStepNotHeld:
-            if _remembered_missing(target):
+            if _remembered_missing(missing):
                 raise
-            fresher = reopened_store(*_store_key(target), stale=opened)
+            fresher = reopened_store(*key, stale=opened)
         try:
-            return fresher.field(target.array, target.time, target.reftime)
+            return read_all(fresher)
         except StoreStepNotHeld:
-            _remember_missing(target, forgets)
+            _remember_missing(missing, forgets)
             raise
 
     return _bounded(read)
@@ -827,6 +851,12 @@ class FieldCache:
                 self.size -= self._kept.popitem(last=False)[1].values.nbytes
             self._kept[target] = found
             self.size += cost
+
+    def generation(self, store_key: tuple[str, tuple[tuple[str, str], ...], bool]) -> int:
+        """How many times the store at this (address, pins) has been let go: a
+        read begun at one generation is kept only while it is still the current one."""
+        with self._lock:
+            return self._forgets.get(store_key, 0)
 
     def forget(self, store_key: tuple[str, tuple[tuple[str, str], ...], bool]) -> None:
         """Drop every field kept from the store at this (address, pins).

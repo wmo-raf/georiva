@@ -67,7 +67,9 @@ every step where both are held, and its values are computed from the two when it
 
 8. **Titiler computes it too.** The entry Django publishes for a vector Store asset names `vector: {u, v, transform}`
    in place of `array`. Titiler reads both fields through its open store and field cache, computes the same quantity
-   with the same arithmetic, and keeps the result as it keeps any field. Its warm-up opens both arrays. An entry naming
+   with the same arithmetic, and keeps the result as it keeps any field. Parts it does not hold yet are decoded
+   together, from one opening of the store within one read timeout: a reopen for a step one part lacks reads both
+   again, so a vector never pairs parts from two snapshots. Its warm-up opens both arrays. An entry naming
    a transform it does not know, or lacking either part, is refused as misdescribed.
 
 9. **STAC names the parts.** A vector Store asset carries `georiva:vector` (`u`, `v`, `transform`) in place of
