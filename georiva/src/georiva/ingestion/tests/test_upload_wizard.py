@@ -288,8 +288,8 @@ class UploadSampleAjaxTests(TestCase):
         self.assertEqual(var["unit_id"], unit.pk)
 
     def test_unmatched_valid_unit_is_creatable(self):
-        # 'knot' is pint-valid but not among the seeded units
-        var = self._post_sample(self._mock_plugin(units="knot")).json()["variables"][0]
+        # 'mph' is pint-valid but not among the seeded units
+        var = self._post_sample(self._mock_plugin(units="mph")).json()["variables"][0]
         self.assertIsNone(var["unit_id"])
         self.assertTrue(var["can_create"])
 
@@ -1067,11 +1067,11 @@ class ProvisionTests(TestCase):
 
     def test_provision_creates_unit_from_unit_create(self):
         session = _full_session()
-        session["assignments"] = [_assignment(units="knot", unit_create="knot")]
+        session["assignments"] = [_assignment(units="mph", unit_create="mph")]
         _seed_session(self.client, session)
         self.client.post(PROVISION_URL)
-        unit = Unit.objects.get(symbol="knot")
-        self.assertEqual(unit.name, "knot")
+        unit = Unit.objects.get(symbol="mph")
+        self.assertEqual(unit.name, "mph")
         self.assertEqual(Variable.objects.get(slug="2t").unit, unit)
 
     def test_provision_uses_existing_unit_by_id(self):
