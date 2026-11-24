@@ -17,7 +17,7 @@ from django.urls import reverse
 from georiva.core.machine_plane.colour_table import LAYER_UNSCALE, encode
 from georiva.core.machine_plane.palette_cache import build_variable_payload
 from georiva.core.machine_plane.render_contract import render_contract
-from georiva.core.models import Asset, Collection, Item, Unit, Variable, VariableStyle
+from georiva.core.models import Asset, Collection, Item, OutOfRange, Unit, Variable, VariableStyle
 from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.edr.ids import edr_collection_id
 from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
@@ -40,6 +40,17 @@ STEPPED = [
     {"value": 293.15, "color": "#b2182b"},
     {"value": 323.15, "color": "#b2182b"},
 ]
+
+#: Two bands inside the range, −10…10 and 10…30 °C, leaving room below and above.
+INNER_STEPPED = [
+    {"value": 263.15, "color": "#2166ac"},
+    {"value": 283.15, "color": "#2166ac"},
+    {"value": 283.15, "color": "#b2182b"},
+    {"value": 303.15, "color": "#b2182b"},
+]
+
+#: Every under/over setting a style can take (#788).
+OUT_OF_RANGE_SETTINGS = [(under, over) for under in OutOfRange.values for over in OutOfRange.values]
 
 
 def unit(symbol):
@@ -69,8 +80,10 @@ class ColourTableTests(TestCase):
     def setUp(self):
         self.variable = Variable.objects.get(pk=self.variable_pk)
 
-    def style(self, stops):
-        VariableStyle.objects.create(variable=self.variable, name="Style", slug="style", is_default=True, stops=stops)
+    def style(self, stops, under=OutOfRange.CLAMP, over=OutOfRange.CLAMP):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Style", slug="style", is_default=True, stops=stops, under=under, over=over
+        )
         return Variable.objects.get(pk=self.variable_pk)
 
     def titiler_colour(self, variable, value):
@@ -103,6 +116,38 @@ class ColourTableTests(TestCase):
 
     def test_titiler_and_the_browser_agree_on_a_styleless_variable(self):
         self.assert_renderers_agree(self.variable)
+
+    def test_titiler_and_the_browser_agree_whatever_the_under_and_over(self):
+        for stops in (CONTINUOUS, STEPPED, INNER_STEPPED):
+            for under, over in OUT_OF_RANGE_SETTINGS:
+                with self.subTest(stops=stops, under=under, over=over):
+                    VariableStyle.objects.filter(variable=self.variable).delete()
+                    self.assert_renderers_agree(self.style(stops, under, over))
+
+    def test_transparent_under_and_over_leave_values_outside_the_stops_undrawn(self):
+        variable = self.style(INNER_STEPPED, OutOfRange.TRANSPARENT, OutOfRange.TRANSPARENT)
+        alpha = {value: self.titiler_colour(variable, value)[3] for value in (240.0, 262.0, 264.0, 302.0, 304.0, 320.0)}
+        self.assertEqual(alpha, {240.0: 0, 262.0: 0, 264.0: 255, 302.0: 255, 304.0: 0, 320.0: 0})
+
+    def test_clamped_under_and_over_draw_the_end_colours(self):
+        variable = self.style(INNER_STEPPED)
+        self.assertEqual(self.titiler_colour(variable, 240.0), [0x21, 0x66, 0xAC, 255])
+        self.assertEqual(self.titiler_colour(variable, 320.0), [0xB2, 0x18, 0x2B, 255])
+
+    def test_under_and_over_are_independent(self):
+        variable = self.style(INNER_STEPPED, under=OutOfRange.TRANSPARENT)
+        self.assertEqual(self.titiler_colour(variable, 240.0)[3], 0)
+        self.assertEqual(self.titiler_colour(variable, 320.0), [0xB2, 0x18, 0x2B, 255])
+
+    def test_values_clipped_past_the_range_take_the_under_and_over(self):
+        """A style whose stops span the whole range: what lies beyond it is
+        clipped into the end codes, and a transparent under or over hides them."""
+        variable = self.style(STEPPED, OutOfRange.TRANSPARENT, OutOfRange.TRANSPARENT)
+        low, high = RANGE_K
+        self.assertEqual(self.titiler_colour(variable, low - 5.0)[3], 0)
+        self.assertEqual(self.titiler_colour(variable, high + 5.0)[3], 0)
+        self.assertEqual(self.titiler_colour(variable, low + 1.0), [0x21, 0x66, 0xAC, 255])
+        self.assertEqual(self.titiler_colour(variable, high - 1.0), [0xB2, 0x18, 0x2B, 255])
 
     def test_a_stepped_style_keeps_its_hard_edges(self):
         palette = dict(render_contract(self.style(STEPPED)).layer_palette)

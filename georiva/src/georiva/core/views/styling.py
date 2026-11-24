@@ -31,7 +31,7 @@ from wagtail.admin import messages
 from georiva.core.machine_plane import titiler_encoded_preview_url
 from georiva.core.machine_plane.colour_table import colour_table
 from georiva.core.machine_plane.render_contract import render_contract
-from georiva.core.models import Collection, ColorRamp, Item, Variable, VariableStyle
+from georiva.core.models import Collection, ColorRamp, Item, OutOfRange, Variable, VariableStyle
 from georiva.core.models.visualization import _swatch_html, served_ramp_stops
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
@@ -97,6 +97,10 @@ class VariableStyleForm(forms.Form):
     ramp = forms.ModelChoiceField(queryset=ColorRamp.objects.none(), required=False)
     mode = forms.ChoiceField(choices=VariableStyle.Mode.choices)
     steps = forms.IntegerField(required=False, min_value=2)
+    # What values beyond the stops are drawn as (#788); a post without them
+    # keeps today's behaviour, clamping.
+    under = forms.TypedChoiceField(choices=OutOfRange.choices, required=False, empty_value=OutOfRange.CLAMP)
+    over = forms.TypedChoiceField(choices=OutOfRange.choices, required=False, empty_value=OutOfRange.CLAMP)
 
     def __init__(self, *args, ramp_queryset, **kwargs):
         super().__init__(*args, **kwargs)
@@ -304,7 +308,9 @@ def variable_style_colours(request, collection_pk, variable_pk):
     Titiler will serve once the stops are saved.
 
     ``stops`` is JSON, ``[{"value", "color"}, ...]`` in the served unit, as the
-    form shows them (ADR 0046 §3). Read-only and side-effect-free, hence GET.
+    form shows them (ADR 0046 §3); ``under`` and ``over`` are the style's
+    out-of-range settings, clamping when absent (#788). Read-only and
+    side-effect-free, hence GET.
     """
     collection = get_org_object_or_404(request, Collection, pk=collection_pk)
     variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
@@ -319,7 +325,11 @@ def variable_style_colours(request, collection_pk, variable_pk):
         for stop in stops
     ):
         return refused
-    style = VariableStyle(variable=variable, stops=variable.stored_stops(stops))
+    under = request.GET.get("under") or OutOfRange.CLAMP
+    over = request.GET.get("over") or OutOfRange.CLAMP
+    if under not in OutOfRange.values or over not in OutOfRange.values:
+        return JsonResponse({"error": _("Under and over are each clamp or transparent.")}, status=400)
+    style = VariableStyle(variable=variable, stops=variable.stored_stops(stops), under=under, over=over)
     try:
         style.clean()
     except ValidationError:
@@ -425,6 +435,8 @@ def variable_styling(request, collection_pk, variable_pk):
             "ramp": selected.ramp_id if selected else None,
             "mode": selected.mode if selected else VariableStyle.Mode.CONTINUOUS,
             "steps": (selected.steps if selected else None) or DEFAULT_STEPPED_CLASSES,
+            "under": selected.under if selected else OutOfRange.CLAMP,
+            "over": selected.over if selected else OutOfRange.CLAMP,
         },
     )
     # The form speaks the served unit; stops are stored in the source unit (ADR 0046 §3).
@@ -463,6 +475,8 @@ def variable_styling(request, collection_pk, variable_pk):
                 style.ramp = data["ramp"]
                 style.mode = data["mode"]
                 style.steps = data["steps"]
+                style.under = data["under"]
+                style.over = data["over"]
                 try:
                     stops = variable.stored_stops(_parse_stops(request.POST))
                     if creating and not stops and style.ramp:

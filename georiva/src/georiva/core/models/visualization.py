@@ -650,6 +650,20 @@ class VariableStyle(TimeStampedModel):
     #: ...]`` in ascending value order. Absolute physical values — this is the
     #: one place styling and the variable's semantics meet.
     stops = models.JSONField(default=list, blank=True)
+    #: What values beyond the stops are drawn as (#788): the end colour, or
+    #: nothing. Carried into the style's colour table, so every renderer agrees.
+    under = models.CharField(
+        max_length=16,
+        choices=OutOfRange.choices,
+        default=OutOfRange.CLAMP,
+        help_text="What a value below the first stop is drawn as.",
+    )
+    over = models.CharField(
+        max_length=16,
+        choices=OutOfRange.choices,
+        default=OutOfRange.CLAMP,
+        help_text="What a value above the last stop is drawn as.",
+    )
 
     class Meta:
         ordering = ["-is_default", "name"]

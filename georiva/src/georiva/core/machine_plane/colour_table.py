@@ -14,7 +14,9 @@ here, and every renderer looks its codes up in it:
 
 ``table[code] = colour_at(decode(code))``: the code is decoded to the value it
 stands for, and the stops are interpolated in value space. A stepped style
-keeps its hard edges through its doubled boundary stops. Every number here is
+keeps its hard edges through its doubled boundary stops. A style's under and
+over (#788) make the codes beyond its stops transparent, alpha 0, so the basemap
+shows through them in every renderer alike. Every number here is
 in the Variable's source unit (ADR 0046 §14), what a tile is drawn with.
 """
 
@@ -66,18 +68,58 @@ def colour_at(stops: list, value: float) -> list:
     return _rgba(stops[-1][1])
 
 
-def table_from_stops(stops: list, vmin: float, vmax: float) -> list:
+#: An undrawn code: what a transparent under or over gives (#788).
+TRANSPARENT = [0, 0, 0, 0]
+
+CLAMP = "clamp"
+
+
+def _is_under(code: int, first: float, vmin: float, vmax: float) -> bool:
+    """Whether ``code`` stands for values below the first stop.
+
+    Code 0 also holds every value clipped below the range, all of them below
+    any first stop that is not itself below the range, so it is under whenever
+    the stops start at or above the range's bottom.
+    """
+    if code == 0:
+        return first >= vmin
+    return decode(code, vmin, vmax) < first
+
+
+def _is_over(code: int, last: float, vmin: float, vmax: float) -> bool:
+    """Whether ``code`` stands for values above the last stop.
+
+    The top code holds the range's top and every value clipped above it, so it
+    is over whenever the stops end at or below the range's top.
+    """
+    if code == TOP_CODE:
+        return last <= vmax
+    return decode(code, vmin, vmax) > last
+
+
+def table_from_stops(stops: list, vmin: float, vmax: float, under: str = CLAMP, over: str = CLAMP) -> list:
     """The 256-entry table of ``[[value, [r, g, b(, a)]], ...]`` stops over ``vmin``…``vmax``.
 
     No stops is grayscale, what a styleless Variable renders as; an empty range
-    is the first stop's colour throughout.
+    is the first stop's colour throughout. ``under`` and ``over`` (``clamp`` or
+    ``transparent``, :class:`~georiva.core.models.OutOfRange`) say what the
+    codes beyond the stops get: the end colour, or nothing (alpha 0).
     """
     if not stops:
         return [[code, code, code, 255] for code in range(CODES)]
     stops = sorted(stops, key=lambda stop: stop[0])
     if vmax == vmin:
         return [_rgba(stops[0][1])] * CODES
-    return [colour_at(stops, decode(code, vmin, vmax)) for code in range(CODES)]
+    first, last = stops[0][0], stops[-1][0]
+    table = []
+    for code in range(CODES):
+        if under != CLAMP and _is_under(code, first, vmin, vmax):
+            table.append(list(TRANSPARENT))
+        elif over != CLAMP and _is_over(code, last, vmin, vmax):
+            table.append(list(TRANSPARENT))
+        else:
+            table.append(colour_at(stops, decode(code, vmin, vmax)))
+    return table
 
 
 def style_stops(style) -> list:
@@ -91,7 +133,9 @@ def colour_table(variable, style=None) -> list:
     """``style``'s table over ``variable``'s range, or the default style's when
     none is named; grayscale for a Variable with no style."""
     style = style if style is not None else variable.default_style
-    return table_from_stops(style_stops(style), variable.value_min, variable.value_max)
+    if style is None:
+        return table_from_stops([], variable.value_min, variable.value_max)
+    return table_from_stops(style_stops(style), variable.value_min, variable.value_max, style.under, style.over)
 
 
 def as_colormap(table: list) -> dict:

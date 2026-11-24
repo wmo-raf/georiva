@@ -907,6 +907,15 @@ Legends and the boundary choropleth read the stops, which agree with the table b
 as the term; `colormap` survives only as a wire key (Titiler's palette payload, the STAC Render extension). See #784.
 _Avoid_: colormap (except as that wire key), palette (for the table)
 
+**Under / over** (`VariableStyle.under` / `.over`, `OutOfRange`):
+What a style does with values below its first stop (under) or above its last (over): **clamp**, drawn in the end
+colour (the default, and every style's behaviour before #788), or **transparent**, not drawn, so the basemap shows
+through. Carried into the **Colour table** as alpha-0 entries, so tiles, WMTS, STAC renders and the browser map
+agree. The table's end codes also hold every value clipped beyond the Variable's range, so a transparent under hides
+code 0 whenever the stops start at or above the range's bottom (and likewise over and code 255). Each Variable style
+and each Style template carries both; set on the Styling surface. See #784.
+_Avoid_: out-of-range colour, extend (matplotlib's term), nodata (that is no value at all, not a value beyond the stops)
+
 **Seed vs. tune**:
 The write policy for ranges and styling. Provisioning surfaces (source setup, upload wizard, derived-product
 recipes, plugin declarations) may **seed** — create-only, never overwriting what exists. Only the styling surface

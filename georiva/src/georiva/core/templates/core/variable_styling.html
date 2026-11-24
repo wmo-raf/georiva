@@ -760,6 +760,18 @@
                         </button>
                     </div>
 
+                    {# What values beyond the stops are drawn as (#788): the end colour, or nothing. #}
+                    <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ style_form.under.id_for_label }}">{% trans "Below the first stop" %}</label>
+                            {{ style_form.under }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ style_form.over.id_for_label }}">{% trans "Above the last stop" %}</label>
+                            {{ style_form.over }}
+                        </div>
+                    </div>
+
                     <h3 class="w-label-2">{% trans "Preview" %}</h3>
                     <div class="vs-preview" id="vs-preview"></div>
                     <div class="vs-preview-labels">
@@ -1055,6 +1067,8 @@
             const modeSelect = form.querySelector('[name="mode"]');
             const stepsField = document.getElementById('vs-steps-field');
             const stepsInput = form.querySelector('[name="steps"]');
+            const underSelect = form.querySelector('[name="under"]');
+            const overSelect = form.querySelector('[name="over"]');
             const body = document.getElementById('vs-stops-body');
             const preview = document.getElementById('vs-preview');
             const previewMin = document.getElementById('vs-preview-min');
@@ -1316,6 +1330,8 @@
             async function fetchColourTable(stops) {
                 const url = new URL(previewConfig.coloursUrl, window.location.origin);
                 url.searchParams.set('stops', JSON.stringify(stops));
+                url.searchParams.set('under', underSelect.value);
+                url.searchParams.set('over', overSelect.value);
                 const response = await fetch(url, {credentials: 'same-origin'});
                 if (!response.ok) {
                     return null;
@@ -2041,6 +2057,13 @@
             stepsInput.addEventListener('input', function () {
                 styleDirty = true;
                 refreshState();
+            });
+            [underSelect, overSelect].forEach(function (select) {
+                select.addEventListener('change', function () {
+                    styleDirty = true;
+                    refreshState();
+                    paintMap(readStops());
+                });
             });
             form.querySelector('[name="name"]').addEventListener('input', function () {
                 styleDirty = true;

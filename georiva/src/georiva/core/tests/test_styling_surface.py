@@ -27,6 +27,7 @@ from georiva.core.models import (
     ColorRamp,
     ColorRampStop,
     Item,
+    OutOfRange,
     Variable,
     VariableStyle,
 )
@@ -665,6 +666,75 @@ class PreviewColourTableTests(StylingSurfaceTestCase):
         foreign = make_org_tree(self.other_org)
         url = reverse("variable_style_colours", args=[foreign["collection"].pk, foreign["variable"].pk])
         self.assertEqual(self.client.get(url, {"stops": "[]"}).status_code, 404)
+
+
+class UnderOverTests(StylingSurfaceTestCase):
+    """Every style, hand-made ones included, says what values beyond its stops
+    are drawn as (#788): the end colour, or nothing."""
+
+    STOPS = [{"value": 0.5, "color": "#a0c8f0"}, {"value": 50.0, "color": "#08306b"}]
+
+    def setUp(self):
+        super().setUp()
+        self.style = VariableStyle.objects.create(
+            variable=self.variable, name="Rain", slug="rain", is_default=True, stops=self.STOPS
+        )
+
+    def post_style(self, **fields):
+        return self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "rain",
+                "name": "Rain",
+                "ramp": "",
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+                "stop_value": ["0.5", "50"],
+                "stop_color": ["#a0c8f0", "#08306b"],
+                **fields,
+            },
+        )
+
+    def test_an_existing_style_clamps(self):
+        self.assertEqual((self.style.under, self.style.over), (OutOfRange.CLAMP, OutOfRange.CLAMP))
+
+    def test_the_form_shows_both_settings(self):
+        response = self.client.get(self.form_url)
+        self.assertContains(response, 'name="under"')
+        self.assertContains(response, 'name="over"')
+
+    def test_under_and_over_are_saved(self):
+        response = self.post_style(under=OutOfRange.TRANSPARENT, over=OutOfRange.CLAMP)
+        self.assertEqual(response.status_code, 302)
+        self.style.refresh_from_db()
+        self.assertEqual((self.style.under, self.style.over), (OutOfRange.TRANSPARENT, OutOfRange.CLAMP))
+
+    def test_an_unknown_setting_is_refused(self):
+        response = self.post_style(under="hidden", over=OutOfRange.CLAMP)
+        self.assertEqual(response.status_code, 200)
+        self.style.refresh_from_db()
+        self.assertEqual(self.style.under, OutOfRange.CLAMP)
+
+    def test_the_preview_colours_unsaved_settings_as_titiler_will_once_saved(self):
+        from georiva.core.machine_plane.palette_cache import build_variable_payload
+
+        url = reverse("variable_style_colours", args=[self.collection.pk, self.variable.pk])
+        response = self.client.get(
+            url, {"stops": json.dumps(self.STOPS), "under": OutOfRange.TRANSPARENT, "over": OutOfRange.TRANSPARENT}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.post_style(under=OutOfRange.TRANSPARENT, over=OutOfRange.TRANSPARENT)
+        colormap = build_variable_payload(Variable.objects.get(pk=self.variable.pk))["colormap"]
+        table = response.json()["colourTable"]
+        self.assertEqual(table, [colormap[code] for code in range(256)])
+        self.assertEqual(table[0][3], 0)
+
+    def test_the_preview_refuses_an_unknown_setting(self):
+        url = reverse("variable_style_colours", args=[self.collection.pk, self.variable.pk])
+        response = self.client.get(url, {"stops": json.dumps(self.STOPS), "under": "hidden"})
+        self.assertEqual(response.status_code, 400)
 
 
 class StyleSetManagementTests(StylingSurfaceTestCase):
