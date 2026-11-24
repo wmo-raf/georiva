@@ -6,6 +6,7 @@ exclude .gitignore
 
 include README.md
 recursive-include src/ *.py
+recursive-include src/georiva/core/style_catalogue *.json
 recursive-include src/**/templates *
 recursive-include src/**/static *
 recursive-include src/**/locale *.po *.mo
