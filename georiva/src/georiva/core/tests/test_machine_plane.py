@@ -786,6 +786,15 @@ class StyleSelectorAddressTests(TestCase):
         self.analyst.stops = [{"value": 0.0, "color": "#123456"}, {"value": 50.0, "color": "#00ff00"}]
         self.assertNotEqual(before, style_version_token(self.variable, self.analyst))
 
+    def test_editing_a_styles_under_or_over_changes_its_token(self):
+        """A transparent under or over is baked into a tile's pixels (#788)."""
+        before = style_version_token(self.variable, self.analyst)
+        self.analyst.under = "transparent"
+        under = style_version_token(self.variable, self.analyst)
+        self.analyst.under, self.analyst.over = "clamp", "transparent"
+        over = style_version_token(self.variable, self.analyst)
+        self.assertEqual(len({before, under, over}), 3)
+
     def test_editing_the_range_changes_every_styles_token(self):
         before = style_version_token(self.variable, self.official)
         self.variable.value_max = (self.variable.value_max or 0) + 1

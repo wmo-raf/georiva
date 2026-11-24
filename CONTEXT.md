@@ -916,6 +916,15 @@ wherever values become codes — Titiler's tiles, WMTS GetTile and the encoded t
 seen. The texture names it in `X-Image-Curve`. See ADR 0049.
 _Avoid_: scale (that is the unit conversion's factor), stretch
 
+**Under / over** (`VariableStyle.under` / `.over`, `OutOfRange`):
+What a style does with values below its first stop (under) or above its last (over): **clamp**, drawn in the end
+colour (the default, and every style's behaviour before #788), or **transparent**, not drawn, so the basemap shows
+through. Carried into the **Colour table** as alpha-0 entries, so tiles, WMTS, STAC renders and the browser map
+agree. The table's end codes also hold every value clipped beyond the Variable's range, so a transparent under hides
+code 0 whenever the stops start at or above the range's bottom (and likewise over and code 255). Each Variable style
+and each Style template carries both; set on the Styling surface. See #784.
+_Avoid_: out-of-range colour, extend (matplotlib's term), nodata (that is no value at all, not a value beyond the stops)
+
 **Seed vs. tune**:
 The write policy for ranges and styling. Provisioning surfaces (source setup, upload wizard, derived-product
 recipes, plugin declarations) may **seed** — create-only, never overwriting what exists. Only the styling surface
