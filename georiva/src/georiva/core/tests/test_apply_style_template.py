@@ -94,16 +94,16 @@ class TemplatePickerTests(ApplyStyleTemplateTestCase):
             slug="warm",
             quantity=StyleTemplate.Quantity.TEMPERATURE,
             unit=_unit("°C"),
-            levels=[0, 1],
-            colors=["#ff0000"],
+            levels=[0, 1, 2],
+            colors=["#ff0000", "#aa0000"],
         )
         cls.fahrenheit = _template(
             name="Warm °F",
             slug="warm-f",
             quantity=StyleTemplate.Quantity.TEMPERATURE,
             unit=_unit("°F"),
-            levels=[32, 50],
-            colors=["#ff0000"],
+            levels=[32, 50, 68],
+            colors=["#ff0000", "#aa0000"],
         )
         cls.rain = _template(organisation=cls.org)
         cls.foreign = _template(organisation=cls.other_org, name="Foreign rain", slug="foreign-rain")
@@ -203,6 +203,21 @@ class ApplyWritesASteppedStyleTests(ApplyStyleTemplateTestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertFalse(dust.styles.exists())
+
+    def test_a_template_the_style_cannot_hold_is_refused_with_a_message(self):
+        # A one-band template, saved before templates needed two bands: the
+        # stepped style it would make is not a valid style.
+        one_band = StyleTemplate.objects.create(
+            organisation=self.org, name="One band", slug="one-band", levels=[0, 1], colors=["#ffffff"], unit=_unit("mm")
+        )
+        rain = self.make_variable("rain", "mm")
+
+        response = self.apply(one_band, rain, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(rain.styles.exists())
+        errors = [m for m in response.context["messages"] if m.level_tag == "error"]
+        self.assertTrue(errors)
 
     def test_another_organisations_template_cannot_be_applied(self):
         foreign = _template(organisation=self.other_org, slug="foreign")

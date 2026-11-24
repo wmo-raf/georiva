@@ -577,6 +577,13 @@ def variable_styling(request, collection_pk, variable_pk):
             except style_application.ConversionRefused as refused:
                 messages.error(request, str(refused))
                 return redirect(form_url)
+            except ValidationError as invalid:
+                messages.error(
+                    request,
+                    _('The "%(template)s" template cannot be applied: %(why)s')
+                    % {"template": template.name, "why": " ".join(invalid.messages)},
+                )
+                return redirect(form_url)
             messages.success(
                 request, _('Applied the "%(template)s" template as a new style.') % {"template": template.name}
             )

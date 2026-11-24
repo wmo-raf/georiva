@@ -60,10 +60,14 @@ class StyleTemplateValidationTests(TestCase):
                 _template(colors=colors).full_clean()
             self.assertIn("colors", caught.exception.message_dict)
 
-    def test_a_template_needs_at_least_one_band(self):
-        with self.assertRaises(ValidationError) as caught:
-            _template(levels=[1], colors=[]).full_clean()
-        self.assertIn("levels", caught.exception.message_dict)
+    def test_a_template_needs_at_least_two_bands(self):
+        for levels, colors in (([1], []), ([0, 1], ["#ffffff"])):
+            with self.subTest(levels=levels), self.assertRaises(ValidationError) as caught:
+                _template(levels=levels, colors=colors).full_clean()
+            self.assertIn("levels", caught.exception.message_dict)
+
+    def test_two_bands_are_enough(self):
+        _template(levels=[0, 1, 2], colors=["#ffffff", "#0000ff"]).full_clean()
 
     def test_levels_must_be_numbers(self):
         with self.assertRaises(ValidationError) as caught:

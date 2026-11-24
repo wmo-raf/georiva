@@ -529,8 +529,9 @@ class StyleTemplate(TimeStampedModel):
             isinstance(v, (int, float)) and not isinstance(v, bool) for v in levels
         ):
             errors["levels"] = "Levels must be a list of numbers."
-        elif len(levels) < 2:
-            errors["levels"] = "A template needs at least two levels: one band."
+        elif len(levels) < 3:
+            # A template becomes a stepped style, and a stepped style is at least two classes.
+            errors["levels"] = "A template needs at least three levels: two bands."
         elif any(b <= a for a, b in zip(levels, levels[1:], strict=False)):
             errors["levels"] = "Levels must be strictly ascending."
 
