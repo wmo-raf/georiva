@@ -24,7 +24,9 @@ from django.utils.text import slugify
 
 from georiva.core.machine_plane.colour_table import CODES, encode, encoding_curve
 from georiva.core.models import Variable, VariableStyle
+from georiva.core.models.visualization import css_hex
 from georiva.core.unit_utils import Conversion, ConversionRefused
+from georiva.utils.slugs import free_slug
 
 #: A band given fewer codes than this is drawn as a sliver, or not at all.
 MIN_BAND_CODES = 2
@@ -64,18 +66,14 @@ def conversion(template, variable) -> Conversion:
     return Conversion.between(template.unit.symbol, variable.source_unit.symbol, water=variable.water)
 
 
-def _hex(color: str) -> str:
-    return color if color.startswith("#") else f"#{color}"
-
-
 def template_stops(template, variable) -> list:
     """The template's bands as stepped stops in ``variable``'s source unit:
     each band two stops, at its lower and upper level, in the band's colour."""
     convert = conversion(template, variable).forward
     stops = []
     for low, high, color in zip(template.levels[:-1], template.levels[1:], template.colors, strict=True):
-        stops.append({"value": convert(low), "color": _hex(color)})
-        stops.append({"value": convert(high), "color": _hex(color)})
+        stops.append({"value": convert(low), "color": css_hex(color)})
+        stops.append({"value": convert(high), "color": css_hex(color)})
     return stops
 
 
@@ -144,13 +142,7 @@ def unique_style_slug(variable, name) -> str:
     The slug is the machine-plane selector (ADR 0023), so it is minted once
     from the name and never edited.
     """
-    base = slugify(name) or "style"
-    existing = set(variable.styles.values_list("slug", flat=True))
-    slug, n = base, 2
-    while slug in existing:
-        slug = f"{base}-{n}"
-        n += 1
-    return slug
+    return free_slug(slugify(name) or "style", set(variable.styles.values_list("slug", flat=True)))
 
 
 def apply_template(template, variable, *, make_default=False, name=None) -> VariableStyle:

@@ -9,6 +9,7 @@ from wagtail.admin.panels import FieldPanel, InlinePanel
 from wagtail.models import Orderable
 
 from georiva.core.unit_utils import significant
+from georiva.utils.slugs import free_slug
 
 from .variable import Variable
 
@@ -18,6 +19,12 @@ HEX_COLOR_VALIDATOR = RegexValidator(
     regex=r"^#?(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
     message="Enter a hex color such as '#RRGGBB' or '#RRGGBBAA'.",
 )
+
+
+def css_hex(color: str) -> str:
+    """A stored hex colour as CSS reads it: with its ``#``, which storage may omit."""
+    color = color.strip()
+    return color if color.startswith("#") else f"#{color}"
 
 
 def hex_to_rgba_list(hex_color: str):
@@ -334,8 +341,7 @@ class ColorRampStop(Orderable):
     ]
 
     def css_color(self):
-        value = self.hex_value.strip()
-        return value if value.startswith("#") else f"#{value}"
+        return css_hex(self.hex_value)
 
     def __str__(self):
         if self.position is not None:
@@ -499,10 +505,7 @@ class StyleTemplate(TimeStampedModel):
         ``-copy-2``… when it does not.
         """
         taken = set(type(self).objects.filter(organisation=organisation).values_list("slug", flat=True))
-        slug, n = self.slug, 1
-        while slug in taken:
-            slug = f"{self.slug}-copy" if n == 1 else f"{self.slug}-copy-{n}"
-            n += 1
+        slug = free_slug(self.slug, taken, stem=f"{self.slug}-copy")
         copy = type(self)(
             organisation=organisation,
             name=self.name,
@@ -565,7 +568,7 @@ class StyleTemplate(TimeStampedModel):
     def css_gradient(self):
         """The bands as equal-width hard-edged blocks, for previews: a band is
         a class, so a narrow one is drawn as readably as a wide one."""
-        colors = [c if c.startswith("#") else f"#{c}" for c in (self.colors or [])]
+        colors = [css_hex(c) for c in (self.colors or [])]
         if not colors:
             return ""
         width = 100 / len(colors)
