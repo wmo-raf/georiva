@@ -875,6 +875,15 @@ org-owned); the instance seeds a curated set under matplotlib-compatible names. 
 the ramp is reused, never the values. See ADR 0022.
 _Avoid_: palette (for the value-free thing), colormap (that's the rendered 256-entry output, the **Colour table**)
 
+**Style template** (`StyleTemplate`):
+A reusable, **value-anchored** set of band levels (n+1 ascending boundaries) and band colours (one per band) that
+declares its unit, its under/over behaviour and a recommended encoding curve. Stepped only. Where a Color ramp is
+value-free, a template is values: it is applied into a Variable style as a stops snapshot converted into the source
+unit, never live-linked. Tiered like Color ramps; a template with an `origin` (e.g. `earthkit-plots`) was shipped by
+GeoRiva and is read-only to everyone, the instance admin included — "Copy to my organisation" makes an editable copy.
+See #784.
+_Avoid_: style preset, palette template
+
 **Variable style** (`VariableStyle`):
 The applied, per-variable result: a named row (one-to-many from `Variable`, exactly one `is_default`) holding the
 ramp it came from, step count/mode, and the materialized absolute value→color **stops snapshot**. Applying a ramp

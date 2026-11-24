@@ -6,7 +6,7 @@ from .source_unit_corrected import SourceUnitCorrected
 from .town import Town
 from .units import Unit
 from .variable import Variable
-from .visualization import ColorRamp, ColorRampStop, VariableStyle
+from .visualization import ColorRamp, ColorRampStop, OutOfRange, StyleTemplate, VariableStyle
 
 __all__ = [
     "Topic",
@@ -17,6 +17,8 @@ __all__ = [
     "Variable",
     "ColorRamp",
     "ColorRampStop",
+    "OutOfRange",
+    "StyleTemplate",
     "VariableStyle",
     "Item",
     "Asset",
