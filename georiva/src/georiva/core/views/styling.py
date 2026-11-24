@@ -24,14 +24,14 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import localize
-from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 
+from georiva.core import style_application
 from georiva.core.machine_plane import titiler_encoded_preview_url
 from georiva.core.machine_plane.colour_table import colour_table
 from georiva.core.machine_plane.render_contract import render_contract
-from georiva.core.models import Collection, ColorRamp, Item, OutOfRange, Variable, VariableStyle
+from georiva.core.models import Collection, ColorRamp, Item, OutOfRange, StyleTemplate, Variable, VariableStyle
 from georiva.core.models.visualization import _swatch_html, served_ramp_stops
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
@@ -149,19 +149,11 @@ def _parse_stops(post):
     return entries
 
 
-def _unique_style_slug(variable, name):
-    """A slug for a new style, unique within the variable.
-
-    The slug is the machine-plane selector (ADR 0023), so it is minted once
-    from the name and never edited here.
-    """
-    base = slugify(name) or "style"
-    existing = set(variable.styles.values_list("slug", flat=True))
-    slug, n = base, 2
-    while slug in existing:
-        slug = f"{base}-{n}"
-        n += 1
-    return slug
+def _int_or_none(raw):
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _add_model_errors(form, error):
@@ -391,6 +383,68 @@ def collection_styling(request, collection_pk):
     return render(request, "core/collection_styling.html", context)
 
 
+def _template_picker(templates, variable):
+    """The Style template catalogue as the picker shows it (#791): grouped by
+    quantity, in catalogue order, split into the templates whose unit converts
+    into the Variable's source unit and the rest, each with the reason it is
+    not offered — what "show all" reveals."""
+    labels = dict(StyleTemplate.Quantity.choices)
+    offered, excluded = {}, {}
+    # The catalogue shares a handful of units: each is judged once.
+    refusals = {}
+    for template in templates:
+        if template.unit_id not in refusals:
+            try:
+                style_application.conversion(template, variable)
+            except style_application.ConversionRefused as refused:
+                refusals[template.unit_id] = str(refused)
+            else:
+                refusals[template.unit_id] = None
+        reason = refusals[template.unit_id]
+        row = {
+            "pk": template.pk,
+            "name": template.name,
+            "gradient": template.css_gradient(),
+            "levels_label": template.levels_label(),
+            "owner_label": template.owner_label(),
+            "reason": reason,
+        }
+        (excluded if reason else offered).setdefault(template.quantity, []).append(row)
+
+    def groups(by_quantity):
+        return [{"label": labels.get(quantity, quantity), "templates": rows} for quantity, rows in by_quantity.items()]
+
+    return {
+        "offered": groups(offered),
+        "excluded": groups(excluded),
+        "excluded_count": sum(len(rows) for rows in excluded.values()),
+    }
+
+
+def _encoding_proposal(variable, style):
+    """The range and curve ``style``'s template proposes, in the served unit,
+    with what they would do to its bands — or ``None`` when there is nothing to
+    propose: only a default style applied from a template sets the encoding
+    every style of the Variable shares (#791)."""
+    if style is None or not style.is_default or style.template is None:
+        return None
+    try:
+        encoding = style_application.proposed_encoding(style.template, variable)
+    except style_application.ConversionRefused:
+        return None
+    if encoding == style_application.current_encoding(variable):
+        return None
+    return {
+        "template": style.template,
+        "value_min": variable.served(encoding.value_min),
+        "value_max": variable.served(encoding.value_max),
+        "scale_type": encoding.scale_type,
+        "scale_type_label": Variable.ScaleType(encoding.scale_type).label,
+        "unit": variable.units,
+        "warnings": style_application.warnings(style.template, variable, encoding),
+    }
+
+
 def _get_style_or_none(variable, slug):
     if not slug:
         return None
@@ -406,7 +460,9 @@ def variable_styling(request, collection_pk, variable_pk):
     )
     variable = get_org_object_or_404(
         request,
-        Variable.objects.select_related("unit").prefetch_related("styles__ramp"),
+        Variable.objects.select_related("unit", "source_unit").prefetch_related(
+            "styles__ramp", "styles__template__unit"
+        ),
         pk=variable_pk,
         collection=collection,
     )
@@ -477,7 +533,7 @@ def variable_styling(request, collection_pk, variable_pk):
                 if creating:
                     style = VariableStyle(
                         variable=variable,
-                        slug=_unique_style_slug(variable, data["name"]),
+                        slug=style_application.unique_style_slug(variable, data["name"]),
                         # The first style is what serves, so it is the default;
                         # later ones stage until explicitly promoted.
                         is_default=not styles,
@@ -504,6 +560,46 @@ def variable_styling(request, collection_pk, variable_pk):
                     messages.success(request, _("Style saved."))
                     return redirect(style_url(style))
             stop_rows = _stop_rows(request.POST)
+
+        elif action == "apply-template":
+            template = (
+                scoped_queryset(request, StyleTemplate.objects.select_related("unit"))
+                .filter(pk=_int_or_none(request.POST.get("template")))
+                .first()
+            )
+            if template is None:
+                messages.error(request, _("Pick a Style template to apply."))
+                return redirect(form_url)
+            try:
+                style = style_application.apply_template(
+                    template, variable, make_default=bool(request.POST.get("make_default"))
+                )
+            except style_application.ConversionRefused as refused:
+                messages.error(request, str(refused))
+                return redirect(form_url)
+            messages.success(
+                request, _('Applied the "%(template)s" template as a new style.') % {"template": template.name}
+            )
+            for warning in style_application.warnings(template, variable, style_application.current_encoding(variable)):
+                messages.warning(request, warning)
+            if style.is_default:
+                return redirect(f"{style_url(style)}&propose=encoding")
+            return redirect(style_url(style))
+
+        elif action == "accept-template-encoding":
+            if selected is None or not selected.is_default or selected.template is None:
+                messages.error(request, _("Only the default style's template can set the range and curve."))
+                return redirect(style_url(selected) if selected else form_url)
+            try:
+                encoding = style_application.proposed_encoding(selected.template, variable)
+                style_application.accept_encoding(variable, encoding)
+            except (style_application.ConversionRefused, ValidationError) as refused:
+                messages.error(request, _("The template's range and curve were not set: %(why)s") % {"why": refused})
+                return redirect(style_url(selected))
+            messages.success(request, _("Range and curve set from the template."))
+            for warning in style_application.warnings(selected.template, variable, encoding):
+                messages.warning(request, warning)
+            return redirect(style_url(selected))
 
         elif action == "promote":
             if selected is None:
@@ -576,6 +672,13 @@ def variable_styling(request, collection_pk, variable_pk):
         "grayscale_gradient": GRAYSCALE_GRADIENT,
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,
         "preview": _preview_context(variable),
+        "template_picker": _template_picker(
+            scoped_queryset(request, StyleTemplate.objects.select_related("unit", "organisation")).in_catalogue_order(),
+            variable,
+        ),
+        "encoding_proposal": (
+            _encoding_proposal(variable, selected) if request.GET.get("propose") == "encoding" else None
+        ),
     }
     return render(request, "core/variable_styling.html", context)
 

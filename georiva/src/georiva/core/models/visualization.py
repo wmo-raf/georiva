@@ -635,6 +635,17 @@ class VariableStyle(TimeStampedModel):
             "only; the stops below are what actually renders."
         ),
     )
+    template = models.ForeignKey(
+        StyleTemplate,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text=(
+            "The Style template this style was applied from (#791) — lineage "
+            "only; the stops below are a snapshot and never follow the template."
+        ),
+    )
     mode = models.CharField(
         max_length=20,
         choices=Mode.choices,
