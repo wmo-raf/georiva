@@ -22,6 +22,7 @@ from .views import (
     variable_styling,
 )
 from .views.source_unit import correct_source_unit
+from .views.style_templates import StyleTemplateViewSet
 from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
 from .views.trace import item_trace
 from .views.viewsets import AssetViewSet, BoundaryChooserViewSet, ItemViewSet, admin_viewsets
@@ -96,6 +97,7 @@ def register_publications_menu():
 def register_viewset():
     return admin_viewsets + [
         BoundaryChooserViewSet("boundary_chooser"),
+        StyleTemplateViewSet(),
     ]
 
 

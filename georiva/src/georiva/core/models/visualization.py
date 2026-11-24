@@ -10,6 +10,8 @@ from wagtail.models import Orderable
 
 from georiva.core.unit_utils import significant
 
+from .variable import Variable
+
 #: '#RRGGBB' or '#RRGGBBAA', with the '#' and shorthand '#RGB'/'#RGBA' allowed —
 #: the same shapes :func:`hex_to_rgba_list` accepts.
 HEX_COLOR_VALIDATOR = RegexValidator(
@@ -339,6 +341,248 @@ class ColorRampStop(Orderable):
         if self.position is not None:
             return f"{self.hex_value} @ {self.position}"
         return self.hex_value
+
+
+class OutOfRange(models.TextChoices):
+    """What a style does with a value outside its stops (#784): draw it in
+    the end colour, as every style always has, or leave it undrawn."""
+
+    CLAMP = "clamp", "Clamp to the end colour"
+    TRANSPARENT = "transparent", "Transparent"
+
+
+class StyleTemplateQuerySet(models.QuerySet):
+    def in_catalogue_order(self):
+        """Grouped by quantity in the order the picker lists them (Temperature
+        first, Other last) rather than alphabetically by key, then by name."""
+        rank = models.Case(
+            *(models.When(quantity=value, then=i) for i, value in enumerate(StyleTemplate.Quantity.values)),
+            default=len(StyleTemplate.Quantity.values),
+            output_field=models.IntegerField(),
+        )
+        return self.annotate(_quantity_rank=rank).order_by("_quantity_rank", "name")
+
+
+class StyleTemplate(TimeStampedModel):
+    """A reusable, value-anchored set of levels and band colours in a declared unit.
+
+    Where a :class:`ColorRamp` is value-free, a template *is* values: n+1
+    ascending level boundaries and one colour per band between them, in the
+    unit the template declares — precipitation bands at 0.5 / 1 / 2 / 5 mm,
+    temperature in 4 °C steps. It is applied into a :class:`VariableStyle` as a
+    stops snapshot, converted into the Variable's source unit, and never
+    live-linked (ADR 0022's snapshot semantics). Stepped only.
+
+    Tiered like the ramp catalog (ADR 0011): no organisation is the
+    instance-wide tier every organisation reads and only the instance admin
+    writes. One rule goes further: a template with an ``origin`` was shipped by
+    GeoRiva (the earthkit-plots catalogue) and is read-only to everyone, the
+    instance admin included, so a later release can refresh it. Anyone adapts
+    one by copying it into their organisation.
+    """
+
+    ORGANISATION_LOOKUP = "organisation"
+    ORGANISATION_GLOBAL_TIER = True
+
+    class Quantity(models.TextChoices):
+        TEMPERATURE = "temperature", "Temperature"
+        PRECIPITATION = "precipitation", "Precipitation"
+        WIND = "wind", "Wind"
+        PRESSURE = "pressure", "Pressure"
+        HUMIDITY = "humidity", "Humidity"
+        CLOUD = "cloud", "Cloud"
+        CONVECTION = "convection", "Convection"
+        OCEAN = "ocean", "Ocean"
+        AIR_QUALITY = "air_quality", "Air quality"
+        FIRE = "fire", "Fire"
+        ANOMALY = "anomaly", "Anomaly"
+        PROBABILITY = "probability", "Probability"
+        OTHER = "other", "Other"
+
+    organisation = models.ForeignKey(
+        "organisations.Organisation",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="style_templates",
+        help_text=(
+            "The organisation this template belongs to. Left empty, it is part of "
+            "the instance-wide catalogue every organisation can use."
+        ),
+    )
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(
+        max_length=255,
+        help_text="How plugins and the catalogue refer to this template. Unique within its tier.",
+    )
+    quantity = models.CharField(
+        max_length=32,
+        choices=Quantity.choices,
+        default=Quantity.OTHER,
+        help_text="The group this template is listed under in pickers.",
+    )
+    #: n+1 strictly ascending band boundaries, in ``unit``.
+    levels = models.JSONField(default=list)
+    #: n hex colours, one per band between consecutive levels.
+    colors = models.JSONField(default=list)
+    unit = models.ForeignKey(
+        "georivacore.Unit",
+        on_delete=models.PROTECT,
+        related_name="+",
+        help_text="The unit the levels are in.",
+    )
+    under = models.CharField(
+        max_length=16,
+        choices=OutOfRange.choices,
+        default=OutOfRange.CLAMP,
+        help_text="What a value below the first level is drawn as.",
+    )
+    over = models.CharField(
+        max_length=16,
+        choices=OutOfRange.choices,
+        default=OutOfRange.CLAMP,
+        help_text="What a value above the last level is drawn as.",
+    )
+    scale_type = models.CharField(
+        max_length=20,
+        choices=Variable.ScaleType.choices,
+        default=Variable.ScaleType.LINEAR,
+        help_text="The encoding curve recommended for a Variable styled with this template.",
+    )
+    origin = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Where a shipped template comes from, e.g. 'earthkit-plots'. Empty for one an organisation authored.",
+    )
+    source_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="The upstream style this template was converted from.",
+    )
+
+    objects = StyleTemplateQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["name"]  # the catalogue lists through in_catalogue_order()
+        verbose_name = "Style Template"
+        verbose_name_plural = "Style Templates"
+        constraints = [
+            # As for ramp names: unique within a tier, and two constraints
+            # because Postgres treats the instance-wide tier's NULLs as distinct.
+            models.UniqueConstraint(
+                fields=["organisation", "slug"],
+                name="unique_style_template_slug_per_organisation",
+            ),
+            models.UniqueConstraint(
+                fields=["slug"],
+                condition=models.Q(organisation__isnull=True),
+                name="unique_global_style_template_slug",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def is_shipped(self):
+        """Whether GeoRiva shipped this template — and so nobody edits it."""
+        return bool(self.origin)
+
+    def copy_to(self, organisation):
+        """An editable copy of this template in ``organisation``'s tier.
+
+        The copy is the organisation's own: it has no ``origin``, so nothing
+        about it is read-only. Its ``source_name`` stays, as lineage. The slug
+        is kept when that tier has it free, and suffixed ``-copy``,
+        ``-copy-2``… when it does not.
+        """
+        taken = set(type(self).objects.filter(organisation=organisation).values_list("slug", flat=True))
+        slug, n = self.slug, 1
+        while slug in taken:
+            slug = f"{self.slug}-copy" if n == 1 else f"{self.slug}-copy-{n}"
+            n += 1
+        copy = type(self)(
+            organisation=organisation,
+            name=self.name,
+            slug=slug,
+            quantity=self.quantity,
+            levels=list(self.levels),
+            colors=list(self.colors),
+            unit=self.unit,
+            under=self.under,
+            over=self.over,
+            scale_type=self.scale_type,
+            origin="",
+            source_name=self.source_name,
+        )
+        copy.full_clean()
+        copy.save()
+        return copy
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        levels = self.levels
+        if not isinstance(levels, list) or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in levels
+        ):
+            errors["levels"] = "Levels must be a list of numbers."
+        elif len(levels) < 2:
+            errors["levels"] = "A template needs at least two levels: one band."
+        elif any(b <= a for a, b in zip(levels, levels[1:], strict=False)):
+            errors["levels"] = "Levels must be strictly ascending."
+
+        colors = self.colors
+        if not isinstance(colors, list) or not all(isinstance(c, str) for c in colors):
+            errors["colors"] = "Colours must be a list of hex colours."
+        else:
+            for color in colors:
+                try:
+                    HEX_COLOR_VALIDATOR(color)
+                except ValidationError:
+                    errors["colors"] = f"Not a hex colour: {color!r}"
+                    break
+            if "colors" not in errors and "levels" not in errors and len(colors) != len(levels) - 1:
+                errors["colors"] = (
+                    f"{len(levels) - 1} bands need exactly {len(levels) - 1} colours, one per band; got {len(colors)}."
+                )
+        if errors:
+            raise ValidationError(errors)
+
+    def owner_label(self):
+        """Which tier this template is in, for a listing that shows both."""
+        if self.organisation_id:
+            return self.organisation.name
+        return "Instance-wide (shipped)" if self.is_shipped else "Instance-wide"
+
+    owner_label.short_description = "Owner"
+
+    # -------- presentation helpers --------
+
+    def css_gradient(self):
+        """The bands as equal-width hard-edged blocks, for previews: a band is
+        a class, so a narrow one is drawn as readably as a wide one."""
+        colors = [c if c.startswith("#") else f"#{c}" for c in (self.colors or [])]
+        if not colors:
+            return ""
+        width = 100 / len(colors)
+        parts = [f"{color} {i * width:g}% {(i + 1) * width:g}%" for i, color in enumerate(colors)]
+        return f"linear-gradient(to right, {', '.join(parts)})"
+
+    def preview(self):
+        """A band swatch for the admin listing."""
+        return _swatch_html(self.css_gradient())
+
+    preview.short_description = "Bands"
+
+    def levels_label(self):
+        """The levels and unit, as an operator reads them: "0.5, 1, 2, 5 mm"."""
+        levels = ", ".join(f"{v:g}" for v in self.levels or [])
+        return f"{levels} {self.unit.symbol}" if levels else ""
+
+    levels_label.short_description = "Levels"
 
 
 class VariableStyle(TimeStampedModel):

@@ -1,0 +1,17 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block main_content %}
+    <p>
+        {% blocktrans trimmed with name=source.name org=organisation.name %}
+            This makes an editable copy of <strong>{{ name }}</strong> in {{ org }}.
+            The original stays as it is; later changes to either do not touch the other.
+        {% endblocktrans %}
+    </p>
+    <p>{{ source.preview }} {{ source.levels_label }}</p>
+    <form action="{% url 'styletemplate:copy_to_organisation' source.pk %}" method="POST">
+        {% csrf_token %}
+        <button type="submit" class="button">{% trans "Copy to my organisation" %}</button>
+        <a href="{% url 'styletemplate:index' %}" class="button button-secondary">{% trans "Cancel" %}</a>
+    </form>
+{% endblock %}
