@@ -166,8 +166,9 @@ def encoded_preview(
 ) -> Response:
     """The whole extent as one value-encoded texture: pixel = rescale(value, vmin→vmax, 0→255).
 
-    Never colormapped — this is the machine texture WeatherLayers unscales
-    client-side with ``imageUnscale=[vmin, vmax]``. The range comes from the
+    Never colormapped — this is the machine texture the browser colours code by
+    code from the same colour table this service colours tiles with, and
+    decodes over ``X-Image-Unscale`` for a readout. The range comes from the
     same always-current tile config the tile routes resolve per request, so
     there is no encode-time state to go stale (ADR 0021); ``v`` is opaque to
     this service and exists only to key caches. The immutable cache header is

@@ -8,11 +8,14 @@ the style set managed. Every other admin surface only seeds or links here.
 The per-variable form carries a live map preview of the latest item (#382), so
 the question the operator actually has — does this style read correctly on real
 data? — is answered on the page where it is asked rather than somewhere else
-after a save. Two seams serve it: :func:`_preview_context`, which finds the item
-and the texture to draw it from, and :func:`variable_style_stops`, which
-generates a ramp's stops without saving them so the map can show a ramp before
-the operator commits to it.
+after a save. Three seams serve it: :func:`_preview_context`, which finds the item
+and the texture to draw it from; :func:`variable_style_stops`, which generates a
+ramp's stops without saving them so the map can show a ramp before the operator
+commits to it; and :func:`variable_style_colours`, the colour table unsaved
+stops would get, so the map colours them as Titiler will (#785).
 """
+
+import json
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -26,6 +29,7 @@ from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 
 from georiva.core.machine_plane import titiler_encoded_preview_url
+from georiva.core.machine_plane.colour_table import colour_table
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Collection, ColorRamp, Item, Variable, VariableStyle
 from georiva.core.models.visualization import _swatch_html, served_ramp_stops
@@ -218,9 +222,10 @@ def _preview_context(variable):
 
     The texture is Titiler's on-demand ``encoded-preview.png`` — the item's whole
     extent with pixel = rescale(value, vmin→vmax, 0→255), which the browser
-    unscales back to physical values and colors client-side. Nothing about the
-    style enters this URL, which is the point: recoloring is a palette swap in
-    the browser, so a stop edit repaints without a request and without a save.
+    colors code by code from a colour table. Nothing about the style enters this
+    URL, which is the point: recoloring is a table swap in the browser, so a stop
+    edit repaints without refetching the texture and without a save — only the
+    small table is asked for (:func:`variable_style_colours`).
 
     That also fixes what the preview can honestly show. The texture is encoded
     against the variable's *saved* range, so a stop beyond it renders as flat
@@ -241,6 +246,7 @@ def _preview_context(variable):
             "imageUnscale": render_contract(variable).image_unscale,
             "unit": variable.units or "",
             "stepUrl": reverse("variable_preview_step", args=[variable.collection_id, variable.pk]),
+            "coloursUrl": reverse("variable_style_colours", args=[variable.collection_id, variable.pk]),
         },
     }
 
@@ -286,6 +292,39 @@ def variable_preview_step(request, collection_pk, variable_pk):
     if neighbour is None:
         return JsonResponse({"item": None})
     return JsonResponse(_preview_frame(neighbour, variable))
+
+
+def variable_style_colours(request, collection_pk, variable_pk):
+    """The colour table a set of stops would get, saved or not (#785).
+
+    What the map preview colours the operator's unsaved stops with. The browser
+    colours a texture code by code from a style's colour table, and that table
+    is built in one place on the server for every renderer, so the preview asks
+    for it here rather than working colours out itself: what it shows is what
+    Titiler will serve once the stops are saved.
+
+    ``stops`` is JSON, ``[{"value", "color"}, ...]`` in the served unit, as the
+    form shows them (ADR 0046 §3). Read-only and side-effect-free, hence GET.
+    """
+    collection = get_org_object_or_404(request, Collection, pk=collection_pk)
+    variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
+
+    refused = JsonResponse({"error": _("Each stop needs a number and a hex color, in ascending order.")}, status=400)
+    try:
+        stops = json.loads(request.GET.get("stops", "[]"))
+    except ValueError:
+        return refused
+    if not isinstance(stops, list) or not all(
+        isinstance(stop, dict) and isinstance(stop.get("value"), (int, float)) and not isinstance(stop["value"], bool)
+        for stop in stops
+    ):
+        return refused
+    style = VariableStyle(variable=variable, stops=variable.stored_stops(stops))
+    try:
+        style.clean()
+    except ValidationError:
+        return refused
+    return JsonResponse({"colourTable": colour_table(variable, style)})
 
 
 def collection_styling(request, collection_pk):

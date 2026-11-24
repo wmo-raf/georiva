@@ -1043,6 +1043,7 @@
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
     <script src="{% static 'js/georiva-basemap.js' %}"></script>
+    <script src="{% static 'js/colour_table.js' %}"></script>
     <script src="{% static 'js/raster_preview.js' %}"></script>
     <script src="{% static 'core/js/stepped_classes.js' %}"></script>
     <script>
@@ -1297,44 +1298,45 @@
             }
 
             /**
-             The map's palette, built from the same rows the gradient bar
-             reads. WeatherLayers wants [[value, [r, g, b, a]], …] — the very
-             shape VariableStyle.as_weatherlayers_palette() hands the tile
-             config, so what the operator sees here is what Titiler will
-             serve once this is saved.
+             The map's colours, from the same rows the gradient bar reads.
+             The map colours each texture code from a colour table, and the
+             server builds that table for every renderer (#785), so the rows
+             are sent to it rather than turned into colours here: what the
+             operator sees is what Titiler will serve once this is saved.
+             Asked once the typing settles; an answer overtaken by a later
+             edit, or refused for a half-typed row, leaves the map as it was.
+             No rows is a styleless variable's table, grayscale, shown
+             honestly rather than as an empty map.
              **/
 
-            function hexToRgba(hex) {
-                const clean = hex.replace('#', '');
-                const rgba = [
-                    parseInt(clean.slice(0, 2), 16),
-                    parseInt(clean.slice(2, 4), 16),
-                    parseInt(clean.slice(4, 6), 16),
-                    clean.length >= 8 ? parseInt(clean.slice(6, 8), 16) : 255
-                ];
-                return rgba.map(function (channel) {
-                    return Number.isNaN(channel) ? 0 : channel;
-                });
+            const COLOUR_TABLE_DELAY_MS = 150;
+            let colourTableTimer = null;
+            let colourTableAsked = 0;
+
+            async function fetchColourTable(stops) {
+                const url = new URL(previewConfig.coloursUrl, window.location.origin);
+                url.searchParams.set('stops', JSON.stringify(stops));
+                const response = await fetch(url, {credentials: 'same-origin'});
+                if (!response.ok) {
+                    return null;
+                }
+                return (await response.json()).colourTable;
             }
 
-            function paletteFromStops(stops) {
-                if (!stops.length) {
-                    // What a styleless variable actually renders as, shown
-                    // honestly rather than as an empty map.
-                    return [
-                        [previewConfig.imageUnscale[0], [0, 0, 0, 255]],
-                        [previewConfig.imageUnscale[1], [255, 255, 255, 255]]
-                    ];
-                }
-                if (stops.length === 1) {
-                    // A single stop spans nothing, and a zero-width palette
-                    // divides by zero on the GPU.
-                    const only = hexToRgba(stops[0].color);
-                    return [[stops[0].value, only], [stops[0].value + 1e-6, only]];
-                }
-                return stops.map(function (stop) {
-                    return [stop.value, hexToRgba(stop.color)];
-                });
+            function requestColourTable(stops) {
+                clearTimeout(colourTableTimer);
+                colourTableTimer = setTimeout(async function () {
+                    const asked = ++colourTableAsked;
+                    let table = null;
+                    try {
+                        table = await fetchColourTable(stops);
+                    } catch (error) {
+                        console.error('Styling preview: colour table failed', error);
+                    }
+                    if (table && asked === colourTableAsked && mapPreview) {
+                        mapPreview.setColourTable(table);
+                    }
+                }, COLOUR_TABLE_DELAY_MS);
             }
 
             /**
@@ -1360,9 +1362,7 @@
                     return;
                 }
                 updateClipWarning(stops);
-                if (mapPreview) {
-                    mapPreview.setPalette(paletteFromStops(stops));
-                }
+                requestColourTable(stops);
             }
 
             function syncPicker(row) {
@@ -1911,7 +1911,6 @@
                     imageUnscale: previewConfig.imageUnscale,
                     unit: previewConfig.unit,
                     compactAttribution: true,
-                    palette: paletteFromStops(readStops()),
                     onStatus: function (state, code) {
                         if (state === 'ready') {
                             mapStatus.hidden = true;
@@ -1924,6 +1923,8 @@
                         }[code] || mapStatus.dataset.textureFailed;
                     }
                 });
+                // The first colours, asked while the basemap and texture load.
+                requestColourTable(readStops());
                 document.getElementById('vs-basemap').addEventListener('change', function (event) {
                     if (mapPreview) {
                         mapPreview.setBasemap(event.target.value);

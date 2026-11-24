@@ -24,7 +24,7 @@ from datetime import timedelta
 from rest_framework import serializers
 
 from georiva.core.machine_plane import titiler_encoded_preview_url, titiler_preview_url
-from georiva.core.machine_plane.palette_cache import build_colormap_256
+from georiva.core.machine_plane.colour_table import as_colormap, colour_table
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Variable, visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
@@ -54,11 +54,8 @@ def build_style_renders(variable, *, with_colormap: bool) -> dict:
             "rescale": [[variable.value_min, variable.value_max]],
         }
         if with_colormap:
-            entry["colormap"] = build_colormap_256(
-                style.as_weatherlayers_palette(),
-                variable.value_min,
-                variable.value_max,
-            )
+            # The style's colour table, as Titiler and the browser colour it (#785).
+            entry["colormap"] = as_colormap(colour_table(variable, style))
         if style.is_default:
             entry["georiva:default"] = True
         renders[style.slug] = entry

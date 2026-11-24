@@ -185,12 +185,16 @@ class ItemDetailMap {
         const palette = xg.palette || [[0, [0, 0, 0]], [1, [255, 255, 255]]];
         const paletteMin = xg.palette_min ?? xg.value_min ?? 0;
         const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
-        // The texture is decoded over the variable's own range (ADR 0022 §4),
-        // as the server's render contract states it — never the stops' span.
+        // The map is coloured code by code from the style's colour table, the
+        // one Titiler colours tiles with (#785); `palette` stays the stops, for
+        // the legend and the choropleth. A code decodes back into a value over
+        // the variable's own range (ADR 0022 §4), never the stops' span.
         const imageUnscale = xg.image_unscale;
+        const layerPalette = GeoRivaColourTable.layerPalette(xg.colour_table);
         const units = param?.unit?.symbol || '';
 
         this.currentPalette = {palette, paletteMin, paletteMax};
+        this.currentImageUnscale = imageUnscale;
         this.currentUnits = units;
         this._clearRasterLayer();
         this._showNoVisual(false);
@@ -214,8 +218,8 @@ class ItemDetailMap {
                 bounds: [bbox[0], bbox[1], bbox[2], bbox[3]],
                 imageSmoothing: true,
                 imageInterpolation: 'LINEAR',
-                imageUnscale,
-                palette,
+                imageUnscale: GeoRivaColourTable.LAYER_UNSCALE,
+                palette: layerPalette,
                 opacity,
                 visible: true,
                 pickable: true,
@@ -427,8 +431,10 @@ class ItemDetailMap {
                 if (canvas) this.tooltipControl.addTo(canvas.parentElement);
             },
             onHover: event => {
-                this.tooltipControl.updatePickingInfo(event);
-                this.lastPickInfo = event;
+                // The layer picks a code; the readout shows the served value it stands for.
+                const decoded = GeoRivaColourTable.decodePick(event, this.currentImageUnscale);
+                this.tooltipControl.updatePickingInfo(decoded);
+                this.lastPickInfo = decoded;
             },
         });
         this.deckgl.props.onLoad();
@@ -712,10 +718,11 @@ class ItemDetailMap {
             const lng = e.lngLat.lng;
 
             // Prefer stored hover info (desktop); fall back to pickObject (touch)
-            let value = this.lastPickInfo?.object?.value ?? null;
+            // (already decoded from its code, see _initTooltip).
+            let value = this.lastPickInfo?.raster?.value ?? null;
             if (value == null) {
                 const pick = this.deckgl.pickObject({x: e.point.x, y: e.point.y, radius: 2});
-                value = pick?.object?.value ?? null;
+                value = GeoRivaColourTable.decodePick(pick, this.currentImageUnscale)?.raster?.value ?? null;
             }
 
             const units = this.parameterNames[this.currentVarSlug]?.unit?.symbol || '';
