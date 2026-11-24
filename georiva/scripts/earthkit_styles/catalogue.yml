@@ -1,0 +1,150 @@
+# The curated list of earthkit-plots styles GeoRiva ships as Style templates (#789).
+#
+# Read by generate.py beside this file, which writes the vendored catalogue
+# georiva/src/georiva/core/style_catalogue/earthkit-plots-<tag>.json. Changing this
+# list is a deliberate choice, reviewed in the PR: regenerate and commit both files.
+#
+# Each entry names one shaded style by its file under auto-styles/ and its key in that
+# file. earthkit style *names* are not unique across files, so they are not used as keys;
+# the name is kept as the template's source_name.
+#
+#   file, style   where the style is in earthkit-plots
+#   slug, name    the template's identity in GeoRiva: human names, grouped by quantity
+#   quantity      a StyleTemplate.Quantity value
+#   scale_type    the encoding curve recommended for a Variable styled with it
+#   unit          a GeoRiva unit symbol (one of `units` below). Required when earthkit
+#                 declares no units; when it does, it must agree with `unit_strings`.
+#
+# An entry the generator cannot convert faithfully (a unit it cannot map, colours that are
+# not one per band) is dropped and reported, never half-converted. A few are listed here
+# on purpose though they drop — each file's own default (`optimal`) style where it does
+# not flatten — so the report shows what the catalogue could not take.
+#
+# Not available upstream: a shaded MSLP style. earthkit-plots 1.0.4 styles mean sea level
+# pressure with contours only (msl, msl_mean, mean-sea-level-pressure); contour styles
+# are out of scope (#793).
+
+source:
+  name: earthkit-plots
+  repository: https://github.com/ecmwf/earthkit-plots
+  tag: 1.0.4
+  commit: 5b7f94db4db5101ffc4ad4d6383d456ea79cb9e5
+  styles_path: src/earthkit/plots/data/styles/auto-styles
+
+# earthkit unit strings -> GeoRiva unit symbols.
+unit_strings:
+  celsius: "°C"
+  fahrenheit: "°F"
+  K: K
+  m s-1: m/s
+  knots: kt
+  mm: mm
+  m: m
+  g kg-1: g/kg
+  kg m-2 h-1: kg/m²/h
+
+# Every GeoRiva unit a shipped template is declared in. The loader creates any that the
+# instance does not have, as shared reference data.
+units:
+  - {symbol: "°C", name: Degree Celsius, description: "Celsius temperature scale. Common display unit for surface temperature."}
+  - {symbol: "°F", name: Degree Fahrenheit, description: "Fahrenheit temperature scale."}
+  - {symbol: delta_degC, name: Celsius difference, description: "A difference of temperatures in degrees Celsius, such as an anomaly or a range."}
+  - {symbol: m/s, name: Metre per second, description: "SI unit of speed. Native unit for wind components in NWP output."}
+  - {symbol: kt, name: Knot, description: "One nautical mile per hour. Used for wind speed in marine and aviation forecasts."}
+  - {symbol: mm, name: Millimetre, description: "Standard unit for precipitation accumulation."}
+  - {symbol: "kg/m²/h", name: Kilogram per square metre per hour, description: "Precipitation rate as a water mass flux. 1 kg/m²/h of water is 1 mm/h."}
+  - {symbol: m, name: Metre, description: "SI unit of length. Used for geopotential height, wave height, visibility."}
+  - {symbol: s, name: Second, description: "SI unit of time. Used for wave and swell periods."}
+  - {symbol: "%", name: Percent, description: "Used for relative humidity, cloud cover, soil moisture fraction."}
+  - {symbol: g/kg, name: Gram per kilogram, description: "Mass mixing ratio. Used for specific humidity."}
+  - {symbol: J/kg, name: Joule per kilogram, description: "Specific energy unit. Used for CAPE, CIN, geopotential."}
+  - {symbol: "µg/m³", name: Microgram per cubic metre, description: "Mass concentration. Used for particulate matter (PM2.5, PM10)."}
+  - {symbol: dimensionless, name: Dimensionless, description: "Unitless quantity. Used for indices (NDVI, SPI, anomaly scores etc)."}
+
+templates:
+  # -- Temperature -------------------------------------------------------------------
+  - {file: 2t, style: 2T_SPECTRAL_CELSIUS, slug: 2m-temperature-spectral-celsius, name: "2 m temperature, spectral, 2 °C bands", quantity: temperature, scale_type: linear}
+  - {file: 2t, style: 2T_SPECTRAL_FAHRENHEIT, slug: 2m-temperature-spectral-fahrenheit, name: "2 m temperature, spectral, 5 °F bands", quantity: temperature, scale_type: linear}
+  - {file: 2t, style: 2T_SH_ALL_FM48T56I4, slug: temperature-4c-bands, name: "Temperature, 4 °C bands, −32 to 44 °C", quantity: temperature, scale_type: linear}
+  - {file: 2t, style: 2T_SH_ALL_FM32T42I2, slug: temperature-2c-bands, name: "Temperature, 2 °C bands, −32 to 42 °C", quantity: temperature, scale_type: linear}
+  - {file: mc_2tmean, style: MC_2TMEAN_SH_MC_T_FM80T60, slug: temperature-5c-bands-meteochart, name: "Temperature, 5 °C bands, ECMWF chart colours", quantity: temperature, scale_type: linear}
+
+  # -- Precipitation -----------------------------------------------------------------
+  - {file: tp_interval, style: TP_INTERVAL_SH_ALL_F05T300LST, slug: precipitation-0-5-to-200mm, name: "Precipitation, 0.5 to 200 mm, 17 bands", quantity: precipitation, scale_type: sqrt}
+  - {file: tp_interval, style: TP_INTERVAL_SH_BLURED_F01T500LST, slug: precipitation-0-1-to-200mm, name: "Precipitation, 0.1 to 200 mm, 10 bands", quantity: precipitation, scale_type: sqrt}
+  - {file: tp_interval, style: TP_INTERVAL_SH_BLURED_F0T300, slug: precipitation-0-1-to-200mm-fine, name: "Precipitation, 0.1 to 200 mm, 14 bands", quantity: precipitation, scale_type: sqrt}
+  - {file: mc_tp, style: MC_TP_SH_MC_TP_F01T1000, slug: precipitation-0-1-to-700mm-meteochart, name: "Precipitation, 0.1 to 700 mm, ECMWF chart colours", quantity: precipitation, scale_type: sqrt}
+  - {file: tp_rate, style: TP_RATE_SH_PRATE_RADARLIKE_GRIDED_F01, slug: precipitation-rate-radar, name: "Precipitation rate, radar-like, 0.1 to 64 kg/m²/h", quantity: precipitation, scale_type: log}
+  # Dropped on purpose (reported): the files' defaults, whose colours are not one per band.
+  - {file: tp_interval, style: TP_INTERVAL_SH_BLURED_F05T300LST, slug: precipitation-0-5-to-100mm, name: "Precipitation, 0.5 to 100 mm", quantity: precipitation, scale_type: sqrt}
+  - {file: tp_rate, style: TP_RATE_SH_PRATE_RADARLIKE_GRIDED, slug: precipitation-rate-radar-fine, name: "Precipitation rate, radar-like, 0.08 to 864 kg/m²/h", quantity: precipitation, scale_type: log}
+
+  # -- Wind --------------------------------------------------------------------------
+  - {file: wind_speed, style: WIND_SPEED_SH_ALL_F03T70_BEAUF, slug: wind-speed-beaufort, name: "Wind speed, Beaufort scale", quantity: wind, scale_type: linear, unit: m/s}
+  - {file: wind_speed, style: WIND_SPEED_SH_ALL_F2T50I2, slug: wind-speed-2ms-bands, name: "Wind speed, 2 m/s bands, 2 to 50 m/s", quantity: wind, scale_type: linear, unit: m/s}
+  - {file: wind-gust-at-10m-in-last-6-hours, style: WIND_GUST_AT_10M_IN_LAST_6_HOURS_IN_METERS_PER_SECOND, slug: wind-gust-12-to-50ms, name: "Wind gust, 12 to 50 m/s", quantity: wind, scale_type: linear}
+  - {file: mc_10fg, style: MC_10FG_SH_MC_WIND_F0T80, slug: wind-gust-meteochart, name: "Wind gust, 0 to 50 m/s, ECMWF chart colours", quantity: wind, scale_type: linear, unit: m/s}
+  - {file: 10u, style: 10U_RDBU_M_S, slug: wind-component-ms, name: "Wind component (u or v), m/s, diverging", quantity: wind, scale_type: diverging}
+  - {file: 10u, style: 10U_RDBU_KNOTS, slug: wind-component-knots, name: "Wind component (u or v), knots, diverging", quantity: wind, scale_type: diverging}
+  # Dropped on purpose (reported): a 256-colour continuous ramp over 9 bands.
+  - {file: wind_speed, style: WIND_SPEED_SH_RED_F5T70LST, slug: wind-speed-5-to-70ms, name: "Wind speed, 5 to 70 m/s", quantity: wind, scale_type: linear, unit: m/s}
+
+  # -- Humidity ----------------------------------------------------------------------
+  - {file: 2t_dewpoint, style: 2T_DEWPOINT_SPECTRAL_CELSIUS, slug: 2m-dewpoint-celsius, name: "2 m dewpoint, 2 °C bands", quantity: humidity, scale_type: linear}
+  - {file: 2t_dewpoint, style: 2T_DEWPOINT_SPECTRAL_FAHRENHEIT, slug: 2m-dewpoint-fahrenheit, name: "2 m dewpoint, 5 °F bands", quantity: humidity, scale_type: linear}
+  - {file: rh1000, style: RH1000_SH_GRNBLU_F65T100I15_LIGHT, slug: relative-humidity-65-to-95, name: "Relative humidity, 65 to 95 %", quantity: humidity, scale_type: linear, unit: "%"}
+  - {file: q1000, style: Q1000_SH_SPECHUM_OPTION1, slug: specific-humidity, name: "Specific humidity, 0 to 28 g/kg", quantity: humidity, scale_type: linear}
+  - {file: q1000, style: Q1000_SH_SPECHUM_OPTION3, slug: specific-humidity-greens, name: "Specific humidity, 0 to 28 g/kg, greens to blues", quantity: humidity, scale_type: linear}
+  # Dropped on purpose (reported): the file's default, a 255-colour continuous ramp.
+  - {file: rh1000, style: RH1000_SH_GRNBLU_F65T100I15, slug: relative-humidity-65-to-95-ramp, name: "Relative humidity, 65 to 95 %, continuous", quantity: humidity, scale_type: linear, unit: "%"}
+
+  # -- Convection --------------------------------------------------------------------
+  - {file: cape, style: CAPE_RANGE_50_9000, slug: cape-50-to-4000, name: "CAPE, 50 to 4000 J/kg, 10 bands", quantity: convection, scale_type: sqrt, unit: J/kg}
+  - {file: cape, style: CAPE_CAPE_EXTRA1, slug: cape-50-to-4000-fine, name: "CAPE, 50 to 4000 J/kg, 13 bands", quantity: convection, scale_type: sqrt, unit: J/kg}
+  - {file: mc_cape, style: MC_CAPE_SH_MC_CAPE_F10T13000, slug: cape-meteochart, name: "CAPE, 10 to 8000 J/kg, ECMWF chart colours", quantity: convection, scale_type: sqrt, unit: J/kg}
+  - {file: cin, style: CIN_SH_RED_F0T900, slug: cin-0-to-300, name: "CIN, 0 to 300 J/kg", quantity: convection, scale_type: sqrt, unit: J/kg}
+  # Dropped on purpose (reported): the file's default, a 255-colour continuous ramp.
+  - {file: cape, style: CAPE_RANGE_100_4500, slug: cape-100-to-4500, name: "CAPE, 100 to 4500 J/kg", quantity: convection, scale_type: sqrt, unit: J/kg}
+
+  # -- Cloud (fraction 0 to 1) -------------------------------------------------------
+  - {file: lcc, style: LCC_SH_GRY_F0T1LST, slug: cloud-cover-grey, name: "Cloud cover, greys", quantity: cloud, scale_type: linear, unit: dimensionless}
+  - {file: lcc, style: LCC_SH_REDGRY_F0T1LST, slug: cloud-cover-red-grey, name: "Cloud cover, red-greys", quantity: cloud, scale_type: linear, unit: dimensionless}
+  - {file: hcc, style: HCC_SH_WHI_F0T1LST, slug: cloud-cover-white, name: "Cloud cover, whites", quantity: cloud, scale_type: linear, unit: dimensionless}
+  - {file: hcc, style: HCC_SH_BLUGRY_F0T1LST, slug: cloud-cover-blue-grey, name: "Cloud cover, blue-greys", quantity: cloud, scale_type: linear, unit: dimensionless}
+  - {file: lcc, style: LCC_TRAN_GRY_F03T1LST, slug: cloud-cover-translucent-grey, name: "Cloud cover, translucent grey overlay", quantity: cloud, scale_type: linear, unit: dimensionless}
+  # Dropped on purpose (reported): the low and mid cloud defaults, one colour more than bands.
+  - {file: lcc, style: LCC_TRANSPARENCY_GREY, slug: cloud-cover-transparency-grey, name: "Cloud cover, fading grey", quantity: cloud, scale_type: linear, unit: dimensionless}
+  - {file: mcc, style: MCC_TRANSPARENCY_LIGHTGREY_100, slug: cloud-cover-transparency-light-grey, name: "Cloud cover, fading light grey (%)", quantity: cloud, scale_type: linear, unit: "%"}
+
+  # -- Ocean -------------------------------------------------------------------------
+  - {file: sst, style: SST_SH_SST_FM2T36I2, slug: sea-surface-temperature, name: "Sea surface temperature, 2 °C bands, −2 to 36 °C", quantity: ocean, scale_type: linear}
+  - {file: wave_swh, style: WAVE_SWH_SH_ALL_F0T20LST, slug: significant-wave-height, name: "Significant wave height, 0 to 20 m", quantity: ocean, scale_type: sqrt, unit: m}
+  - {file: wave_swh, style: WAVE_SWH_SH_BLU_F0T20LST, slug: significant-wave-height-blues, name: "Significant wave height, 0 to 20 m, blues", quantity: ocean, scale_type: sqrt, unit: m}
+  - {file: wave_swh, style: WAVE_SWH_SH_DOUGLAS_SEA_SCALE, slug: significant-wave-height-douglas, name: "Significant wave height, Douglas sea scale", quantity: ocean, scale_type: sqrt, unit: m}
+  - {file: wave_mpts, style: WAVE_MPTS_SH_ALL_F0T18I1_5, slug: wave-period, name: "Wave or swell period, 0 to 18.5 s", quantity: ocean, scale_type: linear, unit: s}
+  - {file: wave_mpts, style: WAVE_MPTS_SH_GRN_F0T18I1_5, slug: wave-period-greens, name: "Wave or swell period, 0 to 18.5 s, greens", quantity: ocean, scale_type: linear, unit: s}
+
+  # -- Air quality -------------------------------------------------------------------
+  - {file: composition_aod550, style: COMPOSITION_AOD550_SH_ALL_AOD, slug: aerosol-optical-depth, name: "Aerosol optical depth, 0.1 to 1", quantity: air_quality, scale_type: log, unit: dimensionless}
+  - {file: composition_aod550, style: COMPOSITION_AOD550_SH_BUYLRD_AOD, slug: aerosol-optical-depth-blue-yellow-red, name: "Aerosol optical depth, 0.1 to 0.94, blue-yellow-red", quantity: air_quality, scale_type: linear, unit: dimensionless}
+  - {file: composition_aod550, style: COMPOSITION_AOD550_SH_ORANGES_AOD, slug: aerosol-optical-depth-oranges, name: "Aerosol optical depth, 0.1 to 0.96, translucent oranges", quantity: air_quality, scale_type: linear, unit: dimensionless}
+  - {file: composition_pm2p5, style: COMPOSITION_PM2P5_SH_ALL_PM2P5_DEFRA_DAQI, slug: pm2-5-daqi, name: "PM2.5, UK Daily Air Quality Index bands", quantity: air_quality, scale_type: linear, unit: "µg/m³"}
+  - {file: composition_pm10, style: COMPOSITION_PM10_SH_ALL_PM10_DEFRA_DAQI, slug: pm10-daqi, name: "PM10, UK Daily Air Quality Index bands", quantity: air_quality, scale_type: linear, unit: "µg/m³"}
+  - {file: composition_pm2p5, style: COMPOSITION_PM2P5_SH_ALL_PMX_REGIONAL, slug: particulate-matter-2-to-200, name: "Particulate matter, 2 to 200 µg/m³", quantity: air_quality, scale_type: log, unit: "µg/m³"}
+  - {file: composition_pm2p5, style: COMPOSITION_PM2P5_SH_ALL_PMX_NCL_PRECIP_11LEV, slug: particulate-matter-10-to-500, name: "Particulate matter, 10 to 500 µg/m³", quantity: air_quality, scale_type: log, unit: "µg/m³"}
+
+  # -- Fire --------------------------------------------------------------------------
+  - {file: aristotle_fwi, style: ARISTOTLE_FWI_FWI_1, slug: fire-weather-index, name: "Fire Weather Index, 0 to 60", quantity: fire, scale_type: linear, unit: dimensionless}
+  - {file: aristotle_fwi, style: ARISTOTLE_FWI_FWI_3, slug: fire-weather-index-alternative, name: "Fire Weather Index, 0 to 60, blue-green to red", quantity: fire, scale_type: linear, unit: dimensionless}
+  - {file: aristotle_drought_code, style: ARISTOTLE_DROUGHT_CODE_DROUGHT_CODE_1, slug: drought-code, name: "Drought Code, 0 to 1000", quantity: fire, scale_type: linear, unit: dimensionless}
+  - {file: aristotle_drought_code, style: ARISTOTLE_DROUGHT_CODE_DROUGHT_CODE_2, slug: drought-code-alternative, name: "Drought Code, 0 to 1000, teal to brown", quantity: fire, scale_type: linear, unit: dimensionless}
+
+  # -- Anomaly -----------------------------------------------------------------------
+  - {file: mofc_10_t_anomaly, style: MOFC_10_T_ANOMALY_T_UPPER_ANOMALY, slug: temperature-anomaly, name: "Temperature anomaly, ±2 to 6 °C, neutral band clear", quantity: anomaly, scale_type: diverging, unit: delta_degC}
+  - {file: efi_2t_data, style: EFI_2T_DATA_SH_BLURED_FM1T1LST, slug: extreme-forecast-index, name: "Extreme Forecast Index, −0.9 to 0.9", quantity: anomaly, scale_type: diverging, unit: dimensionless}
+  # Dropped on purpose (reported): 7 colours over 8 bands.
+  - {file: mofc_10_t_anomaly, style: MOFC_10_T_ANOMALY_SH_ANOMALY_RB_M20T20, slug: temperature-anomaly-10c, name: "Temperature anomaly, ±10 °C", quantity: anomaly, scale_type: diverging, unit: delta_degC}
+
+  # -- Probability -------------------------------------------------------------------
+  - {file: genesis_hr, style: GENESIS_HR_GENESIS_PROB, slug: probability-10-bands, name: "Probability, 5 to 100 %, 10 bands", quantity: probability, scale_type: linear, unit: "%"}
+  - {file: swh_prob_data, style: SWH_PROB_DATA_SH_RGB_F5T100, slug: probability-6-bands, name: "Probability, 5 to 100 %, 6 bands", quantity: probability, scale_type: linear, unit: "%"}

@@ -304,15 +304,20 @@ class CollectionVariable:
     value_range: tuple[float, float] | None = None
     palette: str | None = None  # ColorRamp catalog name, e.g. "viridis"
     palette_stops: tuple[tuple[float, str], ...] | None = None  # exact (value, hex) stops
+    style_template: str | None = None  # Style template slug, e.g. "precipitation-0-5-to-200mm"
 ```
 
-`value_range`, `palette` and `palette_stops` are the **styling seed**
-(ADR 0022): create-only, precedence `palette_stops` > `palette` > grayscale.
+`value_range`, `palette`, `palette_stops` and `style_template` are the **styling seed**
+(ADR 0022): create-only, precedence `palette_stops` > `style_template` > `palette` > grayscale.
+A Style template becomes a stepped default style converted into `source_units`, and sets the
+range and `scale_type` from its levels and recommended curve (#792); the organisation's own
+template wins a slug collision with the instance-wide catalogue. An unknown slug or a template
+whose unit does not convert degrades one tier like an unknown ramp.
 A ramp name is stretched over the declared range into the variable's default
 style; exact stops are materialized verbatim and the range derives from them
 (declaring both warns on disagreement). Range and stops are declared in the
 exposed unit (`output_units`) and stored converted to `source_units`
-(ADR 0046 §3); a ramp is spaced over the exposed range. An unknown ramp or malformed stops
+(ADR 0046 §3); a ramp is spaced over the exposed range. An unknown ramp or template, or malformed stops,
 degrade one tier with a logged warning — provisioning never fails on styling,
 and a re-provision never touches an existing variable's range or styles.
 

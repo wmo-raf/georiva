@@ -1,0 +1,24 @@
+{% load i18n %}
+{% comment %}
+    One quantity's Style templates in the picker (#791). ``excluded`` rows are
+    the ones whose unit does not convert: disabled, with the reason.
+{% endcomment %}
+<fieldset class="vs-template-group">
+    <legend class="w-label-3">{{ group.label }}</legend>
+    <ul class="vs-template-list">
+        {% for template in group.templates %}
+            <li>
+                <label class="vs-template{% if excluded %} vs-template--excluded{% endif %}">
+                    <input type="radio" name="template" value="{{ template.pk }}"{% if excluded %} disabled{% else %} required{% endif %}>
+                    <span class="vs-template-name">{{ template.name }}</span>
+                    {# The bands are data: their colours are the template's. #}
+                    <span class="vs-template-swatch" style="background: {{ template.gradient }};"></span>
+                    <span class="vs-template-levels">{{ template.levels_label }} · {{ template.owner_label }}</span>
+                    {% if template.reason %}
+                        <span class="vs-template-reason">{{ template.reason }}</span>
+                    {% endif %}
+                </label>
+            </li>
+        {% endfor %}
+    </ul>
+</fieldset>

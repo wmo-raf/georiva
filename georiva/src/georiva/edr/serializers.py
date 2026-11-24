@@ -102,6 +102,9 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
         x_georiva = {
             "value_min": value_min,
             "value_max": value_max,
+            # The encoding curve (#787): how values become the texture's codes —
+            # ``linear`` / ``diverging`` linearly, ``sqrt`` and ``log`` through
+            # their curve. ``encoding`` below is the curve as resolved.
             "scale_type": variable.scale_type,
             "transform_type": variable.transform_type,
         }
@@ -110,6 +113,17 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
         # The texture's encoding range; palette_min/palette_max below are the
         # stops' span, for the legend only.
         x_georiva["image_unscale"] = contract.image_unscale
+        # The curve a code decodes through, over the stored range: a ``log``
+        # code needs that range to find its fraction of ``image_unscale`` (#787).
+        x_georiva["encoding"] = contract.encoding
+        # The default style's 256 colours, one per code: what the map is
+        # coloured with, here as in Titiler (#785). ``palette`` stays the stops,
+        # in value space, for legends and choropleths.
+        x_georiva["colour_table"] = contract.colour_table
+        # The default style laid out like the map, for a legend to draw as it
+        # finds it (#790): colour stops and served ticks along a 0–1 bar, and
+        # whether each end is clamped (drawn with an arrow) or transparent.
+        x_georiva["legend"] = contract.legend
 
         style = variable.default_style
         if style:

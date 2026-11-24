@@ -8,11 +8,14 @@ the style set managed. Every other admin surface only seeds or links here.
 The per-variable form carries a live map preview of the latest item (#382), so
 the question the operator actually has — does this style read correctly on real
 data? — is answered on the page where it is asked rather than somewhere else
-after a save. Two seams serve it: :func:`_preview_context`, which finds the item
-and the texture to draw it from, and :func:`variable_style_stops`, which
-generates a ramp's stops without saving them so the map can show a ramp before
-the operator commits to it.
+after a save. Three seams serve it: :func:`_preview_context`, which finds the item
+and the texture to draw it from; :func:`variable_style_stops`, which generates a
+ramp's stops without saving them so the map can show a ramp before the operator
+commits to it; and :func:`variable_style_colours`, the colour table unsaved
+stops would get, so the map colours them as Titiler will (#785).
 """
+
+import json
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -21,13 +24,14 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import localize
-from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 
+from georiva.core import style_application
 from georiva.core.machine_plane import titiler_encoded_preview_url
+from georiva.core.machine_plane.colour_table import colour_table
 from georiva.core.machine_plane.render_contract import render_contract
-from georiva.core.models import Collection, ColorRamp, Item, Variable, VariableStyle
+from georiva.core.models import Collection, ColorRamp, Item, OutOfRange, StyleTemplate, Variable, VariableStyle
 from georiva.core.models.visualization import _swatch_html, served_ramp_stops
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
@@ -74,15 +78,25 @@ def styling_summary(variable):
 
 
 class VariableRangeForm(forms.Form):
-    """The variable's encoding contract — delegates range sanity to the model."""
+    """The variable's encoding contract — delegates range sanity to the model.
+
+    The range is entered in the served unit; the curve is judged against the
+    stored minimum, since that is what values are encoded over (#787)."""
 
     value_min = forms.FloatField()
     value_max = forms.FloatField()
     scale_type = forms.ChoiceField(choices=Variable.ScaleType.choices)
 
+    def __init__(self, *args, variable, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.variable = variable
+
     def clean(self):
         cleaned = super().clean()
-        Variable.validate_value_range(cleaned.get("value_min"), cleaned.get("value_max"))
+        value_min = cleaned.get("value_min")
+        Variable.validate_value_range(value_min, cleaned.get("value_max"))
+        stored_min = None if value_min is None else self.variable.stored(value_min)
+        Variable.validate_scale_type(cleaned.get("scale_type"), stored_min)
         return cleaned
 
 
@@ -93,6 +107,10 @@ class VariableStyleForm(forms.Form):
     ramp = forms.ModelChoiceField(queryset=ColorRamp.objects.none(), required=False)
     mode = forms.ChoiceField(choices=VariableStyle.Mode.choices)
     steps = forms.IntegerField(required=False, min_value=2)
+    # What values beyond the stops are drawn as (#788); a post without them
+    # keeps today's behaviour, clamping.
+    under = forms.TypedChoiceField(choices=OutOfRange.choices, required=False, empty_value=OutOfRange.CLAMP)
+    over = forms.TypedChoiceField(choices=OutOfRange.choices, required=False, empty_value=OutOfRange.CLAMP)
 
     def __init__(self, *args, ramp_queryset, **kwargs):
         super().__init__(*args, **kwargs)
@@ -131,19 +149,11 @@ def _parse_stops(post):
     return entries
 
 
-def _unique_style_slug(variable, name):
-    """A slug for a new style, unique within the variable.
-
-    The slug is the machine-plane selector (ADR 0023), so it is minted once
-    from the name and never edited here.
-    """
-    base = slugify(name) or "style"
-    existing = set(variable.styles.values_list("slug", flat=True))
-    slug, n = base, 2
-    while slug in existing:
-        slug = f"{base}-{n}"
-        n += 1
-    return slug
+def _int_or_none(raw):
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _add_model_errors(form, error):
@@ -217,10 +227,11 @@ def _preview_context(variable):
     """What the map preview draws, or why it draws nothing (#382).
 
     The texture is Titiler's on-demand ``encoded-preview.png`` — the item's whole
-    extent with pixel = rescale(value, vmin→vmax, 0→255), which the browser
-    unscales back to physical values and colors client-side. Nothing about the
-    style enters this URL, which is the point: recoloring is a palette swap in
-    the browser, so a stop edit repaints without a request and without a save.
+    extent with pixel = encode(value) through the variable's curve, which the browser
+    colors code by code from a colour table. Nothing about the style enters this
+    URL, which is the point: recoloring is a table swap in the browser, so a stop
+    edit repaints without refetching the texture and without a save — only the
+    small table is asked for (:func:`variable_style_colours`).
 
     That also fixes what the preview can honestly show. The texture is encoded
     against the variable's *saved* range, so a stop beyond it renders as flat
@@ -232,15 +243,18 @@ def _preview_context(variable):
         return {"unavailable": PREVIEW_NO_DATA, "config": None}
     if not item.bounds:
         return {"unavailable": PREVIEW_NO_BOUNDS, "config": None, "item": item}
+    contract = render_contract(variable)
     return {
         "unavailable": None,
         "item": item,
         "item_url": reverse("item_preview", args=[item.pk]),
         "config": {
             **_preview_frame(item, variable),
-            "imageUnscale": render_contract(variable).image_unscale,
+            "imageUnscale": contract.image_unscale,
+            "encoding": contract.encoding,
             "unit": variable.units or "",
             "stepUrl": reverse("variable_preview_step", args=[variable.collection_id, variable.pk]),
+            "coloursUrl": reverse("variable_style_colours", args=[variable.collection_id, variable.pk]),
         },
     }
 
@@ -288,6 +302,45 @@ def variable_preview_step(request, collection_pk, variable_pk):
     return JsonResponse(_preview_frame(neighbour, variable))
 
 
+def variable_style_colours(request, collection_pk, variable_pk):
+    """The colour table a set of stops would get, saved or not (#785).
+
+    What the map preview colours the operator's unsaved stops with. The browser
+    colours a texture code by code from a style's colour table, and that table
+    is built in one place on the server for every renderer, so the preview asks
+    for it here rather than working colours out itself: what it shows is what
+    Titiler will serve once the stops are saved.
+
+    ``stops`` is JSON, ``[{"value", "color"}, ...]`` in the served unit, as the
+    form shows them (ADR 0046 §3); ``under`` and ``over`` are the style's
+    out-of-range settings, clamping when absent (#788). Read-only and
+    side-effect-free, hence GET.
+    """
+    collection = get_org_object_or_404(request, Collection, pk=collection_pk)
+    variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
+
+    refused = JsonResponse({"error": _("Each stop needs a number and a hex color, in ascending order.")}, status=400)
+    try:
+        stops = json.loads(request.GET.get("stops", "[]"))
+    except ValueError:
+        return refused
+    if not isinstance(stops, list) or not all(
+        isinstance(stop, dict) and isinstance(stop.get("value"), (int, float)) and not isinstance(stop["value"], bool)
+        for stop in stops
+    ):
+        return refused
+    under = request.GET.get("under") or OutOfRange.CLAMP
+    over = request.GET.get("over") or OutOfRange.CLAMP
+    if under not in OutOfRange.values or over not in OutOfRange.values:
+        return JsonResponse({"error": _("Under and over are each clamp or transparent.")}, status=400)
+    style = VariableStyle(variable=variable, stops=variable.stored_stops(stops), under=under, over=over)
+    try:
+        style.clean()
+    except ValidationError:
+        return refused
+    return JsonResponse({"colourTable": colour_table(variable, style)})
+
+
 def collection_styling(request, collection_pk):
     """The collection's Styling page: every variable, range and default swatch."""
     collection = get_org_object_or_404(
@@ -330,6 +383,68 @@ def collection_styling(request, collection_pk):
     return render(request, "core/collection_styling.html", context)
 
 
+def _template_picker(templates, variable):
+    """The Style template catalogue as the picker shows it (#791): grouped by
+    quantity, in catalogue order, split into the templates whose unit converts
+    into the Variable's source unit and the rest, each with the reason it is
+    not offered — what "show all" reveals."""
+    labels = dict(StyleTemplate.Quantity.choices)
+    offered, excluded = {}, {}
+    # The catalogue shares a handful of units: each is judged once.
+    refusals = {}
+    for template in templates:
+        if template.unit_id not in refusals:
+            try:
+                style_application.conversion(template, variable)
+            except style_application.ConversionRefused as refused:
+                refusals[template.unit_id] = str(refused)
+            else:
+                refusals[template.unit_id] = None
+        reason = refusals[template.unit_id]
+        row = {
+            "pk": template.pk,
+            "name": template.name,
+            "gradient": template.css_gradient(),
+            "levels_label": template.levels_label(),
+            "owner_label": template.owner_label(),
+            "reason": reason,
+        }
+        (excluded if reason else offered).setdefault(template.quantity, []).append(row)
+
+    def groups(by_quantity):
+        return [{"label": labels.get(quantity, quantity), "templates": rows} for quantity, rows in by_quantity.items()]
+
+    return {
+        "offered": groups(offered),
+        "excluded": groups(excluded),
+        "excluded_count": sum(len(rows) for rows in excluded.values()),
+    }
+
+
+def _encoding_proposal(variable, style):
+    """The range and curve ``style``'s template proposes, in the served unit,
+    with what they would do to its bands — or ``None`` when there is nothing to
+    propose: only a default style applied from a template sets the encoding
+    every style of the Variable shares (#791)."""
+    if style is None or not style.is_default or style.template is None:
+        return None
+    try:
+        encoding = style_application.proposed_encoding(style.template, variable)
+    except style_application.ConversionRefused:
+        return None
+    if encoding == style_application.current_encoding(variable):
+        return None
+    return {
+        "template": style.template,
+        "value_min": variable.served(encoding.value_min),
+        "value_max": variable.served(encoding.value_max),
+        "scale_type": encoding.scale_type,
+        "scale_type_label": Variable.ScaleType(encoding.scale_type).label,
+        "unit": variable.units,
+        "warnings": style_application.warnings(style.template, variable, encoding),
+    }
+
+
 def _get_style_or_none(variable, slug):
     if not slug:
         return None
@@ -345,7 +460,9 @@ def variable_styling(request, collection_pk, variable_pk):
     )
     variable = get_org_object_or_404(
         request,
-        Variable.objects.select_related("unit").prefetch_related("styles__ramp"),
+        Variable.objects.select_related("unit", "source_unit").prefetch_related(
+            "styles__ramp", "styles__template__unit"
+        ),
         pk=variable_pk,
         collection=collection,
     )
@@ -373,11 +490,12 @@ def variable_styling(request, collection_pk, variable_pk):
 
     served_min, served_max = variable.served_range
     range_form = VariableRangeForm(
+        variable=variable,
         initial={
             "value_min": served_min,
             "value_max": served_max,
             "scale_type": variable.scale_type,
-        }
+        },
     )
     style_form = VariableStyleForm(
         ramp_queryset=ramp_queryset,
@@ -386,6 +504,8 @@ def variable_styling(request, collection_pk, variable_pk):
             "ramp": selected.ramp_id if selected else None,
             "mode": selected.mode if selected else VariableStyle.Mode.CONTINUOUS,
             "steps": (selected.steps if selected else None) or DEFAULT_STEPPED_CLASSES,
+            "under": selected.under if selected else OutOfRange.CLAMP,
+            "over": selected.over if selected else OutOfRange.CLAMP,
         },
     )
     # The form speaks the served unit; stops are stored in the source unit (ADR 0046 §3).
@@ -395,7 +515,7 @@ def variable_styling(request, collection_pk, variable_pk):
         action = request.POST.get("action")
 
         if action == "save-range":
-            range_form = VariableRangeForm(request.POST)
+            range_form = VariableRangeForm(request.POST, variable=variable)
             if range_form.is_valid():
                 variable.set_served_range(range_form.cleaned_data["value_min"], range_form.cleaned_data["value_max"])
                 variable.scale_type = range_form.cleaned_data["scale_type"]
@@ -413,7 +533,7 @@ def variable_styling(request, collection_pk, variable_pk):
                 if creating:
                     style = VariableStyle(
                         variable=variable,
-                        slug=_unique_style_slug(variable, data["name"]),
+                        slug=style_application.unique_style_slug(variable, data["name"]),
                         # The first style is what serves, so it is the default;
                         # later ones stage until explicitly promoted.
                         is_default=not styles,
@@ -424,6 +544,8 @@ def variable_styling(request, collection_pk, variable_pk):
                 style.ramp = data["ramp"]
                 style.mode = data["mode"]
                 style.steps = data["steps"]
+                style.under = data["under"]
+                style.over = data["over"]
                 try:
                     stops = variable.stored_stops(_parse_stops(request.POST))
                     if creating and not stops and style.ramp:
@@ -438,6 +560,53 @@ def variable_styling(request, collection_pk, variable_pk):
                     messages.success(request, _("Style saved."))
                     return redirect(style_url(style))
             stop_rows = _stop_rows(request.POST)
+
+        elif action == "apply-template":
+            template = (
+                scoped_queryset(request, StyleTemplate.objects.select_related("unit"))
+                .filter(pk=_int_or_none(request.POST.get("template")))
+                .first()
+            )
+            if template is None:
+                messages.error(request, _("Pick a Style template to apply."))
+                return redirect(form_url)
+            try:
+                style = style_application.apply_template(
+                    template, variable, make_default=bool(request.POST.get("make_default"))
+                )
+            except style_application.ConversionRefused as refused:
+                messages.error(request, str(refused))
+                return redirect(form_url)
+            except ValidationError as invalid:
+                messages.error(
+                    request,
+                    _('The "%(template)s" template cannot be applied: %(why)s')
+                    % {"template": template.name, "why": " ".join(invalid.messages)},
+                )
+                return redirect(form_url)
+            messages.success(
+                request, _('Applied the "%(template)s" template as a new style.') % {"template": template.name}
+            )
+            for warning in style_application.warnings(template, variable, style_application.current_encoding(variable)):
+                messages.warning(request, warning)
+            if style.is_default:
+                return redirect(f"{style_url(style)}&propose=encoding")
+            return redirect(style_url(style))
+
+        elif action == "accept-template-encoding":
+            if selected is None or not selected.is_default or selected.template is None:
+                messages.error(request, _("Only the default style's template can set the range and curve."))
+                return redirect(style_url(selected) if selected else form_url)
+            try:
+                encoding = style_application.proposed_encoding(selected.template, variable)
+                style_application.accept_encoding(variable, encoding)
+            except (style_application.ConversionRefused, ValidationError) as refused:
+                messages.error(request, _("The template's range and curve were not set: %(why)s") % {"why": refused})
+                return redirect(style_url(selected))
+            messages.success(request, _("Range and curve set from the template."))
+            for warning in style_application.warnings(selected.template, variable, encoding):
+                messages.warning(request, warning)
+            return redirect(style_url(selected))
 
         elif action == "promote":
             if selected is None:
@@ -510,6 +679,13 @@ def variable_styling(request, collection_pk, variable_pk):
         "grayscale_gradient": GRAYSCALE_GRADIENT,
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,
         "preview": _preview_context(variable),
+        "template_picker": _template_picker(
+            scoped_queryset(request, StyleTemplate.objects.select_related("unit", "organisation")).in_catalogue_order(),
+            variable,
+        ),
+        "encoding_proposal": (
+            _encoding_proposal(variable, selected) if request.GET.get("propose") == "encoding" else None
+        ),
     }
     return render(request, "core/variable_styling.html", context)
 

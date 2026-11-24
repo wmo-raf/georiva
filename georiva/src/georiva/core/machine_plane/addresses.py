@@ -33,6 +33,8 @@ import json
 from collections import namedtuple
 from urllib.parse import parse_qs, urlencode
 
+from georiva.core.models import OutOfRange
+
 TITILER_PREFIX = "/titiler"
 MARTIN_PREFIX = "/martin"
 
@@ -316,6 +318,10 @@ def style_version_token(variable, style=None) -> str:
     """
     stops = json.dumps(style.stops, sort_keys=True) if style is not None else ""
     basis = f"{_render_range_basis(variable)}:{stops}"
+    # A transparent under or over is baked in too (#788). Only when one is set,
+    # so a clamping style, every style before it, keeps the URLs it has.
+    if style is not None and (style.under, style.over) != (OutOfRange.CLAMP, OutOfRange.CLAMP):
+        basis += f":under={style.under}:over={style.over}"
     return hashlib.sha1(basis.encode()).hexdigest()[:8]
 
 

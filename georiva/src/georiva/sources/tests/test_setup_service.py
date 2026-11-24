@@ -6,7 +6,7 @@ split that drives ingestion-time unit conversion, and the seed-vs-tune policy
 
 from django.test import TestCase
 
-from georiva.core.models import Catalog, Collection, ColorRamp, ColorRampStop
+from georiva.core.models import Catalog, Collection, ColorRamp, ColorRampStop, StyleTemplate, Unit
 from georiva.core.models.visualization import generate_stops
 from georiva.core.unit_utils import ureg
 from georiva.organisations.testing import make_organisation
@@ -527,6 +527,247 @@ class UpsertVariableStyleSeedTests(TestCase):
         self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))
 
         self.assertEqual(variable.styles.count(), 0)
+
+
+class UpsertVariableStyleTemplateSeedTests(TestCase):
+    """A plugin names a Style template in its collection definition (#792):
+    a new Variable gets the template's stepped default style, in its source
+    unit, and the template's range and curve. Precedence ``palette_stops`` >
+    ``style_template`` > ``palette`` > grayscale; create-only."""
+
+    def setUp(self):
+        self.service = SourceSetupService()
+        self.collection = _collection()
+
+    def _var_def(self, **overrides):
+        fields = dict(
+            key="precip",
+            name="Precipitation",
+            source_units="mm",
+            source_variable=SourceKey(name="band_1"),
+        )
+        fields.update(overrides)
+        return CollectionVariable(**fields)
+
+    def test_a_template_seeds_the_default_style_range_and_curve(self):
+        variable = self.service._upsert_variable(
+            self.collection, self._var_def(style_template="precipitation-0-5-to-200mm")
+        )
+
+        style = variable.styles.get()
+        self.assertTrue(style.is_default)
+        self.assertEqual(style.mode, "stepped")
+        self.assertEqual(style.template.slug, "precipitation-0-5-to-200mm")
+        self.assertEqual(style.steps, 17)
+        self.assertEqual(
+            style.stops[:3],
+            [
+                {"value": 0.5, "color": "#f2a6f2"},
+                {"value": 1.0, "color": "#f2a6f2"},
+                {"value": 1.0, "color": "#d98cd9"},
+            ],
+        )
+        self.assertEqual(style.stops[-1], {"value": 200.0, "color": "#cc0000"})
+        self.assertEqual((style.under, style.over), ("transparent", "clamp"))
+        self.assertEqual((variable.value_min, variable.value_max), (0.5, 200.0))
+        self.assertEqual(variable.scale_type, "sqrt")
+
+    def test_the_template_is_converted_into_the_source_unit(self):
+        # A °C template on a Variable stored in kelvin and served in °C.
+        variable = self.service._upsert_variable(
+            self.collection,
+            self._var_def(
+                key="t2m",
+                name="2 m temperature",
+                source_units="K",
+                output_units="°C",
+                style_template="temperature-4c-bands",
+            ),
+        )
+
+        style = variable.styles.get()
+        self.assertAlmostEqual(style.stops[0]["value"], 241.15)
+        self.assertAlmostEqual(style.stops[-1]["value"], 317.15)
+        self.assertAlmostEqual(variable.value_min, 241.15)
+        self.assertAlmostEqual(variable.value_max, 317.15)
+        self.assertEqual(variable.scale_type, "linear")
+
+    def test_palette_stops_take_precedence_over_a_template(self):
+        stops = ((0.0, "#000000"), (10.0, "#ffffff"))
+        variable = self.service._upsert_variable(
+            self.collection,
+            self._var_def(palette_stops=stops, style_template="precipitation-0-5-to-200mm"),
+        )
+
+        style = variable.styles.get()
+        self.assertIsNone(style.template)
+        self.assertEqual(len(style.stops), 2)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 10.0))
+        self.assertEqual(variable.scale_type, "linear")
+
+    def test_a_template_takes_precedence_over_a_palette(self):
+        variable = self.service._upsert_variable(
+            self.collection,
+            self._var_def(palette="viridis", style_template="precipitation-0-5-to-200mm"),
+        )
+
+        style = variable.styles.get()
+        self.assertIsNone(style.ramp)
+        self.assertEqual(style.template.slug, "precipitation-0-5-to-200mm")
+
+    def test_the_org_template_wins_over_an_instance_wide_one_of_the_same_slug(self):
+        organisation = self.collection.catalog.organisation
+        own = StyleTemplate.objects.create(
+            organisation=organisation,
+            name="House rain",
+            slug="precipitation-0-5-to-200mm",
+            levels=[1, 10, 100],
+            colors=["#00ff00", "#0000ff"],
+            unit=Unit.objects.get(symbol="mm"),
+            scale_type="log",
+        )
+
+        variable = self.service._upsert_variable(
+            self.collection, self._var_def(style_template="precipitation-0-5-to-200mm")
+        )
+
+        self.assertEqual(variable.styles.get().template, own)
+        self.assertEqual((variable.value_min, variable.value_max), (1.0, 100.0))
+        self.assertEqual(variable.scale_type, "log")
+
+    def test_another_organisations_template_is_not_resolved(self):
+        StyleTemplate.objects.create(
+            organisation=make_organisation("other-org"),
+            name="Theirs",
+            slug="theirs",
+            levels=[1, 10, 100],
+            colors=["#00ff00", "#0000ff"],
+            unit=Unit.objects.get(symbol="mm"),
+        )
+
+        with self.assertLogs("georiva.sources.setup_service", level="WARNING"):
+            variable = self.service._upsert_variable(self.collection, self._var_def(style_template="theirs"))
+
+        self.assertEqual(variable.styles.count(), 0)
+
+    def _one_band_template(self):
+        # Saved before templates needed two bands: the stepped style it would
+        # make is not a valid style. Provisioning never fails on styling (ADR 0022).
+        return StyleTemplate.objects.create(
+            organisation=self.collection.catalog.organisation,
+            name="One band",
+            slug="one-band",
+            levels=[1, 10],
+            colors=["#00ff00"],
+            unit=Unit.objects.get(symbol="mm"),
+            scale_type="log",
+        )
+
+    def test_a_template_that_cannot_be_applied_falls_back_to_the_palette_and_the_declared_range(self):
+        self._one_band_template()
+
+        with self.assertLogs("georiva.sources.setup_service", level="WARNING") as logs:
+            variable = self.service._upsert_variable(
+                self.collection,
+                self._var_def(palette="viridis", value_range=(0.0, 50.0), style_template="one-band"),
+            )
+
+        self.assertIn("one-band", "\n".join(logs.output))
+        style = variable.styles.get()
+        self.assertEqual(style.ramp.name, "viridis")
+        self.assertIsNone(style.template)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 50.0))
+        self.assertEqual(variable.scale_type, "linear")
+
+    def test_a_template_that_cannot_be_applied_without_a_palette_falls_back_to_grayscale(self):
+        self._one_band_template()
+
+        with self.assertLogs("georiva.sources.setup_service", level="WARNING"):
+            variable = self.service._upsert_variable(
+                self.collection, self._var_def(value_range=(0.0, 50.0), style_template="one-band")
+            )
+
+        self.assertEqual(variable.styles.count(), 0)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 50.0))
+        self.assertEqual(variable.scale_type, "linear")
+
+    def test_an_unknown_template_falls_back_to_the_palette_with_a_warning(self):
+        with self.assertLogs("georiva.sources.setup_service", level="WARNING") as logs:
+            variable = self.service._upsert_variable(
+                self.collection,
+                self._var_def(palette="viridis", value_range=(0.0, 50.0), style_template="no-such-template"),
+            )
+
+        self.assertIn("no-such-template", "\n".join(logs.output))
+        style = variable.styles.get()
+        self.assertEqual(style.ramp.name, "viridis")
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 50.0))
+        self.assertEqual(variable.scale_type, "linear")
+
+    def test_a_template_whose_unit_does_not_convert_falls_back_with_a_warning(self):
+        # A precipitation (mm) template on a temperature Variable.
+        with self.assertLogs("georiva.sources.setup_service", level="WARNING"):
+            variable = self.service._upsert_variable(
+                self.collection,
+                self._var_def(
+                    source_units="K",
+                    value_range=(200.0, 330.0),
+                    style_template="precipitation-0-5-to-200mm",
+                ),
+            )
+
+        self.assertEqual(variable.styles.count(), 0)
+        self.assertEqual((variable.value_min, variable.value_max), (200.0, 330.0))
+        self.assertEqual(variable.scale_type, "linear")
+
+    def test_a_declared_range_that_disagrees_with_the_template_warns_and_the_template_wins(self):
+        with self.assertLogs("georiva.sources.setup_service", level="WARNING"):
+            variable = self.service._upsert_variable(
+                self.collection,
+                self._var_def(value_range=(0.0, 500.0), style_template="precipitation-0-5-to-200mm"),
+            )
+
+        self.assertEqual((variable.value_min, variable.value_max), (0.5, 200.0))
+
+    def test_reprovision_never_touches_the_seeded_style_range_or_curve(self):
+        variable = self.service._upsert_variable(
+            self.collection, self._var_def(style_template="precipitation-0-5-to-200mm")
+        )
+        style = variable.styles.get()
+        tuned = [{"value": 0.0, "color": "#123456"}, {"value": 42.0, "color": "#654321"}]
+        style.stops = tuned
+        style.save()
+        variable.value_min, variable.value_max, variable.scale_type = 0.0, 42.0, "linear"
+        variable.save()
+
+        self.service._upsert_variable(self.collection, self._var_def(style_template="temperature-4c-bands"))
+
+        variable.refresh_from_db()
+        style.refresh_from_db()
+        self.assertEqual(style.stops, tuned)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 42.0))
+        self.assertEqual(variable.scale_type, "linear")
+        self.assertEqual(variable.styles.count(), 1)
+
+    def test_style_template_survives_parsing(self):
+        defs = parse_collection_defs(
+            {
+                "rain": {
+                    "name": "Rain",
+                    "time_resolution": "daily",
+                    "variables": [
+                        {
+                            "name": "Precipitation",
+                            "source_units": "mm",
+                            "source_variable": "band_1",
+                            "style_template": "precipitation-0-5-to-200mm",
+                        }
+                    ],
+                },
+            }
+        )
+
+        self.assertEqual(defs[0].variables[0].style_template, "precipitation-0-5-to-200mm")
 
 
 class ParseCollectionDefsPaletteTests(TestCase):

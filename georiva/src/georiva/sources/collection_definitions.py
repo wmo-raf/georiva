@@ -41,10 +41,17 @@ class CollectionVariable:
       materialized verbatim as the default style; when present the variable's
       range is derived from the stops (declaring both range and stops merely
       warns on disagreement).
+    - style_template: a Style template slug (e.g. "precipitation-0-5-to-200mm").
+      Its bands become the variable's stepped default style, converted into
+      source_units, and its first and last levels and recommended curve set
+      the variable's range and scale_type (a declared value_range merely
+      warns on disagreement). The organisation's own template wins a slug
+      collision with the instance-wide catalogue.
 
-    Precedence: palette_stops > palette > grayscale. An unknown ramp name or
-    malformed stops degrade one tier with a logged warning — provisioning
-    never fails on styling.
+    Precedence: palette_stops > style_template > palette > grayscale. An
+    unknown ramp name or template slug, a template whose unit does not convert
+    into source_units, or malformed stops degrade one tier with a logged
+    warning — provisioning never fails on styling.
     """
 
     key: str
@@ -59,6 +66,7 @@ class CollectionVariable:
     value_range: tuple[float, float] | None = None
     palette: str | None = None
     palette_stops: tuple[tuple[float, str], ...] | None = None
+    style_template: str | None = None
 
     def __post_init__(self):
         if self.transform == "passthrough" and self.source_variable is None:
@@ -230,6 +238,7 @@ def _parse_variable(v: dict) -> CollectionVariable:
             value_range=tuple(v["value_range"]) if v.get("value_range") else None,
             palette=v.get("palette"),
             palette_stops=_freeze_palette_stops(v.get("palette_stops")),
+            style_template=v.get("style_template"),
         )
 
     # Vector-derived variable
@@ -245,6 +254,7 @@ def _parse_variable(v: dict) -> CollectionVariable:
         value_range=tuple(v["value_range"]) if v.get("value_range") else None,
         palette=v.get("palette"),
         palette_stops=_freeze_palette_stops(v.get("palette_stops")),
+        style_template=v.get("style_template"),
     )
 
 

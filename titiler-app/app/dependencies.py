@@ -21,6 +21,7 @@ from app.config import (
     REMOTE_ASSETS_KEY_PREFIX,
     REMOTE_ASSETS_PUBLISHED_FIELD,
 )
+from app.curve import LINEAR, curve_of, encode
 from app.store import StoreSlice, is_store_entry
 
 logger = logging.getLogger(__name__)
@@ -359,7 +360,7 @@ def SemanticColorMap(
 
 
 class RescaleAlgorithm(BaseAlgorithm):
-    """Rescale raw float COG data to 0-255 before colormap lookup.
+    """Encode raw float COG data as codes 0-255, through the Variable's curve, before colormap lookup.
 
     When the layer's catalog crops its maps to a boundary (``display`` clip mode,
     ADR 0038) the tile is also masked to it here, so the colormap step paints
@@ -368,16 +369,21 @@ class RescaleAlgorithm(BaseAlgorithm):
 
     vmin: float
     vmax: float
+    curve: str = LINEAR
     boundary: dict | None = None
 
     def __call__(self, img: ImageData) -> ImageData:
         crop(img, self.boundary)
-        img.rescale(in_range=[(self.vmin, self.vmax)], out_range=[(0, 255)])
-        return img
+        return encode(img, {"vmin": self.vmin, "vmax": self.vmax, "curve": self.curve})
 
 
 def SemanticRescale(
     tile_config: dict = Depends(SemanticTileConfig),
 ) -> BaseAlgorithm | None:
-    """Return a rescale algorithm using vmin/vmax from the tile config."""
-    return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"], boundary=tile_config.get("boundary"))
+    """Return a rescale algorithm using vmin/vmax and the encoding curve from the tile config."""
+    return RescaleAlgorithm(
+        vmin=tile_config["vmin"],
+        vmax=tile_config["vmax"],
+        curve=curve_of(tile_config),
+        boundary=tile_config.get("boundary"),
+    )

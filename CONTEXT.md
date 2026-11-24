@@ -873,7 +873,16 @@ A catalog entry of pure aesthetics — ordered colors with optional 0–1 positi
 (sequential/diverging/qualitative), carrying **no values**. Tiered like other shared reference data (global tier +
 org-owned); the instance seeds a curated set under matplotlib-compatible names. What "reusable" means for color:
 the ramp is reused, never the values. See ADR 0022.
-_Avoid_: palette (for the value-free thing), colormap (that's the rendered 256-entry output)
+_Avoid_: palette (for the value-free thing), colormap (that's the rendered 256-entry output, the **Colour table**)
+
+**Style template** (`StyleTemplate`):
+A reusable, **value-anchored** set of band levels (n+1 ascending boundaries) and band colours (one per band) that
+declares its unit, its under/over behaviour and a recommended encoding curve. Stepped only. Where a Color ramp is
+value-free, a template is values: it is applied into a Variable style as a stops snapshot converted into the source
+unit, never live-linked. Tiered like Color ramps; a template with an `origin` (e.g. `earthkit-plots`) was shipped by
+GeoRiva and is read-only to everyone, the instance admin included — "Copy to my organisation" makes an editable copy.
+See #784.
+_Avoid_: style preset, palette template
 
 **Variable style** (`VariableStyle`):
 The applied, per-variable result: a named row (one-to-many from `Variable`, exactly one `is_default`) holding the
@@ -888,11 +897,39 @@ stops — the styling surface offers "re-apply ramp", which regenerates and disc
 Not live-linked. See ADR 0022.
 _Avoid_: dynamic stops, linked stops
 
+**Colour table**:
+A style's 256 RGBA entries, one per encoded code: the one answer to which colour a code gets. Built in one place
+(`core/machine_plane/colour_table.py`) by decoding each code to the value it stands for and interpolating the stops
+snapshot in value space; stepped styles keep hard edges through their doubled boundary stops. Every renderer takes
+it from there — Titiler colours tiles and WMTS with it, the browser map colours the encoded texture with it in code
+space (identity unscale), STAC renders and EDR's `colour_table` carry it — so a pixel has the same colour everywhere.
+Legends and the boundary choropleth read the stops, which agree with the table by construction. Replaces "colormap"
+as the term; `colormap` survives only as a wire key (Titiler's palette payload, the STAC Render extension). See #784.
+_Avoid_: colormap (except as that wire key), palette (for the table)
+
+**Encoding curve**:
+The function from a value to one of the 256 codes, chosen by the Variable's `scale_type`: `code = int(255 · f(t))`
+with `t` the value's place in the range clipped to 0–1, and `f` the identity (`linear`, and `diverging`, which stays
+symmetric), `√t` (`sqrt`) or `log(v/vmin) / log(vmax/vmin)` (`log`, which needs a stored minimum above zero). Applied
+wherever values become codes — Titiler's tiles, WMTS GetTile and the encoded texture — and inverted to build the
+**Colour table** and to decode the browser's hover readout. A steep curve gives a narrow low band enough codes to be
+seen. The texture names it in `X-Image-Curve`. See ADR 0049.
+_Avoid_: scale (that is the unit conversion's factor), stretch
+
+**Under / over** (`VariableStyle.under` / `.over`, `OutOfRange`):
+What a style does with values below its first stop (under) or above its last (over): **clamp**, drawn in the end
+colour (the default, and every style's behaviour before #788), or **transparent**, not drawn, so the basemap shows
+through. Carried into the **Colour table** as alpha-0 entries, so tiles, WMTS, STAC renders and the browser map
+agree. The table's end codes also hold every value clipped beyond the Variable's range, so a transparent under hides
+code 0 whenever the stops start at or above the range's bottom (and likewise over and code 255). Each Variable style
+and each Style template carries both; set on the Styling surface. See #784.
+_Avoid_: out-of-range colour, extend (matplotlib's term), nodata (that is no value at all, not a value beyond the stops)
+
 **Seed vs. tune**:
 The write policy for ranges and styling. Provisioning surfaces (source setup, upload wizard, derived-product
 recipes, plugin declarations) may **seed** — create-only, never overwriting what exists. Only the styling surface
-**tunes**. Plugin seed precedence: `palette_stops` > `palette` (ramp name) > grayscale; explicit stops derive the
-range. See ADR 0022.
+**tunes**. Plugin seed precedence: `palette_stops` > `style_template` (Style template slug) > `palette` (ramp
+name) > grayscale; explicit stops derive the range, and a Style template sets the range and curve. See ADR 0022, #792.
 _Avoid_: sync, refresh (for re-provision behavior on styling)
 
 **Styling surface**:

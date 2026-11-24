@@ -9,6 +9,7 @@ creating duplicates, so adding new collections to a plugin is safe to re-run.
 import logging
 import math
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.text import slugify
 
@@ -55,6 +56,51 @@ def _validated_palette_stops(raw):
     if stops[0]["value"] == stops[-1]["value"]:
         return None, "all stop values are equal — cannot derive a range"
     return stops, None
+
+
+def _org_tier_first(queryset, organisation, **lookup):
+    """The row matching ``lookup`` in ``organisation``'s tier, else in the
+    instance-wide tier, else ``None``.
+
+    A plugin provisions into one organisation's catalog, so the ramps and
+    templates it can name are that organisation's plus the instance-wide
+    catalogue (ADR 0011) — the organisation's own wins a collision.
+    """
+    return (
+        queryset.filter(organisation=organisation, **lookup).first()
+        or queryset.filter(organisation__isnull=True, **lookup).first()
+    )
+
+
+def _resolved_style_template(organisation, slug, seeding):
+    """Resolve a plugin's declared ``style_template`` slug for ``seeding``.
+
+    Returns ``(template, encoding, error)``; the template is looked up as
+    :func:`_org_tier_first` does. ``encoding`` is the template's
+    range and curve in ``seeding``'s source unit. An unknown slug, or a
+    template whose unit does not convert into the source unit, gives an
+    ``error`` instead; the caller degrades one tier with a warning (ADR 0022).
+    """
+    from georiva.core.models import StyleTemplate
+    from georiva.core.style_application import ConversionRefused, proposed_encoding
+
+    if not slug:
+        return None, None, None
+    template = _org_tier_first(StyleTemplate.objects.select_related("unit"), organisation, slug=slug)
+    if template is None:
+        return None, None, f"unknown style template {slug!r}"
+    # Judged before anything is seeded from it: a template that is not one
+    # (a row saved before a rule it now breaks) makes no valid style, and its
+    # range and curve must not be written for a style that never appears.
+    try:
+        template.full_clean(validate_unique=False, validate_constraints=False)
+    except ValidationError as invalid:
+        return None, None, f"style template {slug!r} cannot be applied ({'; '.join(invalid.messages)})"
+    try:
+        encoding = proposed_encoding(template, seeding)
+    except ConversionRefused as refused:
+        return None, None, f"style template {slug!r} does not apply ({refused})"
+    return template, encoding, None
 
 
 class SourceSetupService:
@@ -307,6 +353,20 @@ class SourceSetupService:
                 f"Variable {collection.slug}/{slug}: ignoring palette_stops "
                 f"({stops_error}) — falling back to {fallback}"
             )
+        # A plugin declares its range and stops as numbers people read — in the
+        # unit the variable is served in — and they are stored in the source
+        # unit (ADR 0046 §3). Saving refuses a conversion that cannot be made.
+        seeding = Variable(source_unit=source_unit, unit=output_unit, water=var_def.water)
+        seed_template = seed_encoding = None
+        if not seed_stops and var_def.style_template:
+            seed_template, seed_encoding, template_error = _resolved_style_template(
+                collection.catalog.organisation, var_def.style_template, seeding
+            )
+            if template_error:
+                fallback = f"ramp {var_def.palette!r}" if var_def.palette else "grayscale"
+                seed_warnings.append(
+                    f"Variable {collection.slug}/{slug}: ignoring {template_error} — falling back to {fallback}"
+                )
         if seed_stops:
             seed_min = seed_stops[0]["value"]
             seed_max = seed_stops[-1]["value"]
@@ -322,14 +382,28 @@ class SourceSetupService:
             seed_min, seed_max = var_def.value_range
         else:
             seed_min, seed_max = 0.0, 1.0
-        # A plugin declares its range and stops as numbers people read — in the
-        # unit the variable is served in — and they are stored in the source
-        # unit (ADR 0046 §3). Saving refuses a conversion that cannot be made.
-        seeding = Variable(source_unit=source_unit, unit=output_unit, water=var_def.water)
         seeding.set_served_range(seed_min, seed_max)
         seed_defaults = {"value_min": seeding.value_min, "value_max": seeding.value_max}
         if seed_stops:
             seed_stops = seeding.stored_stops(seed_stops)
+        elif seed_template:
+            # The template's encoding is in stored (source-unit) values. At
+            # create time there is no encoding to protect, so it is set, not
+            # proposed as it is on the Styling surface (#792).
+            if var_def.value_range and not (
+                math.isclose(seeding.value_min, seed_encoding.value_min)
+                and math.isclose(seeding.value_max, seed_encoding.value_max)
+            ):
+                seed_warnings.append(
+                    f"Variable {collection.slug}/{slug}: declared value_range "
+                    f"{var_def.value_range} disagrees with style template "
+                    f"{var_def.style_template!r} — the template wins"
+                )
+            seed_defaults = {
+                "value_min": seed_encoding.value_min,
+                "value_max": seed_encoding.value_max,
+                "scale_type": seed_encoding.scale_type,
+            }
 
         if var_def.transform == "passthrough":
             transform = Variable.TransformType.PASSTHROUGH
@@ -361,16 +435,16 @@ class SourceSetupService:
             # it is not going to apply.
             for message in seed_warnings:
                 logger.warning(message)
-            self._seed_default_style(variable, var_def, seed_stops)
+            self._seed_default_style(variable, var_def, seed_stops, seed_template)
         action = "created" if created else "updated"
         logger.info("Variable %s: %s/%s", action, collection.slug, slug)
         return variable
 
     @staticmethod
-    def _seed_default_style(variable, var_def: CollectionVariable, seed_stops):
+    def _seed_default_style(variable, var_def: CollectionVariable, seed_stops, seed_template=None):
         """Materialize the plugin's styling seed as the new Variable's default
-        style (ADR 0022), precedence ``palette_stops`` > ``palette`` >
-        grayscale. Create-only by construction: only called for a variable
+        style (ADR 0022), precedence ``palette_stops`` > ``style_template`` >
+        ``palette`` > grayscale. Create-only by construction: only called for a variable
         this provisioning run just created. The grayscale tier writes no row —
         serving already falls back to grayscale for a style-less variable.
         """
@@ -385,16 +459,20 @@ class SourceSetupService:
                 stops=seed_stops,
             )
             return
+        if seed_template:
+            from georiva.core.style_application import apply_template
+
+            # The Variable's first style, so its default: the same stepped
+            # snapshot an operator applying the template gets (#791). The
+            # template was judged valid before its range and curve were
+            # seeded, and a valid template always makes a valid style.
+            apply_template(seed_template, variable)
+            return
         if not var_def.palette:
             return
 
-        # A plugin provisions into one organisation's catalog, so its ramp
-        # vocabulary is that organisation's tier plus the instance-wide
-        # catalog — the org's own ramp wins a name collision.
-        organisation = variable.collection.catalog.organisation
-        ramp = (
-            ColorRamp.objects.filter(organisation=organisation, name__iexact=var_def.palette).first()
-            or ColorRamp.objects.filter(organisation__isnull=True, name__iexact=var_def.palette).first()
+        ramp = _org_tier_first(
+            ColorRamp.objects, variable.collection.catalog.organisation, name__iexact=var_def.palette
         )
         if ramp is None:
             logger.warning(

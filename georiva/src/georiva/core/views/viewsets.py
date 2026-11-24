@@ -203,7 +203,12 @@ class GlobalTierCreateView(generic.CreateView):
         panel = super().get_panel()
         if not self._may_choose_tier() or panel is None:
             return panel
-        return ObjectList(list(panel.children) + [FieldPanel("organisation")]).bind_to_model(self.model)
+        # Keep the panel's own form class (a viewset's custom form), which a
+        # fresh ObjectList would otherwise drop for the model's default.
+        return ObjectList(
+            list(panel.children) + [FieldPanel("organisation")],
+            base_form_class=panel.base_form_class,
+        ).bind_to_model(self.model)
 
     def save_instance(self):
         if not self._may_choose_tier():

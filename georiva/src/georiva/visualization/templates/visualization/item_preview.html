@@ -497,19 +497,17 @@
             height: 12px;
         }
 
-        .geo-color-scale {
-            height: 8px;
-            border-radius: 2px;
+        .geo-legend-scale {
             margin-bottom: 0.3125rem;
+            color: var(--geo-text-secondary);
+            font-weight: 500;
         }
 
-        .geo-scale-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.625rem;
-            color: var(--geo-text-secondary);
-            font-variant-numeric: tabular-nums;
-            font-weight: 500;
+        /* legend.js sets the bar's gradient; the checkerboard under it shows a
+           translucent or clear band as one. */
+        .geo-legend-scale .legend-bar {
+            background: var(--legend-gradient),
+                repeating-conic-gradient(var(--w-color-border-furniture) 0% 25%, var(--w-color-surface-page) 0% 50%) 0 0 / 8px 8px;
         }
 
         .geo-layer-units {
@@ -747,10 +745,10 @@
                                  data-asset-max="{{ asset.served_stats.max|default_if_none:'' }}"
                                  data-asset-units="{{ asset.served_unit|default:'' }}"
                                  data-asset-name="{{ asset.variable.name }}"
-                                 data-asset-palette='{{ asset.render_contract.palette|to_json }}'
                                  data-asset-image-unscale='{{ asset.render_contract.image_unscale|to_json }}'
-                                 data-asset-palette-min="{{ asset.render_contract.legend_range.0 }}"
-                                 data-asset-palette-max="{{ asset.render_contract.legend_range.1 }}"
+                                 data-asset-encoding='{{ asset.render_contract.encoding|to_json }}'
+                                 data-asset-colour-table='{{ asset.render_contract.colour_table|to_json }}'
+                                 data-asset-legend='{{ asset.render_contract.legend|to_json }}'
                                  data-visualizable="{% if asset.texture_url %}true{% else %}false{% endif %}">
                                 <div class="geo-asset-row" title="{{ asset.variable.slug }}">
                                     <div class="geo-view-indicator">
@@ -868,11 +866,7 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="geo-color-scale" id="colorScale"></div>
-                    <div class="geo-scale-labels">
-                        <span id="scaleMin">0</span>
-                        <span id="scaleMax">100</span>
-                    </div>
+                    <div class="geo-legend-scale" id="legendScale"></div>
                     <div class="geo-layer-units" id="layerUnits"></div>
                     <div class="geo-opacity-control">
                         <div class="geo-opacity-label">
@@ -899,6 +893,8 @@
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
     <script src="{% static 'js/georiva-basemap.js' %}"></script>
+    <script src="{% static 'js/colour_table.js' %}"></script>
+    <script src="{% static 'js/legend.js' %}"></script>
     <script>
         (function async() {
             'use strict';
@@ -915,7 +911,9 @@
             // -----------------------------
             let currentBasemap = 'light';
             let currentAsset = null;
-            let currentPalette = null;
+            // What the shown layer's codes decode over, for the hover readout.
+            let currentImageUnscale = null;
+            let currentEncoding = null;
             let tooltipControl = null;
 
 
@@ -1006,7 +1004,8 @@
                 deckgl.setProps({
                     onLoad: () => deckgl.getCanvas() && tooltipControl.addTo(deckgl.getCanvas().parentElement),
                     onHover: (event) => {
-                        tooltipControl.updatePickingInfo(event)
+                        // The layer picks a code; the readout shows the value it stands for.
+                        tooltipControl.updatePickingInfo(GeoRivaColourTable.decodePick(event, currentImageUnscale, currentEncoding))
                     }
                 });
 
@@ -1114,32 +1113,6 @@
             };
 
             // -----------------------------
-            // Palette Functions
-            // -----------------------------
-
-            /**
-             * Get palette from asset data attribute
-             * Falls back to simple grayscale if parsing fails
-             */
-            function getPaletteForAsset(assetElement) {
-                const paletteStr = assetElement.dataset.assetPalette;
-
-                if (paletteStr && paletteStr.trim() !== '') {
-                    try {
-                        const palette = JSON.parse(paletteStr);
-                        if (Array.isArray(palette) && palette.length > 0) {
-                            return palette;
-                        }
-                    } catch (e) {
-                        console.warn('Failed to parse asset palette:', e);
-                    }
-                }
-
-                // Fallback grayscale
-                return [[0, [0, 0, 0]], [1, [255, 255, 255]]];
-            }
-
-            // -----------------------------
             // WeatherLayers RasterLayer
             // -----------------------------
             async function addWeatherRasterLayer(assetElement) {
@@ -1150,8 +1123,14 @@
                 const textureUrl = assetElement.dataset.assetTextureUrl;
                 const bounds = parseBounds(assetElement.dataset.assetBounds); // [w,s,e,n]
 
-                // The texture's encoding range, from the server's render contract.
+                // The texture's encoding range, from the server's render contract:
+                // what a code decodes back into a value over, for the hover readout.
                 const imageUnscale = JSON.parse(assetElement.dataset.assetImageUnscale || 'null');
+                // The curve a code decodes through (#787).
+                const encoding = JSON.parse(assetElement.dataset.assetEncoding || 'null');
+                // The map is coloured code by code from the style's colour table,
+                // the one Titiler colours tiles with (#785).
+                const colourTable = JSON.parse(assetElement.dataset.assetColourTable || 'null');
 
                 if (!textureUrl) {
                     clearDeckLayers();
@@ -1167,9 +1146,8 @@
                 clearDeckLayers();
 
                 try {
-                    // Get palette from asset
-                    const palette = getPaletteForAsset(assetElement);
-                    currentPalette = palette;
+                    currentImageUnscale = imageUnscale;
+                    currentEncoding = encoding;
 
                     const opacity = parseInt(document.getElementById('opacitySlider').value, 10) / 100;
 
@@ -1185,9 +1163,9 @@
                         bounds, // [west, south, east, north]
                         imageSmoothing: true,
                         imageInterpolation: "LINEAR",
-                        // The variable's range, never the stops' span
-                        imageUnscale,
-                        palette,
+                        // Codes, not values: identity unscale over the colour table.
+                        imageUnscale: GeoRivaColourTable.LAYER_UNSCALE,
+                        palette: GeoRivaColourTable.layerPalette(colourTable),
                         opacity,
                         visible: true,
                         pickable: true
@@ -1199,7 +1177,6 @@
                     console.error('WeatherLayers RasterLayer failed: ', err);
 
                     currentRasterLayer = null;
-                    currentPalette = null;
                     deckOverlay.setProps({layers: []});
                 } finally {
                     map.once('idle', () => {
@@ -1211,7 +1188,6 @@
 
             function clearDeckLayers() {
                 currentRasterLayer = null;
-                currentPalette = null;
                 if (deckOverlay) deckOverlay.setProps({layers: []});
 
                 // Remove fallback if present
@@ -1236,49 +1212,19 @@
             }
 
             /**
-             * Generate CSS gradient from palette for legend display
-             */
-            function generateGradientCSS(palette) {
-                if (!palette || palette.length === 0) {
-                    return 'linear-gradient(to right, #333, #fff)';
-                }
-
-                // Normalize positions for CSS
-                const positions = palette.map(entry => entry[0]);
-                const minPos = Math.min(...positions);
-                const maxPos = Math.max(...positions);
-                const range = maxPos - minPos || 1;
-
-                const stops = palette.map(([pos, color]) => {
-                    const normalizedPos = (pos - minPos) / range;
-                    const rgba = color.length === 4
-                        ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`
-                        : `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-                    return `${rgba} ${normalizedPos * 100}%`;
-                });
-                return `linear-gradient(to right, ${stops.join(', ')})`;
-            }
-
-            /**
-             * Update the legend panel with layer info
+             * Update the legend panel with layer info. The legend is laid out
+             * on the server, like the map (#790), and drawn as it comes.
              */
             function updateLayerInfo(assetElement) {
                 const name = assetElement.dataset.assetName || 'Layer';
                 const units = assetElement.dataset.assetUnits;
 
-                // Use palette value range for legend (from palette stops or asset stats for grayscale)
-                const legendMin = assetElement.dataset.assetPaletteMin;
-                const legendMax = assetElement.dataset.assetPaletteMax;
-
                 document.getElementById('layerTitle').textContent = name;
-                document.getElementById('scaleMin').textContent = legendMin ? parseFloat(legendMin).toFixed(1) : '0';
-                document.getElementById('scaleMax').textContent = legendMax ? parseFloat(legendMax).toFixed(1) : '100';
                 document.getElementById('layerUnits').textContent = units || '';
-
-                // Use current palette for gradient
-                const palette = currentPalette || getPaletteForAsset(assetElement);
-                const colorScale = document.getElementById('colorScale');
-                colorScale.style.background = generateGradientCSS(palette);
+                GeoRivaLegend.render(
+                    document.getElementById('legendScale'),
+                    JSON.parse(assetElement.dataset.assetLegend || 'null')
+                );
 
                 document.getElementById('layerInfo').classList.add('visible');
             }

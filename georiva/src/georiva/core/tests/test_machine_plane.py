@@ -44,8 +44,8 @@ from georiva.core.machine_plane import (
     wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
+from georiva.core.machine_plane.colour_table import as_colormap, table_from_stops
 from georiva.core.machine_plane.palette_cache import (
-    build_colormap_256,
     build_variable_payload,
     get_palette_cache_key,
     variable_cache_key,
@@ -559,14 +559,17 @@ class StyledPayloadTests(TestCase):
             "vmin": self.variable.value_min,
             "vmax": self.variable.value_max,
             "scale_type": "linear",
+            "curve": "linear",
             # The served unit's conversion, for the numbers Titiler answers with (ADR 0046 §15).
             "scale": 1.0,
             "offset": 0.0,
             "unit": self.variable.unit.symbol,
-            "colormap": build_colormap_256(
-                [[0.0, [0, 0, 0]], [50.0, [255, 0, 0]]],
-                self.variable.value_min,
-                self.variable.value_max,
+            "colormap": as_colormap(
+                table_from_stops(
+                    [[0.0, [0, 0, 0]], [50.0, [255, 0, 0]]],
+                    self.variable.value_min,
+                    self.variable.value_max,
+                )
             ),
         }
         payload = build_variable_payload(self.variable)
@@ -582,6 +585,7 @@ class StyledPayloadTests(TestCase):
                 "vmin": self.variable.value_min,
                 "vmax": self.variable.value_max,
                 "scale_type": "linear",
+                "curve": "linear",
                 "scale": 1.0,
                 "offset": 0.0,
                 "unit": self.variable.unit.symbol,
@@ -781,6 +785,15 @@ class StyleSelectorAddressTests(TestCase):
         before = style_version_token(self.variable, self.analyst)
         self.analyst.stops = [{"value": 0.0, "color": "#123456"}, {"value": 50.0, "color": "#00ff00"}]
         self.assertNotEqual(before, style_version_token(self.variable, self.analyst))
+
+    def test_editing_a_styles_under_or_over_changes_its_token(self):
+        """A transparent under or over is baked into a tile's pixels (#788)."""
+        before = style_version_token(self.variable, self.analyst)
+        self.analyst.under = "transparent"
+        under = style_version_token(self.variable, self.analyst)
+        self.analyst.under, self.analyst.over = "clamp", "transparent"
+        over = style_version_token(self.variable, self.analyst)
+        self.assertEqual(len({before, under, over}), 3)
 
     def test_editing_the_range_changes_every_styles_token(self):
         before = style_version_token(self.variable, self.official)

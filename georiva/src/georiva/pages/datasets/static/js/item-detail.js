@@ -185,12 +185,18 @@ class ItemDetailMap {
         const palette = xg.palette || [[0, [0, 0, 0]], [1, [255, 255, 255]]];
         const paletteMin = xg.palette_min ?? xg.value_min ?? 0;
         const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
-        // The texture is decoded over the variable's own range (ADR 0022 §4),
-        // as the server's render contract states it — never the stops' span.
+        // The map is coloured code by code from the style's colour table, the
+        // one Titiler colours tiles with (#785); `palette` stays the stops, for
+        // the choropleth; the legend draws `legend` (#790). A code decodes back into a value over
+        // the variable's own range (ADR 0022 §4), never the stops' span.
         const imageUnscale = xg.image_unscale;
+        const layerPalette = GeoRivaColourTable.layerPalette(xg.colour_table);
         const units = param?.unit?.symbol || '';
 
         this.currentPalette = {palette, paletteMin, paletteMax};
+        this.currentImageUnscale = imageUnscale;
+        // The curve a code decodes through (#787).
+        this.currentEncoding = xg.encoding;
         this.currentUnits = units;
         this._clearRasterLayer();
         this._showNoVisual(false);
@@ -214,8 +220,8 @@ class ItemDetailMap {
                 bounds: [bbox[0], bbox[1], bbox[2], bbox[3]],
                 imageSmoothing: true,
                 imageInterpolation: 'LINEAR',
-                imageUnscale,
-                palette,
+                imageUnscale: GeoRivaColourTable.LAYER_UNSCALE,
+                palette: layerPalette,
                 opacity,
                 visible: true,
                 pickable: true,
@@ -224,7 +230,7 @@ class ItemDetailMap {
 
             this.deckOverlay.setProps({layers: [this.currentRasterLayer]});
             this._initTooltip(units);
-            this._updateLegend(param, xg, paletteMin, paletteMax);
+            this._updateLegend(param, xg);
         } catch (err) {
             console.error('WeatherLayers load failed:', url, err);
             this._clearRasterLayer();
@@ -427,8 +433,10 @@ class ItemDetailMap {
                 if (canvas) this.tooltipControl.addTo(canvas.parentElement);
             },
             onHover: event => {
-                this.tooltipControl.updatePickingInfo(event);
-                this.lastPickInfo = event;
+                // The layer picks a code; the readout shows the served value it stands for.
+                const decoded = GeoRivaColourTable.decodePick(event, this.currentImageUnscale, this.currentEncoding);
+                this.tooltipControl.updatePickingInfo(decoded);
+                this.lastPickInfo = decoded;
             },
         });
         this.deckgl.props.onLoad();
@@ -446,27 +454,13 @@ class ItemDetailMap {
 
     // ── Legend ─────────────────────────────────────────────────────────────
 
-    _updateLegend(param, xg, paletteMin, paletteMax) {
+    // Laid out on the server like the map (#790): a continuous style along the
+    // encoding curve, a stepped one as equal blocks, arrows on clamped ends.
+    _updateLegend(param, xg) {
         document.getElementById('grLegend').style.display = 'block';
         document.getElementById('grLegendTitle').textContent = param?.label || this.currentVarSlug;
-        document.getElementById('grLegendMin').textContent = Number(paletteMin).toFixed(1);
-        document.getElementById('grLegendMax').textContent = Number(paletteMax).toFixed(1);
         document.getElementById('grLegendUnits').textContent = param?.unit?.symbol || '';
-        document.getElementById('grLegendScale').style.background =
-            this._buildGradientCSS(xg.palette || [], paletteMin, paletteMax);
-    }
-
-    _buildGradientCSS(palette, paletteMin, paletteMax) {
-        if (!palette?.length) return 'linear-gradient(to right, #000, #fff)';
-        const range = paletteMax - paletteMin || 1;
-        const stops = palette.map(([val, color]) => {
-            const pct = ((val - paletteMin) / range) * 100;
-            const rgba = color.length === 4
-                ? `rgba(${color[0]},${color[1]},${color[2]},${color[3] / 255})`
-                : `rgb(${color[0]},${color[1]},${color[2]})`;
-            return `${rgba} ${pct.toFixed(1)}%`;
-        });
-        return `linear-gradient(to right, ${stops.join(', ')})`;
+        GeoRivaLegend.render(document.getElementById('grLegendScale'), xg.legend);
     }
 
     _setupLegendToggle() {
@@ -712,10 +706,11 @@ class ItemDetailMap {
             const lng = e.lngLat.lng;
 
             // Prefer stored hover info (desktop); fall back to pickObject (touch)
-            let value = this.lastPickInfo?.object?.value ?? null;
+            // (already decoded from its code, see _initTooltip).
+            let value = this.lastPickInfo?.raster?.value ?? null;
             if (value == null) {
                 const pick = this.deckgl.pickObject({x: e.point.x, y: e.point.y, radius: 2});
-                value = pick?.object?.value ?? null;
+                value = GeoRivaColourTable.decodePick(pick, this.currentImageUnscale, this.currentEncoding)?.raster?.value ?? null;
             }
 
             const units = this.parameterNames[this.currentVarSlug]?.unit?.symbol || '';

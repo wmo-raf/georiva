@@ -154,6 +154,73 @@
             letter-spacing: 0.04em;
         }
 
+        /* The Style template picker (#791). */
+        .vs-template-catalogue {
+            max-block-size: 28rem;
+            overflow-y: auto;
+            margin-block-end: 0.75rem;
+        }
+
+        .vs-template-group {
+            border: 0;
+            padding: 0;
+            margin: 0 0 0.75rem;
+        }
+
+        .vs-template-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .vs-template {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) 120px;
+            align-items: center;
+            gap: 0.15rem 0.6rem;
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .vs-template:hover {
+            background: color-mix(in srgb, var(--w-color-text-label) 6%, transparent);
+        }
+
+        .vs-template-swatch {
+            block-size: 14px;
+            border-radius: 3px;
+            border: 1px solid var(--w-color-border-furniture);
+        }
+
+        .vs-template-levels,
+        .vs-template-reason {
+            grid-column: 2 / -1;
+            color: var(--w-color-text-meta);
+            font-size: 0.85em;
+        }
+
+        .vs-template--excluded {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .vs-template-excluded summary {
+            cursor: pointer;
+            margin-block-end: 0.5rem;
+        }
+
+        .vs-template-default {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .vs-template-lineage {
+            color: var(--w-color-text-meta);
+            margin-block: 0 0.75rem;
+        }
+
         .vs-ramp-manage {
             display: inline-block;
             margin-block-start: 0.35rem;
@@ -595,6 +662,33 @@
         <div>
 
             {% comment %}
+                What a default style's template proposes for the variable's
+                encoding (#791). The range and curve are shared by every style,
+                so nothing changes until the operator accepts here.
+            {% endcomment %}
+            {% if encoding_proposal %}
+                <section class="vs-panel vs-proposal" id="vs-encoding-proposal">
+                    <h2 class="w-label-1">{% trans "Use the template's range and curve?" %}</h2>
+                    <p>
+                        {% blocktrans with template=encoding_proposal.template.name min=encoding_proposal.value_min max=encoding_proposal.value_max unit=encoding_proposal.unit curve=encoding_proposal.scale_type_label %}“{{ template }}” is laid out for a range of {{ min }} to {{ max }} {{ unit }} and a {{ curve }} curve.{% endblocktrans %}
+                    </p>
+                    {% for warning in encoding_proposal.warnings %}
+                        <div class="help-block help-warning">{{ warning }}</div>
+                    {% endfor %}
+                    <form method="post" action="{{ form_url }}" class="vs-actions">
+                        {% csrf_token %}
+                        <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                        <button type="submit" name="action" value="accept-template-encoding" class="button">
+                            {% trans "Use this range and curve" %}
+                        </button>
+                        <a href="{{ form_url }}?style={{ selected.slug }}" class="button button-secondary">
+                            {% trans "Keep the current encoding" %}
+                        </a>
+                    </form>
+                </section>
+            {% endif %}
+
+            {% comment %}
                 The variable's encoding contract. Saving here never touches any
                 style's stops (ADR 0022): regeneration is only the explicit
                 re-apply gesture in the style editor below.
@@ -649,6 +743,11 @@
                         {% endif %}
                     {% endif %}
                 </h2>
+                {% if selected.template %}
+                    <p class="vs-template-lineage">
+                        {% blocktrans with template=selected.template.name %}Applied from the Style template “{{ template }}”. These stops are a snapshot: editing them never changes the template, nor the template them.{% endblocktrans %}
+                    </p>
+                {% endif %}
 
                 <form method="post" action="{{ form_url }}" id="vs-style-form">
                     {% csrf_token %}
@@ -758,6 +857,18 @@
                                 data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
                             {% trans "Apply ramp" %}
                         </button>
+                    </div>
+
+                    {# What values beyond the stops are drawn as (#788): the end colour, or nothing. #}
+                    <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ style_form.under.id_for_label }}">{% trans "Below the first stop" %}</label>
+                            {{ style_form.under }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ style_form.over.id_for_label }}">{% trans "Above the last stop" %}</label>
+                            {{ style_form.over }}
+                        </div>
                     </div>
 
                     <h3 class="w-label-2">{% trans "Preview" %}</h3>
@@ -921,6 +1032,58 @@
                     </p>
                 </form>
             </section>
+
+            {% comment %}
+                The Style template picker (#791). Applying one writes a new
+                stepped style: the template's bands converted into this
+                variable's source unit, a snapshot it never follows again. Only
+                templates whose unit converts are offered; "Show all" lists the
+                rest, disabled, with the reason each is not.
+            {% endcomment %}
+            <section class="vs-panel" id="vs-templates">
+                <h2 class="w-label-1">{% trans "Style templates" %}</h2>
+                <form method="post" action="{{ form_url }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="apply-template">
+                    {% if template_picker.offered %}
+                        <div class="vs-template-catalogue">
+                            {% for group in template_picker.offered %}
+                                {% include "core/_styling_template_group.html" with group=group %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="help-text">
+                            {% blocktrans with unit=variable.source_unit.symbol %}No Style template is in a unit that converts into {{ unit }}.{% endblocktrans %}
+                        </p>
+                    {% endif %}
+                    {% if template_picker.excluded %}
+                        <details class="vs-template-excluded">
+                            <summary>
+                                {% blocktrans count counter=template_picker.excluded_count %}Show all templates ({{ counter }} more, not offered for this unit){% plural %}Show all templates ({{ counter }} more, not offered for this unit){% endblocktrans %}
+                            </summary>
+                            <div class="vs-template-catalogue">
+                                {% for group in template_picker.excluded %}
+                                    {% include "core/_styling_template_group.html" with group=group excluded=True %}
+                                {% endfor %}
+                            </div>
+                        </details>
+                    {% endif %}
+                    {% if template_picker.offered %}
+                        <div class="vs-field">
+                            <label class="vs-template-default">
+                                <input type="checkbox" name="make_default"{% if not styles %} checked disabled{% endif %}>
+                                {% trans "Make it the default style" %}
+                            </label>
+                            <p class="help-text">
+                                {% trans "A default style then proposes the template's range and curve. The variable's encoding changes only if you accept." %}
+                            </p>
+                        </div>
+                        <div class="vs-actions">
+                            <button type="submit" class="button">{% trans "Apply template" %}</button>
+                        </div>
+                    {% endif %}
+                </form>
+            </section>
         </div>
 
         <aside>
@@ -1043,6 +1206,7 @@
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
     <script src="{% static 'js/georiva-basemap.js' %}"></script>
+    <script src="{% static 'js/colour_table.js' %}"></script>
     <script src="{% static 'js/raster_preview.js' %}"></script>
     <script src="{% static 'core/js/stepped_classes.js' %}"></script>
     <script>
@@ -1054,6 +1218,8 @@
             const modeSelect = form.querySelector('[name="mode"]');
             const stepsField = document.getElementById('vs-steps-field');
             const stepsInput = form.querySelector('[name="steps"]');
+            const underSelect = form.querySelector('[name="under"]');
+            const overSelect = form.querySelector('[name="over"]');
             const body = document.getElementById('vs-stops-body');
             const preview = document.getElementById('vs-preview');
             const previewMin = document.getElementById('vs-preview-min');
@@ -1297,44 +1463,47 @@
             }
 
             /**
-             The map's palette, built from the same rows the gradient bar
-             reads. WeatherLayers wants [[value, [r, g, b, a]], …] — the very
-             shape VariableStyle.as_weatherlayers_palette() hands the tile
-             config, so what the operator sees here is what Titiler will
-             serve once this is saved.
+             The map's colours, from the same rows the gradient bar reads.
+             The map colours each texture code from a colour table, and the
+             server builds that table for every renderer (#785), so the rows
+             are sent to it rather than turned into colours here: what the
+             operator sees is what Titiler will serve once this is saved.
+             Asked once the typing settles; an answer overtaken by a later
+             edit, or refused for a half-typed row, leaves the map as it was.
+             No rows is a styleless variable's table, grayscale, shown
+             honestly rather than as an empty map.
              **/
 
-            function hexToRgba(hex) {
-                const clean = hex.replace('#', '');
-                const rgba = [
-                    parseInt(clean.slice(0, 2), 16),
-                    parseInt(clean.slice(2, 4), 16),
-                    parseInt(clean.slice(4, 6), 16),
-                    clean.length >= 8 ? parseInt(clean.slice(6, 8), 16) : 255
-                ];
-                return rgba.map(function (channel) {
-                    return Number.isNaN(channel) ? 0 : channel;
-                });
+            const COLOUR_TABLE_DELAY_MS = 150;
+            let colourTableTimer = null;
+            let colourTableAsked = 0;
+
+            async function fetchColourTable(stops) {
+                const url = new URL(previewConfig.coloursUrl, window.location.origin);
+                url.searchParams.set('stops', JSON.stringify(stops));
+                url.searchParams.set('under', underSelect.value);
+                url.searchParams.set('over', overSelect.value);
+                const response = await fetch(url, {credentials: 'same-origin'});
+                if (!response.ok) {
+                    return null;
+                }
+                return (await response.json()).colourTable;
             }
 
-            function paletteFromStops(stops) {
-                if (!stops.length) {
-                    // What a styleless variable actually renders as, shown
-                    // honestly rather than as an empty map.
-                    return [
-                        [previewConfig.imageUnscale[0], [0, 0, 0, 255]],
-                        [previewConfig.imageUnscale[1], [255, 255, 255, 255]]
-                    ];
-                }
-                if (stops.length === 1) {
-                    // A single stop spans nothing, and a zero-width palette
-                    // divides by zero on the GPU.
-                    const only = hexToRgba(stops[0].color);
-                    return [[stops[0].value, only], [stops[0].value + 1e-6, only]];
-                }
-                return stops.map(function (stop) {
-                    return [stop.value, hexToRgba(stop.color)];
-                });
+            function requestColourTable(stops) {
+                clearTimeout(colourTableTimer);
+                colourTableTimer = setTimeout(async function () {
+                    const asked = ++colourTableAsked;
+                    let table = null;
+                    try {
+                        table = await fetchColourTable(stops);
+                    } catch (error) {
+                        console.error('Styling preview: colour table failed', error);
+                    }
+                    if (table && asked === colourTableAsked && mapPreview) {
+                        mapPreview.setColourTable(table);
+                    }
+                }, COLOUR_TABLE_DELAY_MS);
             }
 
             /**
@@ -1360,9 +1529,7 @@
                     return;
                 }
                 updateClipWarning(stops);
-                if (mapPreview) {
-                    mapPreview.setPalette(paletteFromStops(stops));
-                }
+                requestColourTable(stops);
             }
 
             function syncPicker(row) {
@@ -1909,9 +2076,9 @@
                     textureUrl: previewConfig.textureUrl,
                     bounds: previewConfig.bounds,
                     imageUnscale: previewConfig.imageUnscale,
+                    encoding: previewConfig.encoding,
                     unit: previewConfig.unit,
                     compactAttribution: true,
-                    palette: paletteFromStops(readStops()),
                     onStatus: function (state, code) {
                         if (state === 'ready') {
                             mapStatus.hidden = true;
@@ -1924,6 +2091,8 @@
                         }[code] || mapStatus.dataset.textureFailed;
                     }
                 });
+                // The first colours, asked while the basemap and texture load.
+                requestColourTable(readStops());
                 document.getElementById('vs-basemap').addEventListener('change', function (event) {
                     if (mapPreview) {
                         mapPreview.setBasemap(event.target.value);
@@ -2040,6 +2209,13 @@
             stepsInput.addEventListener('input', function () {
                 styleDirty = true;
                 refreshState();
+            });
+            [underSelect, overSelect].forEach(function (select) {
+                select.addEventListener('change', function () {
+                    styleDirty = true;
+                    refreshState();
+                    paintMap(readStops());
+                });
             });
             form.querySelector('[name="name"]').addEventListener('input', function () {
                 styleDirty = true;

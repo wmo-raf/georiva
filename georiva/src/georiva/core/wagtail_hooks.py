@@ -18,10 +18,12 @@ from .views import (
     collection_styling,
     plugin_list,
     variable_preview_step,
+    variable_style_colours,
     variable_style_stops,
     variable_styling,
 )
 from .views.source_unit import correct_source_unit
+from .views.style_templates import StyleTemplateViewSet
 from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
 from .views.trace import item_trace
 from .views.viewsets import AssetViewSet, BoundaryChooserViewSet, ItemViewSet, admin_viewsets
@@ -43,6 +45,11 @@ def urlconf_georivacore():
             "collection/<int:collection_pk>/styling/<int:variable_pk>/stops/",
             variable_style_stops,
             name="variable_style_stops",
+        ),
+        path(
+            "collection/<int:collection_pk>/styling/<int:variable_pk>/colours/",
+            variable_style_colours,
+            name="variable_style_colours",
         ),
         path(
             "collection/<int:collection_pk>/styling/<int:variable_pk>/preview-step/",
@@ -96,6 +103,7 @@ def register_publications_menu():
 def register_viewset():
     return admin_viewsets + [
         BoundaryChooserViewSet("boundary_chooser"),
+        StyleTemplateViewSet(),
     ]
 
 

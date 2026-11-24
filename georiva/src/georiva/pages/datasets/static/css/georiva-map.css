@@ -499,18 +499,19 @@
     display: none;
 }
 
+/* The bar, its end arrows and its ticks are drawn by js/legend.js (#790);
+   the labels take this colour and font. */
 .gr-map-legend-scale {
-    height: 8px;
-    border-radius: 3px;
     margin-bottom: 0.3rem;
+    font-family: var(--gr-font-mono);
+    color: rgba(255, 255, 255, 0.6);
 }
 
-.gr-map-legend-labels {
-    display: flex;
-    justify-content: space-between;
-    font-family: var(--gr-font-mono);
-    font-size: 0.62rem;
-    color: rgba(255, 255, 255, 0.6);
+/* legend.js sets the bar's gradient; the checkerboard under it shows a
+   translucent or clear band as one. */
+.gr-map-legend-scale .legend-bar {
+    background: var(--legend-gradient),
+        repeating-conic-gradient(var(--gr-light-border-2) 0% 25%, var(--gr-light) 0% 50%) 0 0 / 8px 8px;
 }
 
 .gr-map-legend-units {
@@ -735,7 +736,7 @@
     color: var(--gr-text-1);
 }
 
-.gr-map-canvas--light .gr-map-legend-labels {
+.gr-map-canvas--light .gr-map-legend-scale {
     color: var(--gr-text-2);
 }
 
