@@ -58,13 +58,25 @@ def _validated_palette_stops(raw):
     return stops, None
 
 
+def _org_tier_first(queryset, organisation, **lookup):
+    """The row matching ``lookup`` in ``organisation``'s tier, else in the
+    instance-wide tier, else ``None``.
+
+    A plugin provisions into one organisation's catalog, so the ramps and
+    templates it can name are that organisation's plus the instance-wide
+    catalogue (ADR 0011) — the organisation's own wins a collision.
+    """
+    return (
+        queryset.filter(organisation=organisation, **lookup).first()
+        or queryset.filter(organisation__isnull=True, **lookup).first()
+    )
+
+
 def _resolved_style_template(organisation, slug, seeding):
     """Resolve a plugin's declared ``style_template`` slug for ``seeding``.
 
-    Returns ``(template, encoding, error)``. A plugin provisions into one
-    organisation's catalog, so its template vocabulary is that organisation's
-    tier plus the instance-wide catalogue — the organisation's own template
-    wins a slug collision, as ramp names do. ``encoding`` is the template's
+    Returns ``(template, encoding, error)``; the template is looked up as
+    :func:`_org_tier_first` does. ``encoding`` is the template's
     range and curve in ``seeding``'s source unit. An unknown slug, or a
     template whose unit does not convert into the source unit, gives an
     ``error`` instead; the caller degrades one tier with a warning (ADR 0022).
@@ -74,10 +86,7 @@ def _resolved_style_template(organisation, slug, seeding):
 
     if not slug:
         return None, None, None
-    template = (
-        StyleTemplate.objects.filter(organisation=organisation, slug=slug).select_related("unit").first()
-        or StyleTemplate.objects.filter(organisation__isnull=True, slug=slug).select_related("unit").first()
-    )
+    template = _org_tier_first(StyleTemplate.objects.select_related("unit"), organisation, slug=slug)
     if template is None:
         return None, None, f"unknown style template {slug!r}"
     # Judged before anything is seeded from it: a template that is not one
@@ -462,13 +471,8 @@ class SourceSetupService:
         if not var_def.palette:
             return
 
-        # A plugin provisions into one organisation's catalog, so its ramp
-        # vocabulary is that organisation's tier plus the instance-wide
-        # catalog — the org's own ramp wins a name collision.
-        organisation = variable.collection.catalog.organisation
-        ramp = (
-            ColorRamp.objects.filter(organisation=organisation, name__iexact=var_def.palette).first()
-            or ColorRamp.objects.filter(organisation__isnull=True, name__iexact=var_def.palette).first()
+        ramp = _org_tier_first(
+            ColorRamp.objects, variable.collection.catalog.organisation, name__iexact=var_def.palette
         )
         if ramp is None:
             logger.warning(
