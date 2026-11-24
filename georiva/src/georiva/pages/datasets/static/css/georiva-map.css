@@ -499,17 +499,11 @@
     display: none;
 }
 
+/* The bar, its end arrows and its ticks are drawn by js/legend.js (#790);
+   the labels take this colour and font. */
 .gr-map-legend-scale {
-    height: 8px;
-    border-radius: 3px;
     margin-bottom: 0.3rem;
-}
-
-.gr-map-legend-labels {
-    display: flex;
-    justify-content: space-between;
     font-family: var(--gr-font-mono);
-    font-size: 0.62rem;
     color: rgba(255, 255, 255, 0.6);
 }
 
@@ -735,7 +729,7 @@
     color: var(--gr-text-1);
 }
 
-.gr-map-canvas--light .gr-map-legend-labels {
+.gr-map-canvas--light .gr-map-legend-scale {
     color: var(--gr-text-2);
 }
 

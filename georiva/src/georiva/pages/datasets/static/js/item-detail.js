@@ -187,7 +187,7 @@ class ItemDetailMap {
         const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
         // The map is coloured code by code from the style's colour table, the
         // one Titiler colours tiles with (#785); `palette` stays the stops, for
-        // the legend and the choropleth. A code decodes back into a value over
+        // the choropleth; the legend draws `legend` (#790). A code decodes back into a value over
         // the variable's own range (ADR 0022 §4), never the stops' span.
         const imageUnscale = xg.image_unscale;
         const layerPalette = GeoRivaColourTable.layerPalette(xg.colour_table);
@@ -230,7 +230,7 @@ class ItemDetailMap {
 
             this.deckOverlay.setProps({layers: [this.currentRasterLayer]});
             this._initTooltip(units);
-            this._updateLegend(param, xg, paletteMin, paletteMax);
+            this._updateLegend(param, xg);
         } catch (err) {
             console.error('WeatherLayers load failed:', url, err);
             this._clearRasterLayer();
@@ -454,27 +454,13 @@ class ItemDetailMap {
 
     // ── Legend ─────────────────────────────────────────────────────────────
 
-    _updateLegend(param, xg, paletteMin, paletteMax) {
+    // Laid out on the server like the map (#790): a continuous style along the
+    // encoding curve, a stepped one as equal blocks, arrows on clamped ends.
+    _updateLegend(param, xg) {
         document.getElementById('grLegend').style.display = 'block';
         document.getElementById('grLegendTitle').textContent = param?.label || this.currentVarSlug;
-        document.getElementById('grLegendMin').textContent = Number(paletteMin).toFixed(1);
-        document.getElementById('grLegendMax').textContent = Number(paletteMax).toFixed(1);
         document.getElementById('grLegendUnits').textContent = param?.unit?.symbol || '';
-        document.getElementById('grLegendScale').style.background =
-            this._buildGradientCSS(xg.palette || [], paletteMin, paletteMax);
-    }
-
-    _buildGradientCSS(palette, paletteMin, paletteMax) {
-        if (!palette?.length) return 'linear-gradient(to right, #000, #fff)';
-        const range = paletteMax - paletteMin || 1;
-        const stops = palette.map(([val, color]) => {
-            const pct = ((val - paletteMin) / range) * 100;
-            const rgba = color.length === 4
-                ? `rgba(${color[0]},${color[1]},${color[2]},${color[3] / 255})`
-                : `rgb(${color[0]},${color[1]},${color[2]})`;
-            return `${rgba} ${pct.toFixed(1)}%`;
-        });
-        return `linear-gradient(to right, ${stops.join(', ')})`;
+        GeoRivaLegend.render(document.getElementById('grLegendScale'), xg.legend);
     }
 
     _setupLegendToggle() {

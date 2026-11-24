@@ -57,8 +57,12 @@ def encoding_curve(variable) -> str:
     return LINEAR
 
 
-def _fraction(value: float, vmin: float, vmax: float, curve: str) -> float:
-    """How far along the codes ``value`` sits, 0–1: ``f(t)``."""
+def fraction(value: float, vmin: float, vmax: float, curve: str = LINEAR) -> float:
+    """How far along the codes ``value`` sits, 0–1: ``f(t)``, untruncated.
+
+    What a legend lays a continuous style out along (#790), so it stretches
+    where the map does.
+    """
     value = min(max(value, vmin), vmax)
     if curve == LOG:
         return math.log(value / vmin) / math.log(vmax / vmin)
@@ -74,7 +78,7 @@ def encode(value: float, vmin: float, vmax: float, curve: str = LINEAR) -> int:
     """
     if vmax == vmin:
         return 0
-    return int(_fraction(value, vmin, vmax, curve) * TOP_CODE)
+    return int(fraction(value, vmin, vmax, curve) * TOP_CODE)
 
 
 def decode(code: float, vmin: float, vmax: float, curve: str = LINEAR) -> float:
