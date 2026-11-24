@@ -9,6 +9,7 @@ creating duplicates, so adding new collections to a plugin is safe to re-run.
 import logging
 import math
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.text import slugify
 
@@ -79,6 +80,13 @@ def _resolved_style_template(organisation, slug, seeding):
     )
     if template is None:
         return None, None, f"unknown style template {slug!r}"
+    # Judged before anything is seeded from it: a template that is not one
+    # (a row saved before a rule it now breaks) makes no valid style, and its
+    # range and curve must not be written for a style that never appears.
+    try:
+        template.full_clean(validate_unique=False, validate_constraints=False)
+    except ValidationError as invalid:
+        return None, None, f"style template {slug!r} cannot be applied ({'; '.join(invalid.messages)})"
     try:
         encoding = proposed_encoding(template, seeding)
     except ConversionRefused as refused:
@@ -443,22 +451,13 @@ class SourceSetupService:
             )
             return
         if seed_template:
-            from django.core.exceptions import ValidationError
-
             from georiva.core.style_application import apply_template
 
             # The Variable's first style, so its default: the same stepped
-            # snapshot an operator applying the template gets (#791).
-            try:
-                apply_template(seed_template, variable)
-            except ValidationError as invalid:
-                logger.warning(
-                    "Variable %s/%s: style template %r cannot be applied (%s) — grayscale fallback",
-                    variable.collection.slug,
-                    variable.slug,
-                    seed_template.slug,
-                    "; ".join(invalid.messages),
-                )
+            # snapshot an operator applying the template gets (#791). The
+            # template was judged valid before its range and curve were
+            # seeded, and a valid template always makes a valid style.
+            apply_template(seed_template, variable)
             return
         if not var_def.palette:
             return

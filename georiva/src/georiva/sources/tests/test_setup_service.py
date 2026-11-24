@@ -650,22 +650,46 @@ class UpsertVariableStyleTemplateSeedTests(TestCase):
 
         self.assertEqual(variable.styles.count(), 0)
 
-    def test_a_single_band_template_seeds_no_style_with_a_warning(self):
-        # A valid template, but a stepped style needs at least two bands:
-        # provisioning never fails on styling (ADR 0022).
-        StyleTemplate.objects.create(
+    def _one_band_template(self):
+        # Saved before templates needed two bands: the stepped style it would
+        # make is not a valid style. Provisioning never fails on styling (ADR 0022).
+        return StyleTemplate.objects.create(
             organisation=self.collection.catalog.organisation,
             name="One band",
             slug="one-band",
             levels=[1, 10],
             colors=["#00ff00"],
             unit=Unit.objects.get(symbol="mm"),
+            scale_type="log",
         )
 
+    def test_a_template_that_cannot_be_applied_falls_back_to_the_palette_and_the_declared_range(self):
+        self._one_band_template()
+
+        with self.assertLogs("georiva.sources.setup_service", level="WARNING") as logs:
+            variable = self.service._upsert_variable(
+                self.collection,
+                self._var_def(palette="viridis", value_range=(0.0, 50.0), style_template="one-band"),
+            )
+
+        self.assertIn("one-band", "\n".join(logs.output))
+        style = variable.styles.get()
+        self.assertEqual(style.ramp.name, "viridis")
+        self.assertIsNone(style.template)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 50.0))
+        self.assertEqual(variable.scale_type, "linear")
+
+    def test_a_template_that_cannot_be_applied_without_a_palette_falls_back_to_grayscale(self):
+        self._one_band_template()
+
         with self.assertLogs("georiva.sources.setup_service", level="WARNING"):
-            variable = self.service._upsert_variable(self.collection, self._var_def(style_template="one-band"))
+            variable = self.service._upsert_variable(
+                self.collection, self._var_def(value_range=(0.0, 50.0), style_template="one-band")
+            )
 
         self.assertEqual(variable.styles.count(), 0)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 50.0))
+        self.assertEqual(variable.scale_type, "linear")
 
     def test_an_unknown_template_falls_back_to_the_palette_with_a_warning(self):
         with self.assertLogs("georiva.sources.setup_service", level="WARNING") as logs:
