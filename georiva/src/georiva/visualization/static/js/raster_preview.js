@@ -8,7 +8,7 @@
  * tiles with (#785), so it is given whole, never worked out from stops here.
  * `setColourTable()` repaints without refetching the texture, which is what
  * lets the styling page follow an operator's unsaved stop edits live.
- * `imageUnscale` is the variable's served range: what the hover readout
+ * `imageUnscale` is the variable's served range and `encoding` its curve: what the hover readout
  * decodes a code back into a value over.
  *
  * Expects `maplibregl`, `deck`, `WeatherLayers`, `GeoRivaColourTable` and `GeoRivaBasemap` to be
@@ -18,7 +18,7 @@
  *   const preview = GeoRivaRasterPreview.create({
  *       container: 'vs-map',
  *       basemapStyleUrl,
- *       textureUrl, bounds, imageUnscale, unit, compactAttribution,
+ *       textureUrl, bounds, imageUnscale, encoding, unit, compactAttribution,
  *       colourTable: [[r, g, b, a], ...],  // 256 entries, one per code
  *       onStatus: (state, message) => { ... },
  *   });
@@ -124,7 +124,7 @@
                     }
                 },
                 onHover: function (event) {
-                    tooltip.updatePickingInfo(GeoRivaColourTable.decodePick(event, options.imageUnscale));
+                    tooltip.updatePickingInfo(GeoRivaColourTable.decodePick(event, options.imageUnscale, options.encoding));
                 }
             });
             instance.props.onLoad();

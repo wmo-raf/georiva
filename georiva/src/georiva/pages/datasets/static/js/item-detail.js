@@ -195,6 +195,8 @@ class ItemDetailMap {
 
         this.currentPalette = {palette, paletteMin, paletteMax};
         this.currentImageUnscale = imageUnscale;
+        // The curve a code decodes through (#787).
+        this.currentEncoding = xg.encoding;
         this.currentUnits = units;
         this._clearRasterLayer();
         this._showNoVisual(false);
@@ -432,7 +434,7 @@ class ItemDetailMap {
             },
             onHover: event => {
                 // The layer picks a code; the readout shows the served value it stands for.
-                const decoded = GeoRivaColourTable.decodePick(event, this.currentImageUnscale);
+                const decoded = GeoRivaColourTable.decodePick(event, this.currentImageUnscale, this.currentEncoding);
                 this.tooltipControl.updatePickingInfo(decoded);
                 this.lastPickInfo = decoded;
             },
@@ -722,7 +724,7 @@ class ItemDetailMap {
             let value = this.lastPickInfo?.raster?.value ?? null;
             if (value == null) {
                 const pick = this.deckgl.pickObject({x: e.point.x, y: e.point.y, radius: 2});
-                value = GeoRivaColourTable.decodePick(pick, this.currentImageUnscale)?.raster?.value ?? null;
+                value = GeoRivaColourTable.decodePick(pick, this.currentImageUnscale, this.currentEncoding)?.raster?.value ?? null;
             }
 
             const units = this.parameterNames[this.currentVarSlug]?.unit?.symbol || '';

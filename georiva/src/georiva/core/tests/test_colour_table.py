@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.html import escape
 
 from georiva.core.machine_plane.colour_table import LAYER_UNSCALE, encode
 from georiva.core.machine_plane.palette_cache import build_variable_payload
@@ -25,6 +26,9 @@ from georiva.stac.serializers import build_style_renders
 
 #: Stored in Kelvin, served in °C: −40…50 °C.
 RANGE_K = (233.15, 323.15)
+
+#: Every encoding curve (#787); the range starts above zero, so ``log`` applies.
+CURVES = ("linear", "sqrt", "log")
 
 CONTINUOUS = [
     {"value": 263.15, "color": "#0000ff"},
@@ -77,32 +81,56 @@ class ColourTableTests(TestCase):
         """What Titiler paints ``value`` with: its code's colormap entry, or its
         grayscale fallback when the payload carries none."""
         payload = build_variable_payload(variable)
-        code = encode(value, payload["vmin"], payload["vmax"])
+        code = encode(value, payload["vmin"], payload["vmax"], payload["curve"])
         colormap = payload.get("colormap")
         return colormap[code] if colormap else [code, code, code, 255]
 
     def browser_colour(self, variable, value):
-        """What the browser paints ``value`` with: the texture holds Titiler's
-        code, the layer unscales it by identity, and the palette colours the code."""
+        """What the browser paints ``value`` with: the texture holds the code
+        Titiler encodes, the layer unscales it by identity, and the palette
+        colours the code."""
         contract = render_contract(variable)
         self.assertEqual(contract.layer_unscale, LAYER_UNSCALE)
         palette = dict((code, colour) for code, colour in contract.layer_palette)
         low, high = variable.value_range
-        return palette[encode(value, low, high)]
+        return palette[encode(value, low, high, variable.scale_type)]
 
     def assert_renderers_agree(self, variable):
         for value in probes():
             with self.subTest(value=value):
                 self.assertEqual(self.browser_colour(variable, value), self.titiler_colour(variable, value))
 
+    def curved(self, variable, scale_type):
+        """``variable`` declared with ``scale_type``, its encoding curve (#787)."""
+        variable.scale_type = scale_type
+        variable.save()
+        return Variable.objects.get(pk=variable.pk)
+
     def test_titiler_and_the_browser_agree_on_a_continuous_style(self):
-        self.assert_renderers_agree(self.style(CONTINUOUS))
+        variable = self.style(CONTINUOUS)
+        for curve in CURVES:
+            with self.subTest(curve=curve):
+                self.assert_renderers_agree(self.curved(variable, curve))
 
     def test_titiler_and_the_browser_agree_on_a_stepped_style(self):
-        self.assert_renderers_agree(self.style(STEPPED))
+        variable = self.style(STEPPED)
+        for curve in CURVES:
+            with self.subTest(curve=curve):
+                self.assert_renderers_agree(self.curved(variable, curve))
 
     def test_titiler_and_the_browser_agree_on_a_styleless_variable(self):
-        self.assert_renderers_agree(self.variable)
+        for curve in CURVES:
+            with self.subTest(curve=curve):
+                self.assert_renderers_agree(self.curved(self.variable, curve))
+
+    def test_a_curves_table_colours_each_code_by_the_value_it_stands_for(self):
+        """Titiler encodes a value through the curve; its code's colour is the value's own."""
+        variable = self.style(STEPPED)
+        for curve in CURVES:
+            variable = self.curved(variable, curve)
+            for value, colour in ((263.15, [0x21, 0x66, 0xAC, 255]), (283.15, [0xF7, 0xF7, 0xF7, 255])):
+                with self.subTest(curve=curve, value=value):
+                    self.assertEqual(self.titiler_colour(variable, value), colour)
 
     def test_a_stepped_style_keeps_its_hard_edges(self):
         palette = dict(render_contract(self.style(STEPPED)).layer_palette)
@@ -155,6 +183,24 @@ class EveryBrowserSurfaceCarriesTheTableTests(TestCase):
         self.assertEqual(xg["colour_table"], self.titiler_table())
         # Legends and choropleths keep reading the stops, in value space.
         self.assertEqual(xg["palette"], [[0.0, [0, 0, 255]], [100.0, [255, 0, 0]]])
+
+    def test_the_edr_parameter_says_how_a_code_decodes(self):
+        """The hover readout decodes through the curve (#787)."""
+        Variable.objects.filter(pk=self.variable.pk).update(scale_type=Variable.ScaleType.SQRT)
+
+        response = self.client.get(reverse("edr:collection-detail", args=[edr_collection_id(self.collection)]))
+        xg = response.json()["parameter_names"][self.variable.slug]["x-georiva"]
+
+        self.assertEqual(xg["encoding"], {"curve": "sqrt", "range": [0.0, 300.0]})
+
+    def test_the_item_preview_page_says_how_a_code_decodes(self):
+        Variable.objects.filter(pk=self.variable.pk).update(scale_type=Variable.ScaleType.SQRT)
+        self.client.force_login(get_user_model().objects.create_superuser("root", "r@x.org", "pw"))
+
+        response = self.client.get(reverse("item_preview", args=[self.item.pk]))
+
+        encoding = escape(json.dumps({"curve": "sqrt", "range": [0.0, 300.0]}))
+        self.assertContains(response, f"data-asset-encoding='{encoding}'")
 
     def test_each_stac_render_carries_its_styles_table(self):
         renders = build_style_renders(self.variable, with_colormap=True)

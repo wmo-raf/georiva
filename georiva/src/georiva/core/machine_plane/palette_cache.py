@@ -20,10 +20,13 @@ at that moment — if the alias ever diverges from the default's own key, that
 is a bug in the default-flip signal, not a feature.
 
 Value format (JSON):
-  With a style:    {"vmin": 263.15, "vmax": 313.15, "scale_type": "linear", "colormap": {"0": [r,g,b,a], ...},
-                    "scale": 1.0, "offset": -273.15, "unit": "degC"}
+  With a style:    {"vmin": 263.15, "vmax": 313.15, "scale_type": "linear", "curve": "linear",
+                    "colormap": {"0": [r,g,b,a], ...}, "scale": 1.0, "offset": -273.15, "unit": "degC"}
   Without one:     the same without ``colormap``; Titiler falls back to grayscale,
                    which is a styleless Variable's colour table.
+  ``curve`` is the encoding curve Titiler turns values into codes with (#787):
+  ``linear``, ``sqrt`` or ``log``, resolved from ``scale_type`` here
+  (``encoding_curve``), so Titiler never interprets ``scale_type`` itself.
   The colormap is the style's colour table (``colour_table``), the same 256
   entries the browser colours the encoded texture with (#785).
   ``vmin``/``vmax`` and the colormap are in the variable's source unit — what a
@@ -38,7 +41,7 @@ Value format (JSON):
 import json
 import logging
 
-from .colour_table import as_colormap, colour_table
+from .colour_table import as_colormap, colour_table, encoding_curve
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,7 @@ def build_variable_payload(variable, style=None) -> dict:
         "vmin": variable.value_min,
         "vmax": variable.value_max,
         "scale_type": variable.scale_type or "linear",
+        "curve": encoding_curve(variable),
         "scale": variable.scale,
         "offset": variable.offset,
         "unit": variable.unit.symbol,

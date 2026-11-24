@@ -78,15 +78,25 @@ def styling_summary(variable):
 
 
 class VariableRangeForm(forms.Form):
-    """The variable's encoding contract — delegates range sanity to the model."""
+    """The variable's encoding contract — delegates range sanity to the model.
+
+    The range is entered in the served unit; the curve is judged against the
+    stored minimum, since that is what values are encoded over (#787)."""
 
     value_min = forms.FloatField()
     value_max = forms.FloatField()
     scale_type = forms.ChoiceField(choices=Variable.ScaleType.choices)
 
+    def __init__(self, *args, variable, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.variable = variable
+
     def clean(self):
         cleaned = super().clean()
-        Variable.validate_value_range(cleaned.get("value_min"), cleaned.get("value_max"))
+        value_min = cleaned.get("value_min")
+        Variable.validate_value_range(value_min, cleaned.get("value_max"))
+        stored_min = None if value_min is None else self.variable.stored(value_min)
+        Variable.validate_scale_type(cleaned.get("scale_type"), stored_min)
         return cleaned
 
 
@@ -221,7 +231,7 @@ def _preview_context(variable):
     """What the map preview draws, or why it draws nothing (#382).
 
     The texture is Titiler's on-demand ``encoded-preview.png`` — the item's whole
-    extent with pixel = rescale(value, vmin→vmax, 0→255), which the browser
+    extent with pixel = encode(value) through the variable's curve, which the browser
     colors code by code from a colour table. Nothing about the style enters this
     URL, which is the point: recoloring is a table swap in the browser, so a stop
     edit repaints without refetching the texture and without a save — only the
@@ -237,13 +247,15 @@ def _preview_context(variable):
         return {"unavailable": PREVIEW_NO_DATA, "config": None}
     if not item.bounds:
         return {"unavailable": PREVIEW_NO_BOUNDS, "config": None, "item": item}
+    contract = render_contract(variable)
     return {
         "unavailable": None,
         "item": item,
         "item_url": reverse("item_preview", args=[item.pk]),
         "config": {
             **_preview_frame(item, variable),
-            "imageUnscale": render_contract(variable).image_unscale,
+            "imageUnscale": contract.image_unscale,
+            "encoding": contract.encoding,
             "unit": variable.units or "",
             "stepUrl": reverse("variable_preview_step", args=[variable.collection_id, variable.pk]),
             "coloursUrl": reverse("variable_style_colours", args=[variable.collection_id, variable.pk]),
@@ -412,11 +424,12 @@ def variable_styling(request, collection_pk, variable_pk):
 
     served_min, served_max = variable.served_range
     range_form = VariableRangeForm(
+        variable=variable,
         initial={
             "value_min": served_min,
             "value_max": served_max,
             "scale_type": variable.scale_type,
-        }
+        },
     )
     style_form = VariableStyleForm(
         ramp_queryset=ramp_queryset,
@@ -434,7 +447,7 @@ def variable_styling(request, collection_pk, variable_pk):
         action = request.POST.get("action")
 
         if action == "save-range":
-            range_form = VariableRangeForm(request.POST)
+            range_form = VariableRangeForm(request.POST, variable=variable)
             if range_form.is_valid():
                 variable.set_served_range(range_form.cleaned_data["value_min"], range_form.cleaned_data["value_max"])
                 variable.scale_type = range_form.cleaned_data["scale_type"]

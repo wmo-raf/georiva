@@ -907,6 +907,15 @@ Legends and the boundary choropleth read the stops, which agree with the table b
 as the term; `colormap` survives only as a wire key (Titiler's palette payload, the STAC Render extension). See #784.
 _Avoid_: colormap (except as that wire key), palette (for the table)
 
+**Encoding curve**:
+The function from a value to one of the 256 codes, chosen by the Variable's `scale_type`: `code = int(255 · f(t))`
+with `t` the value's place in the range clipped to 0–1, and `f` the identity (`linear`, and `diverging`, which stays
+symmetric), `√t` (`sqrt`) or `log(v/vmin) / log(vmax/vmin)` (`log`, which needs a stored minimum above zero). Applied
+wherever values become codes — Titiler's tiles, WMTS GetTile and the encoded texture — and inverted to build the
+**Colour table** and to decode the browser's hover readout. A steep curve gives a narrow low band enough codes to be
+seen. The texture names it in `X-Image-Curve`. See ADR 0049.
+_Avoid_: scale (that is the unit conversion's factor), stretch
+
 **Seed vs. tune**:
 The write policy for ranges and styling. Provisioning surfaces (source setup, upload wizard, derived-product
 recipes, plugin declarations) may **seed** — create-only, never overwriting what exists. Only the styling surface

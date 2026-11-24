@@ -16,7 +16,14 @@ here, and every renderer looks its codes up in it:
 stands for, and the stops are interpolated in value space. A stepped style
 keeps its hard edges through its doubled boundary stops. Every number here is
 in the Variable's source unit (ADR 0046 §14), what a tile is drawn with.
+
+The decode is the inverse of the Variable's encoding curve (#787): ``linear``,
+``sqrt`` or ``log``, chosen by its ``scale_type`` (:func:`encoding_curve`). A
+curve spends more codes where it is steep, so a narrow low band of a ``sqrt``
+or ``log`` Variable gets enough codes to be seen.
 """
+
+import math
 
 #: How many codes an encoded value can take: an 8-bit texture.
 CODES = 256
@@ -27,21 +34,54 @@ TOP_CODE = CODES - 1
 LAYER_UNSCALE = [0, TOP_CODE]
 
 
-def encode(value: float, vmin: float, vmax: float) -> int:
-    """The code Titiler encodes ``value`` as over ``vmin``…``vmax``.
+#: The encoding curves (#787): how a value becomes a code. Titiler's
+#: ``app/curve.py`` encodes with the same three.
+LINEAR, SQRT, LOG = "linear", "sqrt", "log"
 
-    Clipped to the range, scaled to 0–255 and truncated, as rio-tiler's rescale
-    does. Encoding is linear for now.
+
+def encoding_curve(variable) -> str:
+    """The curve ``variable``'s values are encoded with, from its ``scale_type``.
+
+    ``sqrt`` and ``log`` are themselves; ``diverging`` encodes linearly, so a
+    centred range stays symmetric. ``log`` has no meaning over a range that does
+    not start above zero: the range form refuses one, and one declared before it
+    did encodes linearly.
+    """
+    scale_type = variable.scale_type
+    if scale_type == SQRT:
+        return SQRT
+    if scale_type == LOG and variable.value_min is not None and variable.value_min > 0:
+        return LOG
+    return LINEAR
+
+
+def _fraction(value: float, vmin: float, vmax: float, curve: str) -> float:
+    """How far along the codes ``value`` sits, 0–1: ``f(t)``."""
+    value = min(max(value, vmin), vmax)
+    if curve == LOG:
+        return math.log(value / vmin) / math.log(vmax / vmin)
+    t = (value - vmin) / (vmax - vmin)
+    return math.sqrt(t) if curve == SQRT else t
+
+
+def encode(value: float, vmin: float, vmax: float, curve: str = LINEAR) -> int:
+    """The code Titiler encodes ``value`` as over ``vmin``…``vmax``, through ``curve``.
+
+    ``int(255 · f(t))`` with ``t`` clipped to the range: scaled to 0–255 and
+    truncated, as rio-tiler's rescale does.
     """
     if vmax == vmin:
         return 0
-    t = min(max((value - vmin) / (vmax - vmin), 0.0), 1.0)
-    return int(t * TOP_CODE)
+    return int(_fraction(value, vmin, vmax, curve) * TOP_CODE)
 
 
-def decode(code: float, vmin: float, vmax: float) -> float:
-    """The value a code stands for over ``vmin``…``vmax``: :func:`encode`'s inverse."""
-    return vmin + code / TOP_CODE * (vmax - vmin)
+def decode(code: float, vmin: float, vmax: float, curve: str = LINEAR) -> float:
+    """The value a code stands for over ``vmin``…``vmax``: :func:`encode`'s inverse through ``curve``."""
+    fraction = code / TOP_CODE
+    if curve == LOG:
+        return vmin * (vmax / vmin) ** fraction
+    t = fraction * fraction if curve == SQRT else fraction
+    return vmin + t * (vmax - vmin)
 
 
 def _rgba(colour) -> list:
@@ -66,8 +106,9 @@ def colour_at(stops: list, value: float) -> list:
     return _rgba(stops[-1][1])
 
 
-def table_from_stops(stops: list, vmin: float, vmax: float) -> list:
-    """The 256-entry table of ``[[value, [r, g, b(, a)]], ...]`` stops over ``vmin``…``vmax``.
+def table_from_stops(stops: list, vmin: float, vmax: float, curve: str = LINEAR) -> list:
+    """The 256-entry table of ``[[value, [r, g, b(, a)]], ...]`` stops over ``vmin``…``vmax``,
+    each code decoded through ``curve``.
 
     No stops is grayscale, what a styleless Variable renders as; an empty range
     is the first stop's colour throughout.
@@ -77,7 +118,7 @@ def table_from_stops(stops: list, vmin: float, vmax: float) -> list:
     stops = sorted(stops, key=lambda stop: stop[0])
     if vmax == vmin:
         return [_rgba(stops[0][1])] * CODES
-    return [colour_at(stops, decode(code, vmin, vmax)) for code in range(CODES)]
+    return [colour_at(stops, decode(code, vmin, vmax, curve)) for code in range(CODES)]
 
 
 def style_stops(style) -> list:
@@ -89,9 +130,10 @@ def style_stops(style) -> list:
 
 def colour_table(variable, style=None) -> list:
     """``style``'s table over ``variable``'s range, or the default style's when
-    none is named; grayscale for a Variable with no style."""
+    none is named; grayscale for a Variable with no style. Decoded through the
+    Variable's encoding curve."""
     style = style if style is not None else variable.default_style
-    return table_from_stops(style_stops(style), variable.value_min, variable.value_max)
+    return table_from_stops(style_stops(style), variable.value_min, variable.value_max, encoding_curve(variable))
 
 
 def as_colormap(table: list) -> dict:

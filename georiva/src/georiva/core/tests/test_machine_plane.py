@@ -559,6 +559,7 @@ class StyledPayloadTests(TestCase):
             "vmin": self.variable.value_min,
             "vmax": self.variable.value_max,
             "scale_type": "linear",
+            "curve": "linear",
             # The served unit's conversion, for the numbers Titiler answers with (ADR 0046 §15).
             "scale": 1.0,
             "offset": 0.0,
@@ -584,6 +585,7 @@ class StyledPayloadTests(TestCase):
                 "vmin": self.variable.value_min,
                 "vmax": self.variable.value_max,
                 "scale_type": "linear",
+                "curve": "linear",
                 "scale": 1.0,
                 "offset": 0.0,
                 "unit": self.variable.unit.symbol,

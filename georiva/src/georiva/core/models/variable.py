@@ -293,14 +293,25 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         if value_min is not None and value_max is not None and value_min >= value_max:
             raise ValidationError({"value_max": _("Maximum value must be greater than minimum value.")})
 
+    @classmethod
+    def validate_scale_type(cls, scale_type, value_min):
+        """A ``log`` encoding curve needs a stored minimum above zero (#787):
+        it encodes ``log(v / vmin)``, which has no meaning otherwise."""
+        if scale_type == cls.ScaleType.LOG and value_min is not None and value_min <= 0:
+            raise ValidationError({"scale_type": _("A logarithmic encoding needs a minimum above zero.")})
+
     def clean(self):
         super().clean()
         errors = {}
 
-        try:
-            self.validate_value_range(self.value_min, self.value_max)
-        except ValidationError as e:
-            errors.update(e.error_dict)
+        for validate in (
+            lambda: self.validate_value_range(self.value_min, self.value_max),
+            lambda: self.validate_scale_type(self.scale_type, self.value_min),
+        ):
+            try:
+                validate()
+            except ValidationError as e:
+                errors.update(e.error_dict)
 
         if self.source_unit_id is None:
             errors["source_unit"] = _("Every variable states the unit its data is stored in.")

@@ -749,6 +749,7 @@
                                  data-asset-name="{{ asset.variable.name }}"
                                  data-asset-palette='{{ asset.render_contract.palette|to_json }}'
                                  data-asset-image-unscale='{{ asset.render_contract.image_unscale|to_json }}'
+                                 data-asset-encoding='{{ asset.render_contract.encoding|to_json }}'
                                  data-asset-colour-table='{{ asset.render_contract.colour_table|to_json }}'
                                  data-asset-palette-min="{{ asset.render_contract.legend_range.0 }}"
                                  data-asset-palette-max="{{ asset.render_contract.legend_range.1 }}"
@@ -920,6 +921,7 @@
             let currentPalette = null;
             // What the shown layer's codes decode over, for the hover readout.
             let currentImageUnscale = null;
+            let currentEncoding = null;
             let tooltipControl = null;
 
 
@@ -1011,7 +1013,7 @@
                     onLoad: () => deckgl.getCanvas() && tooltipControl.addTo(deckgl.getCanvas().parentElement),
                     onHover: (event) => {
                         // The layer picks a code; the readout shows the value it stands for.
-                        tooltipControl.updatePickingInfo(GeoRivaColourTable.decodePick(event, currentImageUnscale))
+                        tooltipControl.updatePickingInfo(GeoRivaColourTable.decodePick(event, currentImageUnscale, currentEncoding))
                     }
                 });
 
@@ -1158,6 +1160,8 @@
                 // The texture's encoding range, from the server's render contract:
                 // what a code decodes back into a value over, for the hover readout.
                 const imageUnscale = JSON.parse(assetElement.dataset.assetImageUnscale || 'null');
+                // The curve a code decodes through (#787).
+                const encoding = JSON.parse(assetElement.dataset.assetEncoding || 'null');
                 // The map is coloured code by code from the style's colour table,
                 // the one Titiler colours tiles with (#785).
                 const colourTable = JSON.parse(assetElement.dataset.assetColourTable || 'null');
@@ -1180,6 +1184,7 @@
                     const palette = getPaletteForAsset(assetElement);
                     currentPalette = palette;
                     currentImageUnscale = imageUnscale;
+                    currentEncoding = encoding;
 
                     const opacity = parseInt(document.getElementById('opacitySlider').value, 10) / 100;
 

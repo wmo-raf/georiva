@@ -4,6 +4,11 @@
 
 accepted
 
+> **Amended by [ADR-0049](0049-a-variables-scale-type-is-its-encoding-curve.md) — pixels are encoded through the
+> Variable's curve.** A pixel is `int(255 · f(t))`, with `f` chosen by `scale_type` (`linear`, `sqrt`, `log`), not a
+> linear rescale; the texture names its curve in `X-Image-Curve` beside `X-Image-Unscale`. The vector texture stays
+> linear. Everything else here is untouched.
+
 ## Context
 
 Every ingested (or derived) variable used to materialize an asset trio: the

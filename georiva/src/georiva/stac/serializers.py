@@ -401,15 +401,19 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
                 }
             visual_href = self._build_visual_href(obj, variable, request)
             if visual_href:
+                contract = render_contract(variable)
                 assets[f"{variable.slug}_visual"] = {
                     "href": visual_href,
                     "type": "image/png",
                     "title": f"{variable.name} (encoded texture)",
                     "description": (
-                        "Value-encoded texture rendered on demand from the COG; unscale pixels with imageUnscale."
+                        "Value-encoded texture rendered on demand from the COG; decode pixels through "
+                        "georiva:encoding's curve and unscale them with imageUnscale."
                     ),
                     "roles": ["visual"],
-                    "imageUnscale": render_contract(variable).image_unscale,
+                    "imageUnscale": contract.image_unscale,
+                    # The curve a pixel was encoded through, over the stored range (#787).
+                    "georiva:encoding": contract.encoding,
                 }
 
         return assets

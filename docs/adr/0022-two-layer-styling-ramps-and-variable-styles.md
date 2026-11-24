@@ -11,6 +11,11 @@
 > shown in its served unit; the styling surface converts at its boundary, and a ramp is applied in the served unit.
 > The two-layer model is untouched.
 
+> **Amended by [ADR-0049](0049-a-variables-scale-type-is-its-encoding-curve.md) — `scale_type` is an encoding curve.**
+> `scale_type` no longer only spaces a ramp's stops: it chooses the curve values are encoded through, in Titiler and
+> in the browser's decode alike. The #382 consequence below, that a log-declared variable renders linearly, no
+> longer holds. A curve change never rewrites stops.
+
 ## Status
 
 accepted
@@ -176,10 +181,11 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
   are stale by design and rebuildable from tile-config (extends ADR 0021's
   "no stored render-config-dependent artifacts").
 - **(#382)** The preview inherits ADR 0021's separation whole, including its
-  limits. `scale_type` is carried in the tile-config payload but consumed by no
+  limits. ~~`scale_type` is carried in the tile-config payload but consumed by no
   Titiler code path, so a log-declared variable renders linearly on both sides
   and the preview matches by accident rather than by design; implementing log
-  must change both or the preview silently diverges. The texture reaches the
+  must change both or the preview silently diverges.~~ Superseded by ADR-0049:
+  both sides encode and decode through the curve `scale_type` names. The texture reaches the
   browser through the ADR 0015 gate on the operator's own session, so an
   operator on a host that resolves a different organisation gets the
   texture-failed placeholder rather than a map.
