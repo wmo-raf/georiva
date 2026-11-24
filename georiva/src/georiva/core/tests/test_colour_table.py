@@ -15,7 +15,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils.html import escape
 
-from georiva.core.machine_plane.colour_table import LAYER_UNSCALE, encode
+from georiva.core.machine_plane.colour_table import encode
 from georiva.core.machine_plane.palette_cache import build_variable_payload
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Asset, Collection, Item, OutOfRange, Unit, Variable, VariableStyle
@@ -100,13 +100,11 @@ class ColourTableTests(TestCase):
 
     def browser_colour(self, variable, value):
         """What the browser paints ``value`` with: the texture holds the code
-        Titiler encodes, the layer unscales it by identity, and the palette
-        colours the code."""
-        contract = render_contract(variable)
-        self.assertEqual(contract.layer_unscale, LAYER_UNSCALE)
-        palette = dict((code, colour) for code, colour in contract.layer_palette)
+        Titiler encodes, the layer unscales it by identity, and the colour
+        table colours the code."""
+        table = render_contract(variable).colour_table
         low, high = variable.value_range
-        return palette[encode(value, low, high, variable.scale_type)]
+        return table[encode(value, low, high, variable.scale_type)]
 
     def assert_renderers_agree(self, variable):
         for value in probes():
@@ -183,15 +181,15 @@ class ColourTableTests(TestCase):
         self.assertEqual(self.titiler_colour(variable, high - 1.0), [0xB2, 0x18, 0x2B, 255])
 
     def test_a_stepped_style_keeps_its_hard_edges(self):
-        palette = dict(render_contract(self.style(STEPPED)).layer_palette)
+        table = render_contract(self.style(STEPPED)).colour_table
         # 0 °C sits at code 113.33: every code below it is the cold band, every code above the mild one.
-        self.assertEqual(palette[0], [0x21, 0x66, 0xAC, 255])
-        self.assertEqual(palette[113], [0x21, 0x66, 0xAC, 255])
-        self.assertEqual(palette[114], [0xF7, 0xF7, 0xF7, 255])
+        self.assertEqual(table[0], [0x21, 0x66, 0xAC, 255])
+        self.assertEqual(table[113], [0x21, 0x66, 0xAC, 255])
+        self.assertEqual(table[114], [0xF7, 0xF7, 0xF7, 255])
         # 20 °C sits at code 170: the mild band holds until it, the warm one after.
-        self.assertEqual(palette[169], [0xF7, 0xF7, 0xF7, 255])
-        self.assertEqual(palette[171], [0xB2, 0x18, 0x2B, 255])
-        self.assertEqual(palette[255], [0xB2, 0x18, 0x2B, 255])
+        self.assertEqual(table[169], [0xF7, 0xF7, 0xF7, 255])
+        self.assertEqual(table[171], [0xB2, 0x18, 0x2B, 255])
+        self.assertEqual(table[255], [0xB2, 0x18, 0x2B, 255])
 
     def test_the_browser_decodes_a_code_into_the_served_value(self):
         """The hover readout reads a code; the contract's range turns it back

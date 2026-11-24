@@ -6,10 +6,10 @@ display concern. Each surface used to assemble the pair itself, and one got it
 wrong. They all ask here instead.
 
 The browser colours the texture in code space (#785): its WeatherLayers layer
-unscales by identity (``layer_unscale``) and looks each code up in the default
-style's colour table (``layer_palette``), the same table Titiler colours tiles
-with. ``image_unscale`` is what turns a code back into a value — the hover
-readout's decode, and what an external client of the texture reads.
+unscales by identity and looks each code up in the default style's colour
+table (``colour_table``), the same table Titiler colours tiles with.
+``image_unscale`` is what turns a code back into a value — the hover readout's
+decode, and what an external client of the texture reads.
 
 Every value in it is in the variable's served unit (ADR 0046 §15). The texture
 is encoded over the raw range; decoded over the served one it gives served
@@ -24,7 +24,7 @@ itself, so the readout finds the fraction of the range a code stands for over
 
 from dataclasses import dataclass
 
-from .colour_table import LAYER_UNSCALE, as_layer_palette, colour_table, encoding_curve
+from .colour_table import colour_table, encoding_curve
 from .legend import legend
 
 
@@ -34,14 +34,8 @@ class RenderContract:
     palette: list  # [[value, [r, g, b(, a)]], ...] the default style's stops, served: legends and choropleths
     legend_range: tuple  # (min, max) of the stops, served, for display only
     colour_table: list  # 256 [r, g, b, a], the default style's, one per code: what the map is coloured with
-    layer_unscale: list  # [0, 255]: the browser layer reads codes, not values
     encoding: dict  # {"curve", "range"}: the curve a code decodes through, over the stored range (#787)
     legend: dict  # {"gradient", "ticks", "under", "over"}: the default style laid out along a 0–1 bar (#790)
-
-    @property
-    def layer_palette(self) -> list:
-        """The colour table as the browser layer's palette, ``[[code, [r, g, b, a]], ...]``."""
-        return as_layer_palette(self.colour_table)
 
 
 def render_contract(variable) -> RenderContract:
@@ -55,7 +49,6 @@ def render_contract(variable) -> RenderContract:
         palette=variable.served_palette(variable.weather_layers_palette),
         legend_range=legend_range,
         colour_table=colour_table(variable, style),
-        layer_unscale=list(LAYER_UNSCALE),
         encoding={"curve": encoding_curve(variable), "range": [variable.value_min, variable.value_max]},
         legend=legend(variable, style),
     )

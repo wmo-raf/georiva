@@ -8,7 +8,7 @@ here, and every renderer looks its codes up in it:
 
 - Titiler, tiles and WMTS, reads it as the ``colormap`` of its palette payload.
 - The browser reads it as a WeatherLayers palette over the codes 0–255, with an
-  identity unscale (:data:`LAYER_UNSCALE`), and decodes a code back to a value
+  identity unscale (``colour_table.js``), and decodes a code back to a value
   only for its hover readout.
 - STAC render entries and EDR's ``colour_table`` carry it as they find it.
 
@@ -32,10 +32,6 @@ from georiva.core.models import OutOfRange
 #: How many codes an encoded value can take: an 8-bit texture.
 CODES = 256
 TOP_CODE = CODES - 1
-
-#: What the browser unscales a texture with: none at all. Its palette is over
-#: codes, so a pixel's code is what it looks up.
-LAYER_UNSCALE = [0, TOP_CODE]
 
 
 #: The encoding curves (#787): how a value becomes a code. Titiler's
@@ -203,8 +199,3 @@ def colour_table(variable, style=None) -> list:
 def as_colormap(table: list) -> dict:
     """The table as a ``{code: [r, g, b, a]}`` colormap, Titiler's and STAC's shape."""
     return dict(enumerate(table))
-
-
-def as_layer_palette(table: list) -> list:
-    """The table as a WeatherLayers palette over codes, ``[[code, [r, g, b, a]], ...]``."""
-    return [[code, colour] for code, colour in enumerate(table)]
