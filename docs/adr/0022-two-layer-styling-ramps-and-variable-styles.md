@@ -117,6 +117,11 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
      stops** (declaring both merely warns on disagreement).
    Unknown ramp or malformed stops degrade one tier with a warning;
    provisioning never fails on styling.
+   _Amended (#792):_ a fourth tier, `style_template` (a Style template
+   slug), sits between `palette_stops` and `palette`. It seeds a stepped
+   default style converted into the source unit and sets the range and
+   `scale_type` from the template — set, not proposed, since a new Variable
+   has no encoding to protect. Still create-only.
 
 6. **One editing surface.** A collection-level Styling page (range + swatch
    per variable at a glance) drills into the single canonical per-variable

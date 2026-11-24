@@ -928,8 +928,8 @@ _Avoid_: out-of-range colour, extend (matplotlib's term), nodata (that is no val
 **Seed vs. tune**:
 The write policy for ranges and styling. Provisioning surfaces (source setup, upload wizard, derived-product
 recipes, plugin declarations) may **seed** — create-only, never overwriting what exists. Only the styling surface
-**tunes**. Plugin seed precedence: `palette_stops` > `palette` (ramp name) > grayscale; explicit stops derive the
-range. See ADR 0022.
+**tunes**. Plugin seed precedence: `palette_stops` > `style_template` (Style template slug) > `palette` (ramp
+name) > grayscale; explicit stops derive the range, and a Style template sets the range and curve. See ADR 0022, #792.
 _Avoid_: sync, refresh (for re-provision behavior on styling)
 
 **Styling surface**:

@@ -133,10 +133,23 @@ Key per-variable fields:
   (a `0.0` stop with `output_units="degC"` pins 0 °C). Materialized as the default
   style, and the variable's range is **derived from the stops** — declaring
   both `value_range` and `palette_stops` merely warns if they disagree.
-  Malformed stops fall back to `palette` (or grayscale) with a warning;
-  provisioning never fails on styling.
+  Malformed stops fall back to `style_template`, then `palette` (or
+  grayscale), with a warning; provisioning never fails on styling.
+- `style_template` — a Style template slug from the template catalogue (the
+  shipped earthkit-plots catalogue, e.g. `"precipitation-0-5-to-200mm"` or
+  `"temperature-4c-bands"`, or one of your organisation's own templates, which
+  win a slug collision). Its bands become the variable's **stepped** default
+  style, converted into `source_units` (a °C template applies to a variable
+  stored in K; an mm template to a `kg m-2` one only with `water=True`), with
+  the template's under/over. The template also **sets the variable's range**
+  (its first and last levels) **and `scale_type`** (its recommended curve) —
+  declaring a disagreeing `value_range` merely warns. An unknown slug or a
+  template whose unit does not convert falls back to `palette` (or grayscale)
+  with a logged warning.
 
-All three styling fields are **create-only seeds** (ADR 0022): re-provisioning
+Precedence: `palette_stops` > `style_template` > `palette` > grayscale.
+
+All four styling fields are **create-only seeds** (ADR 0022): re-provisioning
 a feed never overwrites an existing variable's range or styles, so an
 operator's tuning always survives.
 
