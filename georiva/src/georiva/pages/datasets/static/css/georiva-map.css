@@ -507,6 +507,13 @@
     color: rgba(255, 255, 255, 0.6);
 }
 
+/* legend.js sets the bar's gradient; the checkerboard under it shows a
+   translucent or clear band as one. */
+.gr-map-legend-scale .legend-bar {
+    background: var(--legend-gradient),
+        repeating-conic-gradient(var(--gr-light-border-2) 0% 25%, var(--gr-light) 0% 50%) 0 0 / 8px 8px;
+}
+
 .gr-map-legend-units {
     text-align: center;
     font-family: var(--gr-font-mono);

@@ -15,8 +15,10 @@
  *
  *   GeoRivaLegend.render(container, legend);
  *
- * Everything is styled inline, so the item page and the admin preview need no
- * shared stylesheet; text takes the container's colour and font.
+ * Layout is styled inline; text takes the container's colour and font. The
+ * bar is a `.legend-bar` whose background each page draws in its own theme's
+ * colours: its gradient, `var(--legend-gradient)`, over a checkerboard, so a
+ * translucent or clear band reads as one.
  */
 (function (global) {
     'use strict';
@@ -37,9 +39,6 @@
         const stops = gradient.map(([position, colour]) => `${css(colour)} ${position * 100}%`);
         return `linear-gradient(to right, ${stops.join(', ')})`;
     }
-
-    /** A checkerboard under the bar, so a translucent or clear band reads as one. */
-    const CHECKER = 'repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 0 / 8px 8px';
 
     function arrow(colour, pointsLeft) {
         const el = document.createElement('span');
@@ -88,9 +87,10 @@
             row.appendChild(arrow(gradient[0][1], true));
         }
         const bar = document.createElement('div');
+        bar.className = 'legend-bar';
         bar.style.flex = '1 1 auto';
         bar.style.height = `${BAR_HEIGHT}px`;
-        bar.style.background = `${gradientCSS(gradient)}, ${CHECKER}`;
+        bar.style.setProperty('--legend-gradient', gradientCSS(gradient));
         row.appendChild(bar);
         if (clampedOver && gradient.length) {
             row.appendChild(arrow(gradient[gradient.length - 1][1], false));
@@ -135,5 +135,5 @@
         container.appendChild(scale);
     }
 
-    global.GeoRivaLegend = {render, gradientCSS};
+    global.GeoRivaLegend = {render};
 })(window);
