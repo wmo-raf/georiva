@@ -120,6 +120,10 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
         # coloured with, here as in Titiler (#785). ``palette`` stays the stops,
         # in value space, for legends and choropleths.
         x_georiva["colour_table"] = contract.colour_table
+        # The default style laid out like the map, for a legend to draw as it
+        # finds it (#790): colour stops and served ticks along a 0–1 bar, and
+        # whether each end is clamped (drawn with an arrow) or transparent.
+        x_georiva["legend"] = contract.legend
 
         style = variable.default_style
         if style:
