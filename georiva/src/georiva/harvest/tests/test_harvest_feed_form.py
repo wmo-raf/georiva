@@ -187,6 +187,11 @@ class EditHarvestFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
         labels = dict(formset.empty_form.fields["asset_key"].widget.choices)
         self.assertEqual(labels["rainfall"], "rainfall — Monthly rainfall")
 
+    def test_a_feed_of_items_is_not_offered_fixed_fields(self):
+        row = self.client.get(form_url("edit", pk=self.feed.pk)).context["form"].formsets["variable_mappings"]
+
+        self.assertNotIn("fixed_field", row.empty_form.fields)
+
     def test_a_feed_nothing_was_surveyed_for_has_its_asset_keys_typed(self):
         formset = self.client.get(form_url("edit", pk=self.feed.pk)).context["form"].formsets["variable_mappings"]
 
@@ -360,6 +365,16 @@ class EditStoreFeedTests(StoreFeedFormMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("not an array the upstream store offers", self.errors(response))
         self.assertFalse(VariableMapping.objects.exists())
+
+    def test_an_array_is_declared_a_fixed_field(self):
+        self.edit([{"asset_key": "temperature_2m", "variable": self.temperature.pk, "fixed_field": "on"}])
+
+        self.assertEqual(self.feed.fixed_fields(), {"temperature_2m"})
+
+    def test_an_array_left_unticked_is_no_fixed_field(self):
+        self.edit([{"asset_key": "temperature_2m", "variable": self.temperature.pk}])
+
+        self.assertEqual(self.feed.fixed_fields(), set())
 
     def test_the_feeds_page_says_what_it_points_at(self):
         page = self.client.get(reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))

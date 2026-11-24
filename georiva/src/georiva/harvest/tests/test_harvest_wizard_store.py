@@ -883,3 +883,67 @@ class WizardProposesTheWaterFlagTests(StoreWizardMixin, TestCase):
 
         self.assertIn("only for water", self.errors(refused))
         self.assertRedirects(self.client.get(step(5)), step(4))
+
+
+class WizardProposesFixedFieldsTests(StoreWizardMixin, TestCase):
+    """A field the store holds at a run's first step only is a Fixed field: the
+    wizard proposes it from the map it read, and the operator confirms it (#782)."""
+
+    def setUp(self):
+        super().setUp()
+        self.arrays = {
+            "temperature_2m": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "2 metre temperature", "unit": "°C"}),
+            "geopotential_height_surface": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "Orography", "unit": "°C"}),
+        }
+        self.upstream.field_steps = {"temperature_2m": (0, 1, 2), "geopotential_height_surface": (0,)}
+        self.store()
+
+    def choose_both(self, **changes):
+        typed = {
+            **{f"name_{index}": f"Field {index}" for index in (0, 1)},
+            **{f"unit_{index}": self.celsius.pk for index in (0, 1)},
+            **{f"low_{index}": "0" for index in (0, 1)},
+            **{f"high_{index}": "100" for index in (0, 1)},
+        }
+        typed.update(changes)
+        self.tick(0, 1)
+        return self.tick(0, 1, **typed)
+
+    def test_a_field_held_at_its_first_step_only_beside_one_held_at_more_is_proposed(self):
+        self.reach_fields()
+
+        rows = self.tick(0, 1).context["details"]
+
+        self.assertEqual([row["fixed"] for row in rows], [False, True])
+
+    def test_one_step_alone_proves_nothing(self):
+        self.upstream.field_steps["temperature_2m"] = (0,)
+        self.reach_fields()
+
+        rows = self.tick(0, 1).context["details"]
+
+        self.assertEqual([row["fixed"] for row in rows], [False, False])
+
+    def test_a_field_confirmed_fixed_is_saved_so(self):
+        self.reach_fields()
+
+        self.choose_both(fixed_1="on")
+        self.save_store()
+
+        self.assertEqual(HarvestFeed.objects.get().fixed_fields(), {"geopotential_height_surface"})
+
+    def test_a_proposal_the_operator_unticks_is_not_saved(self):
+        self.reach_fields()
+
+        self.choose_both()
+        self.save_store()
+
+        self.assertEqual(HarvestFeed.objects.get().fixed_fields(), set())
+
+    def test_coming_back_to_the_step_shows_what_was_chosen(self):
+        self.reach_fields()
+        self.choose_both(fixed_0="on")
+
+        rows = self.client.get(step(4)).context["details"]
+
+        self.assertEqual([row["fixed"] for row in rows], [True, False])

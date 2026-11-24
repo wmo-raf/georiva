@@ -213,7 +213,7 @@ class HarvestFeed(DataFeed):
                 "Only mapped asset keys — for an upstream store, mapped arrays — are indexed. Variables are "
                 "curated in the feed's collection."
             ),
-            panels=[FieldPanel("asset_key"), FieldPanel("variable")],
+            panels=[FieldPanel("asset_key"), FieldPanel("variable"), FieldPanel("fixed_field")],
         ),
         # Where its files are read from is not edited here: it is confirmed, on
         # the feed's page, from what a re-check of the Upstream proposes.
@@ -382,6 +382,10 @@ class HarvestFeed(DataFeed):
         self.mark_collection(collection)
         return collection
 
+    def fixed_fields(self) -> frozenset[str]:
+        """The upstream asset keys of the mapping declared Fixed fields (#782)."""
+        return frozenset(self.variable_mappings.filter(fixed_field=True).values_list("asset_key", flat=True))
+
     def mapped_variables(self, collection) -> dict:
         """The Variable mapping as upstream asset key → Variable, for `collection`.
 
@@ -433,6 +437,14 @@ class VariableMapping(models.Model):
         on_delete=models.CASCADE,
         related_name="+",
         help_text=_("The Variable this asset is indexed under. It must belong to the feed's collection."),
+    )
+    fixed_field = models.BooleanField(
+        default=False,
+        verbose_name=_("Fixed field"),
+        help_text=_(
+            "The upstream store publishes this array at each run's first step only — a field that does not change "
+            "with lead time, such as orography or a land–sea mask. A run is then complete without its later steps."
+        ),
     )
 
     class Meta:

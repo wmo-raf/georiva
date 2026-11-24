@@ -274,7 +274,9 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped, settled)
 
     if reach.is_store:
+        fixed = feed.fixed_fields()
         for _steps, by_array in expected.values():
+            by_array.update(_fixed_steps(by_array, fixed))
             by_array.update(_vector_steps(by_array, vectors))
         expected = {
             run: runs.Expected(steps, {variables[path].pk: n for path, n in by_array.items() if path in variables})
@@ -453,6 +455,12 @@ def _with_vectors(item: UpstreamItem, vectors: dict) -> UpstreamItem:
         key: replace(item.assets[key.u], array="") for key in vectors if key.u in item.assets and key.v in item.assets
     }
     return replace(item, assets={**item.assets, **added}) if added else item
+
+
+def _fixed_steps(by_array: dict, fixed: frozenset[str]) -> dict:
+    """The step of a run each Fixed field is expected at: its first Held one
+    only, the store's coordinates giving it the run's every lead time (#782)."""
+    return {path: frozenset({min(steps)}) for path, steps in by_array.items() if path in fixed and steps}
 
 
 def _vector_steps(by_array: dict, vectors: dict) -> dict:

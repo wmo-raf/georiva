@@ -204,6 +204,28 @@ class NewestClosedRunTests(StoreFixture, SimpleTestCase):
         self.assertTrue(sample.readable, sample.problem)
         self.assertEqual((sample.value_min, sample.value_max), (7.0, 7.0))
 
+    def test_the_sample_says_which_steps_its_run_holds(self):
+        def build(store):
+            self.forecast(store)[1] = 3.0
+
+        self.commit(build)
+
+        self.assertEqual(self.read()["temperature_2m"].held_steps, (0, 1, 2, 3))
+
+    def test_a_field_held_at_its_runs_first_step_only_says_so(self):
+        # Orography: time-invariant, written at lead 0 alone (#782).
+        def build(store):
+            array = self.forecast(store)
+            array[0, 0] = 120.0
+            array[1, 0] = 120.0
+
+        self.commit(build)
+
+        sample = self.read()["temperature_2m"]
+
+        self.assertTrue(sample.readable, sample.problem)
+        self.assertEqual(sample.held_steps, (0,))
+
     def test_a_store_with_no_closed_run_in_reach_says_so(self):
         def build(store):
             array = self.forecast(store)

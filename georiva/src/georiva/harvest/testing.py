@@ -125,6 +125,8 @@ class FakeUpstream:
         self.field_ranges: dict[str, tuple[float, float]] = {}
         #: The declared place each array's data is in, by path; one not here needs none.
         self.field_places: dict[str, str] = {}
+        #: The steps, by index, a sample of each forecast array finds its run holding; one not here says none.
+        self.field_steps: dict[str, tuple[int, ...]] = {}
         #: Why a sample of an array cannot be read, by path.
         self.field_problems: dict[str, str] = {}
         #: The samples asked for, in order: the store, the arrays, and the places the read may follow.
@@ -451,7 +453,8 @@ class FakeUpstream:
                 samples[field.path] = FieldSample(readable=False, problem=problem, elsewhere=f"{place}a/file.grib2")
             else:
                 low, high = self.field_ranges.get(field.path, (0.0, 100.0))
-                samples[field.path] = FieldSample(readable=True, value_min=low, value_max=high)
+                steps = self.field_steps.get(field.path, ())
+                samples[field.path] = FieldSample(readable=True, value_min=low, value_max=high, held_steps=steps)
         return samples
 
 

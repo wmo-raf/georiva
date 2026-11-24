@@ -68,6 +68,9 @@ class HarvestFeedForm(DataFeedForm):
             if self.instance.is_store:
                 fields["asset_key"].label = _("Array in the store")
                 fields["asset_key"].help_text = _("The array's full path in the upstream store.")
+            else:
+                # A run is a store's: a feed of items has no first step to hold an array at (#782).
+                fields.pop("fixed_field", None)
 
         for row in formset.forms:
             narrow(row.fields)
