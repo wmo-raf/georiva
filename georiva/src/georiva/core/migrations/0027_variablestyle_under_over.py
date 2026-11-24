@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("georivacore", "0025_styletemplate"),
+        ("georivacore", "0026_load_earthkit_style_templates"),
     ]
 
     operations = [
