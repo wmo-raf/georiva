@@ -162,6 +162,11 @@ class FieldSample:
     #: The range most of the field's values lie in (`RANGE_PERCENTILES`).
     value_min: float | None = None
     value_max: float | None = None
+    #: For a forecast: the steps, by index along its lead times, that its run
+    #: read whole holds. One holding its first step alone is time-invariant —
+    #: orography, a land–sea mask — and evidence of a Fixed field (#782).
+    #: Empty for an analysis store, or where nothing was read.
+    held_steps: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -772,9 +777,9 @@ def _held(store, array, path: str, cells: list[tuple[int, ...]]) -> list[bool]:
     return list(asyncio.run(ask()))
 
 
-def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | None, str]:
+def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | None, str, tuple[int, ...]]:
     """Where the field to sample is — `{"run": …, "step": …}` or `{"time": …}`
-    — or why there is none. A forecast's is the middle step of its newest
+    — or why there is none, and for a forecast the steps its run holds. A forecast's is the middle step of its newest
     closed run. Coordinates are allocated ahead of data, so the newest run is
     rarely it.
 
@@ -794,8 +799,8 @@ def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | Non
         held = _held(store, array, field.path, [cell(time=time) for time in newest])
         for time, there in zip(newest, held, strict=True):
             if there:
-                return {"time": time}, ""
-        return None, "none of its newest time steps holds any data yet"
+                return {"time": time}, "", ()
+        return None, "none of its newest time steps holds any data yet", ()
 
     runs = range(sizes["run"] - 1, max(-1, sizes["run"] - 1 - RUNS_IN_REACH), -1)
     steps = range(sizes["step"])
@@ -804,11 +809,11 @@ def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | Non
     holds = {run: {step for step in steps if next(held)} for run in runs}
     expected = set().union(*holds.values())
     if not expected:
-        return None, f"none of its newest {RUNS_IN_REACH} forecasts holds any data yet"
+        return None, f"none of its newest {RUNS_IN_REACH} forecasts holds any data yet", ()
     for run in runs:
         if holds[run] == expected:
-            return {"run": run, "step": sorted(expected)[len(expected) // 2]}, ""
-    return None, f"none of its newest {RUNS_IN_REACH} forecasts has arrived in full yet"
+            return {"run": run, "step": sorted(expected)[len(expected) // 2]}, "", tuple(sorted(expected))
+    return None, f"none of its newest {RUNS_IN_REACH} forecasts has arrived in full yet", ()
 
 
 def _sample(store, field: StoreField) -> FieldSample:
@@ -817,13 +822,13 @@ def _sample(store, field: StoreField) -> FieldSample:
     array = zarr.open_array(store, path=field.path, mode="r")
     if len(field.axes) != array.ndim:
         return FieldSample(readable=False, problem="it is not laid out as its collection says")
-    at, missing = _newest_whole(store, array, field)
+    at, missing, held_steps = _newest_whole(store, array, field)
     if at is None:
         return FieldSample(readable=False, problem=missing)
     low, high = display_range(array[tuple(at.get(part, slice(None)) for part in field.axes)])
     if low is None:
         return FieldSample(readable=False, problem="the map that was read holds no values")
-    return FieldSample(readable=True, value_min=low, value_max=high)
+    return FieldSample(readable=True, value_min=low, value_max=high, held_steps=held_steps)
 
 
 def read_field_samples(

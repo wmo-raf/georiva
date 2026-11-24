@@ -357,6 +357,81 @@ class AnArrayNotHeldAtARunsFirstStepTests(StoreRunsMixin, TestCase):
         self.assertEqual(response.json()["latest_complete"]["reference_time"], self.run.isoformat())
 
 
+#: Orography: time-invariant, so the store holds it at a run's first step only.
+OROGRAPHY = "geopotential_height_surface"
+
+
+class AFixedFieldTests(StoreRunsMixin, TestCase):
+    """A Fixed field is expected at its run's first Held step only (#782)."""
+
+    arrays = {**StoreFeedMixin.arrays, OROGRAPHY: (RUN_STEP_GRID, WHOLE_FIELD)}
+
+    def setUp(self):
+        super().setUp()
+        self.orography = self.map_variable(OROGRAPHY, "orography", fixed_field=True)
+
+    def hold_whole_runs(self, run=None):
+        """Every step of `run` each array is published at: the fixed one at its first only."""
+        self.hold_run("temperature_2m", run=run)
+        self.hold(OROGRAPHY, 0, run=run)
+
+    def test_a_run_whose_every_published_step_has_arrived_closes(self):
+        self.hold_whole_runs()
+
+        self.harvest()
+
+        record = self.record()
+        self.assertTrue(record.is_complete)
+        self.assertEqual(record.closed_by, RunIngestion.Closer.STORE_HELD)
+
+    def test_undeclared_the_same_run_stays_open(self):
+        self.feed.variable_mappings.filter(asset_key=OROGRAPHY).update(fixed_field=False)
+        self.hold_whole_runs()
+
+        self.harvest()
+
+        self.assertTrue(self.record().is_open)
+
+    def test_a_run_the_fixed_field_has_not_arrived_in_stays_open(self):
+        self.hold_run("temperature_2m")
+
+        self.harvest()
+
+        self.assertTrue(self.record().is_open)
+
+    def test_a_fixed_field_held_at_later_steps_too_is_indexed_there_and_the_run_closes(self):
+        self.hold_run("temperature_2m")
+        self.hold(OROGRAPHY, 0, 3)
+
+        self.harvest()
+
+        self.assertTrue(self.record().is_complete)
+        rows = Item.objects.filter(collection=self.feed.collection, assets__variable=self.orography)
+        self.assertEqual(rows.count(), 2)
+
+    def test_the_closed_run_settles_and_is_not_asked_again(self):
+        newer = self.run + hours(6)
+        self.hold_whole_runs()
+        self.hold("temperature_2m", 0, run=newer)
+        self.harvest()
+
+        self.harvest()
+
+        self.assertEqual(self.upstream.runs_asked[-1], {newer})
+        self.assertTrue(self.record().is_complete)
+
+    def test_declaring_it_closes_a_run_left_open_on_the_next_harvest(self):
+        self.feed.variable_mappings.filter(asset_key=OROGRAPHY).update(fixed_field=False)
+        self.hold_whole_runs()
+        self.harvest()
+        self.assertTrue(self.record().is_open)
+
+        self.feed.variable_mappings.filter(asset_key=OROGRAPHY).update(fixed_field=True)
+        self.harvest()
+
+        self.assertTrue(self.record().is_complete)
+
+
 class WhichStepsAreHeldTests(StoreRunsMixin, TestCase):
     """A run is complete when the steps it is expected at are held — which
     ones, not how many. A step held past the expected length gets a row and

@@ -767,7 +767,12 @@ def _read_samples(session: dict, ticked: list[dict], allowed: list[dict], places
     for array in wanted:
         sample, name = read.get(array["path"]), array["label"]
         if sample is not None and sample.readable:
-            samples[array["path"]] = {"low": sample.value_min, "high": sample.value_max, "places": sorted(following)}
+            samples[array["path"]] = {
+                "low": sample.value_min,
+                "high": sample.value_max,
+                "places": sorted(following),
+                "steps": list(sample.held_steps),
+            }
             continue
         samples.pop(array["path"], None)
         if sample is not None and sample.elsewhere:
@@ -824,6 +829,7 @@ def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> li
     range: what was posted wins, then what was chosen on an earlier visit,
     then what the collection says of it and the map that was read shows."""
     rows = []
+    proposed = _proposed_fixed_fields(samples)
     for array in offered:
         index = array["index"]
         use = bool(posted.get(f"use_{index}")) if posted is not None else array["path"] in earlier
@@ -838,18 +844,35 @@ def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> li
                 low=low,
                 high=high,
                 about=array["description"],
+                forecast="run" in array["axes"],
+                fixed=array["path"] in proposed,
             )
             if array["path"] in earlier:
                 field = earlier[array["path"]]
-                row.update(name=field["name"], about=field["description"], **_units_chosen_earlier(field))
+                row.update(
+                    name=field["name"],
+                    about=field["description"],
+                    fixed=field.get("fixed", False),
+                    **_units_chosen_earlier(field),
+                )
             if posted is not None and f"name_{index}" in posted:
                 row.update(
                     name=posted.get(f"name_{index}", ""),
                     about=posted.get(f"about_{index}", ""),
+                    fixed=bool(posted.get(f"fixed_{index}")),
                     **_units_posted(row, index, posted),
                 )
         rows.append(row)
     return rows
+
+
+def _proposed_fixed_fields(samples: dict) -> set[str]:
+    """The fields whose sample shows them time-invariant: their run held whole
+    holds its first step only, while another field read beside them holds more.
+    Alone, one step proves nothing — every field of a run just begun holds one (#782)."""
+    if not any(len(sample.get("steps") or ()) > 1 for sample in samples.values()):
+        return set()
+    return {path for path, sample in samples.items() if list(sample.get("steps") or ()) == [0]}
 
 
 def _field_bounds(array: dict, low: float, high: float) -> tuple[float, float]:
@@ -890,6 +913,7 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
                 "name": name,
                 **units,
                 "description": posted.get(f"about_{index}", "").strip(),
+                "fixed": "run" in array["axes"] and bool(posted.get(f"fixed_{index}")),
             }
         )
     return chosen, errors, False
@@ -1215,6 +1239,7 @@ def _store_plan(form: dict, session: dict, interval, catalog_id, start, end, day
                 value_min=field["value_min"],
                 value_max=field["value_max"],
                 description=field["description"],
+                fixed_field=field.get("fixed", False),
             )
             for field in session["chosen"]
         ]

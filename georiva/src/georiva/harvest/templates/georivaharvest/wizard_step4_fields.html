@@ -164,6 +164,14 @@
                                     <input type="text" name="about_{{ row.index }}" class="w-field__input hwiz-about"
                                            value="{{ row.about }}" placeholder="{% trans 'Description (optional)' %}"
                                            aria-label="{% blocktrans with name=row.label %}Description of {{ name }}{% endblocktrans %}">
+                                    {% if row.forecast %}
+                                        {# A field the store holds at a run's first step only: a run does not wait for the rest (#782). #}
+                                        <label class="hwiz-check" for="fixed_{{ row.index }}">
+                                            <input type="checkbox" name="fixed_{{ row.index }}" id="fixed_{{ row.index }}"
+                                                   {% if row.fixed %}checked{% endif %}>
+                                            <span>{% trans "Fixed field: published at each forecast's first step only, as orography or a land–sea mask is. A forecast is complete without its later steps." %}</span>
+                                        </label>
+                                    {% endif %}
                                 </td>
                             </tr>
                         {% endfor %}

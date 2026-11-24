@@ -88,7 +88,7 @@ class StoreFeedMixin:
         #: A run that began a day ago, on the hour.
         self.run = timezone.now().replace(minute=0, second=0, microsecond=0) - timedelta(days=1)
 
-    def map_variable(self, path, slug):
+    def map_variable(self, path, slug, *, fixed_field=False):
         unit, _ = Unit.objects.get_or_create(name="Degree Celsius", symbol="°C")
         variable = Variable.objects.create(
             collection=self.feed.ensure_collection(),
@@ -99,7 +99,7 @@ class StoreFeedMixin:
             value_min=-40,
             value_max=45,
         )
-        VariableMapping.objects.create(feed=self.feed, asset_key=path, variable=variable)
+        VariableMapping.objects.create(feed=self.feed, asset_key=path, variable=variable, fixed_field=fixed_field)
         return variable
 
     def harvest(self, **kwargs):
