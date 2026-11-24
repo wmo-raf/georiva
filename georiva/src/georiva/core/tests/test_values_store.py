@@ -21,10 +21,10 @@ from affine import Affine
 from django.test import SimpleTestCase, TestCase
 
 from georiva.core import values
-from georiva.core.models import Asset
+from georiva.core.models import Asset, Variable
 from georiva.harvest import upstream
 from georiva.harvest.models import HarvestFeed
-from georiva.harvest.testing import LocalStore, StoreArray, StoreVariable
+from georiva.harvest.testing import LocalStore, StoreArray, StoreVariable, StoreVector
 from georiva.organisations.testing import make_organisation
 
 STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
@@ -268,3 +268,81 @@ class StoreAssetRowTests(ReadsALocalStore, TestCase):
             values.field(Asset.objects.get(pk=self.asset.pk))
 
         self.assertEqual(opening.call_args.args[1], {})
+
+
+#: A wind field's eastward and northward parts, every cell its own pair (ADR 0048).
+U, V = "wind_u_10m", "wind_v_10m"
+
+
+def eastward(run: int, step: int) -> np.ndarray:
+    return np.full((4, 8), 3.0 + run, dtype=np.float32)
+
+
+def northward(run: int, step: int) -> np.ndarray:
+    return np.full((4, 8), 4.0 + step, dtype=np.float32)
+
+
+class VectorStoreAssetTests(TestCase):
+    """A vector Variable over a store's u and v is computed when it is read (ADR 0048)."""
+
+    def setUp(self):
+        super().setUp()
+        self.store = LocalStore(
+            self,
+            href=STORE,
+            runs=RUNS,
+            leads=LEADS,
+            arrays=[StoreArray(U, values=eastward), StoreArray(V, values=northward)],
+        )
+        self.harvested = self.store.harvest(
+            make_organisation(),
+            variables={
+                U: StoreVariable("wind-u-10m", source_unit="m/s"),
+                V: StoreVariable("wind-v-10m", source_unit="m/s"),
+            },
+            vectors=[
+                StoreVector("wind-speed-10m", U, V, Variable.TransformType.VECTOR_MAGNITUDE, source_unit="m/s"),
+                StoreVector("wind-direction-10m", U, V, Variable.TransformType.VECTOR_DIRECTION, source_unit="°"),
+            ],
+        )
+
+    def asset(self, slug: str, run: int = 0, step: int = 0) -> Asset:
+        # With its item and Variable, as a series' rows are read: its reads run in threads of their own.
+        return Asset.objects.select_related("item", "variable").get(
+            variable__slug=slug, item__reference_time=RUNS[run], item__time=RUNS[run] + LEADS[step]
+        )
+
+    def test_speed_is_the_length_of_u_and_v_at_every_cell(self):
+        # u = 3, v = 4 at run 0, step 0: a 3-4-5 triangle.
+        field = values.field(self.asset("wind-speed-10m"))
+
+        np.testing.assert_allclose(field.data, np.full((4, 8), 5.0))
+        self.assertEqual(field.data.dtype, np.float32)
+        self.assertEqual(field.transform, NORTH_UP)
+
+    def test_direction_is_the_bearing_the_wind_blows_from(self):
+        # u = 3, v = 4 blows towards the north-north-east, so from about 216.87°.
+        point = values.point(self.asset("wind-direction-10m"), 25.0, 0.0)
+
+        self.assertAlmostEqual(point, 216.8699, places=3)
+
+    def test_each_step_combines_its_own_u_and_v(self):
+        # Run 1, step 2: u = 4, v = 6.
+        with values.session() as s:
+            series = s.point_series([self.asset("wind-speed-10m", run, step) for run, step in [(0, 0), (1, 2)]], 5, 5)
+
+        np.testing.assert_allclose(series, [5.0, np.hypot(4.0, 6.0)], rtol=1e-6)
+
+    def test_speed_converts_to_the_unit_asked_for_like_any_value(self):
+        point = values.point(self.asset("wind-speed-10m"), 25.0, 0.0, in_unit="km/h")
+
+        self.assertAlmostEqual(point, 18.0, places=4)
+
+    def test_both_parts_are_read_from_one_opening_of_the_store(self):
+        with mock.patch.object(upstream, "open_repository", wraps=upstream.open_repository) as opening:
+            with values.session() as s:
+                s.field(self.asset("wind-speed-10m"))
+                s.field(self.asset("wind-direction-10m"))
+                s.field(self.asset("wind-u-10m"))
+
+        self.assertEqual(opening.call_count, 1)

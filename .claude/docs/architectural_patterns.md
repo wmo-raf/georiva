@@ -102,6 +102,12 @@ Access via import: `from georiva.core.storage import storage`
   reference time and valid time. Ask `asset.location.is_store` or filter with `store_q()`; `open_raster()` refuses
   one. Readers that select `format=COG` (zonal statistics, virtual-Zarr manifests) leave Store assets out by that
   alone, and a time series over one answers 501
+- **A vector Store asset** (ADR 0048) is a store collection's wind speed or direction: its Variable has a vector
+  `transform_type` and `u_component` / `v_component` sources naming two mapped arrays, and its asset has an empty
+  `store_array`. Ask `asset.store_vector` (a `VectorComponents`, or `None`) — never test `store_array` yourself. It
+  is computed when read, by `core/values/store.py` and by `titiler-app/app/store.py` (the same arithmetic as
+  `geoprocessing.wind`, restated across the process boundary; each side pins the same values). Its published entry
+  names `vector: {u, v, transform}` in place of `array`, and STAC names `georiva:vector`
 - **Where Titiler finds a Remote asset** (ADR 0043 §3): Titiler derives a local COG's URL from the request path and
   consults no row, so a Remote asset's href is published to it. `core/machine_plane/remote_assets.py` writes one
   Redis hash per Variable (timestep → href, plus a `published` marker), for every visibility tier; the tile-config

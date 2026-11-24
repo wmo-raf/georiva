@@ -439,6 +439,15 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
 
         return AssetLocation(self.href, self.format)
 
+    @property
+    def store_vector(self):
+        """For a vector Variable's Store asset, the two arrays it is computed
+        from and which quantity of them it is (a ``VectorComponents``, ADR 0048);
+        ``None`` for any other asset. Such an asset names no array of its own."""
+        if self.store_array or not self.location.is_store:
+            return None
+        return self.variable.vector_components
+
     @cached_property
     def url(self) -> str:
         """Public URL to this asset — the upstream href itself for a Remote asset."""

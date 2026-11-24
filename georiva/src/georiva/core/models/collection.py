@@ -85,13 +85,18 @@ def _not_file_read_variable_form(form_class, collection):
 
     A new row's instance is not attached to its collection until the formset
     saves, so it is attached here — `Variable.clean()` asks the collection how
-    its Variables are fed."""
+    its Variables are fed.
+
+    A store collection's Variable keeps them: it may be a vector over two of
+    the store's arrays, named as its u and v sources (ADR 0048)."""
+    keeps_transform = collection.store_mapping() is not None
 
     class NotFileReadVariableForm(form_class):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            for name in FILE_READ_VARIABLE_FIELDS:
-                self.fields.pop(name, None)
+            if not keeps_transform:
+                for name in FILE_READ_VARIABLE_FIELDS:
+                    self.fields.pop(name, None)
             if self.instance.collection_id is None:
                 self.instance.collection = collection
 
@@ -352,6 +357,26 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         collection that is not file reading adds its mark here.
         """
         return self.harvested_by_id is None and not self.derived_by_recipe
+
+    def store_mapping(self) -> dict | None:
+        """The arrays of its Upstream store that its harvest feed maps, each to
+        its Variable, for a collection harvested from a store; ``None`` for any other.
+
+        A vector Variable of such a collection is computed from two of them
+        (ADR 0048). Asked of the harvest app by model label: core is not built on it.
+        """
+        from django.apps import apps
+
+        if self.harvested_by_id is None:
+            return None
+        try:
+            feeds = apps.get_model("georivaharvest", "HarvestFeed")
+        except LookupError:
+            return None
+        feed = feeds.objects.filter(pk=self.harvested_by_id).first()
+        if feed is None or not feed.is_store:
+            return None
+        return {row.asset_key: row.variable for row in feed.variable_mappings.select_related("variable")}
 
     @property
     def spatial_extent(self) -> list | None:

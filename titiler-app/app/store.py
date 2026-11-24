@@ -35,6 +35,12 @@ raster, and from there renders exactly as a COG does: the same rescale,
 palette and crop. Every upstream read is bounded in time, and a failure is an
 error for the request in hand and nothing else.
 
+**It computes a vector field from two** (ADR 0048). Wind speed and direction
+are not arrays of a store: Django publishes a vector Variable's timestep as the
+store and its u and v, and the field drawn is their magnitude or the bearing
+the wind blows from, computed from the two fields read at the same step through
+the same open store. Both parts and the result are kept like any field.
+
 **It refreshes on a missing step, and never draws a blank one** (ADR 0044 §10).
 The store is kept open at the snapshot it was opened on, and an Upstream store
 commits several times a minute while a run arrives: a row can name a step that
@@ -79,7 +85,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TimedOut
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from time import monotonic
 
@@ -98,6 +104,21 @@ BRANCH = "main"
 
 
 @dataclass(frozen=True)
+class Vector:
+    """What a vector field (ADR 0048) is computed from: its eastward (``u``) and
+    northward (``v``) arrays, and which of :data:`VECTOR_TRANSFORMS` it is.
+    Django's ``VectorComponents``, as a published entry names it."""
+
+    u: str
+    v: str
+    transform: str
+
+    @property
+    def arrays(self) -> tuple[str, str]:
+        return (self.u, self.v)
+
+
+@dataclass(frozen=True)
 class StoreSlice:
     """One field of an Upstream store: what a Store asset at one timestep names.
 
@@ -106,6 +127,9 @@ class StoreSlice:
     declares it with its region (empty where it has none), sorted, so that two
     requests naming the same pins share one open store. ``allow_http`` is the
     feed's word on whether a plain ``http`` store may be opened.
+
+    A vector field (ADR 0048) names no array: ``vector`` names the two it is
+    computed from at the same step.
     """
 
     store: str
@@ -114,24 +138,33 @@ class StoreSlice:
     time: datetime
     reftime: datetime | None = None
     allow_http: bool = False
+    vector: Vector | None = None
 
     @classmethod
     def published(cls, entry: dict, time: datetime, reftime: datetime | None) -> StoreSlice:
         """The slice a published entry names at this timestep. Raises
         :class:`StoreMisdescribed` for an entry that is not Django's shape."""
-        store, array, chunk_locations, allow_http = published_store(entry)
+        store, arrays, chunk_locations, allow_http = published_store(entry)
+        vector = Vector(*arrays, transform=entry["vector"]["transform"]) if len(arrays) == 2 else None
         return cls(
             store=store,
-            array=array,
+            array="" if vector else arrays[0],
+            vector=vector,
             chunk_locations=chunk_locations,
             time=time,
             reftime=reftime,
             allow_http=allow_http,
         )
 
+    def components(self) -> tuple[StoreSlice, StoreSlice]:
+        """The u and v fields a vector field is computed from."""
+        return tuple(replace(self, array=array, vector=None) for array in self.vector.arrays)
+
     def __str__(self) -> str:
         at = self.time.isoformat() if self.reftime is None else f"{self.reftime.isoformat()}+{self.time.isoformat()}"
-        return f"{self.store}#{self.array}@{at}"
+        vector = self.vector
+        arrays = f"{vector.transform}({vector.u},{vector.v})" if vector else self.array
+        return f"{self.store}#{arrays}@{at}"
 
 
 def is_store_entry(value: str) -> bool:
@@ -142,16 +175,25 @@ def is_store_entry(value: str) -> bool:
     return value.startswith("{")
 
 
-def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...], bool]:
-    """The store, the array, the pins and whether plain HTTP is allowed, as a
-    published entry names them, the pins as every request spells them. Raises
+#: What a vector field may be computed as, from its u and v (ADR 0048). Django's
+#: ``Variable.TransformType`` values for them.
+VECTOR_MAGNITUDE = "vector_magnitude"
+VECTOR_DIRECTION = "vector_direction"
+VECTOR_TRANSFORMS = (VECTOR_MAGNITUDE, VECTOR_DIRECTION)
+
+
+def published_store(entry) -> tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], bool]:
+    """The store, the arrays read from it, the pins and whether plain HTTP is
+    allowed, as a published entry names them, the pins as every request spells
+    them. The arrays are one, or a vector's u and v. Raises
     :class:`StoreMisdescribed` for an entry that is not Django's shape, or for
     a plain ``http`` store its feed does not allow. What a tile reads and what
     the warm-up opens are both named here, so a warmed store is the one a tile finds."""
     if not isinstance(entry, dict):
         entry = {}
-    store, array, places = entry.get("store"), entry.get("array"), entry.get("chunk_locations") or {}
-    if not isinstance(store, str) or not isinstance(array, str) or not array or not isinstance(places, dict):
+    store, places = entry.get("store"), entry.get("chunk_locations") or {}
+    arrays = _published_arrays(entry)
+    if not isinstance(store, str) or arrays is None or not isinstance(places, dict):
         raise StoreMisdescribed("The published description of this upstream store is incomplete.")
     if not store.startswith(("https://", "http://")):
         raise StoreMisdescribed("The upstream store's address is not an http(s) URL.")
@@ -159,7 +201,21 @@ def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...], bool]
     allow_http = entry.get("allow_http") is True
     _may_open(store, allow_http)
     pins = tuple(sorted((str(prefix), str(region or "")) for prefix, region in places.items()))
-    return store, array, pins, allow_http
+    return store, arrays, pins, allow_http
+
+
+def _published_arrays(entry: dict) -> tuple[str, ...] | None:
+    """The array an entry names, or a vector entry's u and v; ``None`` for neither."""
+    vector = entry.get("vector")
+    if vector is None:
+        array = entry.get("array")
+        return (array,) if isinstance(array, str) and array else None
+    if not isinstance(vector, dict) or vector.get("transform") not in VECTOR_TRANSFORMS:
+        return None
+    u, v = vector.get("u"), vector.get("v")
+    if not isinstance(u, str) or not isinstance(v, str) or not u or not v:
+        return None
+    return (u, v)
 
 
 # ---------------------------------------------------------------------------
@@ -661,29 +717,75 @@ def forget_all() -> None:
 
 
 def read_field(target: StoreSlice) -> Field:
-    """The field ``target`` names: kept by this process, or decoded now and kept."""
-    return _fields.kept_or_read(target, _decode)
+    """The field ``target`` names: kept by this process, or decoded now and kept.
+    A vector field is computed from its u and v."""
+    return _fields.kept_or_read(target, _computed if target.vector else _decode)
+
+
+def _computed(target: StoreSlice) -> Field:
+    """A vector field, from its u and v at the same step (ADR 0048): the speed
+    or the bearing the wind blows from. The same arithmetic as core's
+    ``geoprocessing.wind``, across the process boundary.
+
+    Both parts kept already are used as they are. Otherwise both are decoded
+    together — from one opening of the store, within one ``STORE_READ_TIMEOUT``
+    — so a reopen for one part never pairs it with the other from an older
+    snapshot; and both are kept, for a map of either."""
+    parts = target.components()
+    kept = [_fields.get(part) for part in parts]
+    if None in kept:
+        generation = _fields.generation(_store_key(target))
+        kept = _decode_together(parts, missing=target)
+        for part, found in zip(parts, kept, strict=True):
+            _fields.put(part, found, forgets=generation)
+    u, v = kept
+    if u.values.shape != v.values.shape or (u.west, u.north, u.x_resolution, u.y_resolution) != (
+        v.west,
+        v.north,
+        v.x_resolution,
+        v.y_resolution,
+    ):
+        raise StoreMisdescribed(f"The upstream arrays “{target.vector.u}” and “{target.vector.v}” are not on one grid.")
+    with np.errstate(invalid="ignore"):
+        if target.vector.transform == VECTOR_MAGNITUDE:
+            values = np.hypot(u.values, v.values)
+        else:
+            values = np.mod(np.degrees(np.arctan2(u.values, v.values)) + 180.0, 360.0)
+            values = np.where(values >= 360.0, 0.0, values)
+    return replace(u, values=np.asarray(values))
 
 
 def _decode(target: StoreSlice) -> Field:
-    """Decode the field ``target`` names: opening the store if this process
-    has not yet, reopening it once if the step is not held, and reading the
-    field, all within one ``STORE_READ_TIMEOUT``."""
+    """Decode the field ``target`` names (see :func:`_decode_together`)."""
+    (found,) = _decode_together((target,), missing=target)
+    return found
 
-    def read() -> Field:
+
+def _decode_together(parts: tuple[StoreSlice, ...], missing: StoreSlice) -> tuple[Field, ...]:
+    """Decode the fields ``parts`` name, all of one store and step: opening the
+    store if this process has not yet, reopening it once if a step is not held
+    and reading every part again from the reopened one, all within one
+    ``STORE_READ_TIMEOUT``. A step a reopen did not find is remembered as
+    ``missing`` — the field asked for."""
+    key = _store_key(missing)
+
+    def read_all(opened: OpenStore) -> tuple[Field, ...]:
+        return tuple(opened.field(part.array, part.time, part.reftime) for part in parts)
+
+    def read() -> tuple[Field, ...]:
         with _opened.lock:
-            forgets = _opened.forgets.get(_store_key(target), 0)
-        opened = opened_store(*_store_key(target))
+            forgets = _opened.forgets.get(key, 0)
+        opened = opened_store(*key)
         try:
-            return opened.field(target.array, target.time, target.reftime)
+            return read_all(opened)
         except StoreStepNotHeld:
-            if _remembered_missing(target):
+            if _remembered_missing(missing):
                 raise
-            fresher = reopened_store(*_store_key(target), stale=opened)
+            fresher = reopened_store(*key, stale=opened)
         try:
-            return fresher.field(target.array, target.time, target.reftime)
+            return read_all(fresher)
         except StoreStepNotHeld:
-            _remember_missing(target, forgets)
+            _remember_missing(missing, forgets)
             raise
 
     return _bounded(read)
@@ -763,6 +865,12 @@ class FieldCache:
                 self.size -= self._kept.popitem(last=False)[1].values.nbytes
             self._kept[target] = found
             self.size += cost
+
+    def generation(self, store_key: tuple[str, tuple[tuple[str, str], ...], bool]) -> int:
+        """How many times the store at this (address, pins) has been let go: a
+        read begun at one generation is kept only while it is still the current one."""
+        with self._lock:
+            return self._forgets.get(store_key, 0)
 
     def forget(self, store_key: tuple[str, tuple[tuple[str, str], ...], bool]) -> None:
         """Drop every field kept from the store at this (address, pins).

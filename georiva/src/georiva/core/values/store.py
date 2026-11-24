@@ -36,11 +36,15 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import numpy as np
 from affine import Affine
+
+if TYPE_CHECKING:
+    from georiva.core.models.variable import VectorComponents
 
 #: The branch a store is read at: its tip, as the session opens it (ADR 0044 §10).
 BRANCH = "main"
@@ -102,6 +106,10 @@ class StoreSlice:
     the store declares it, with its region (empty where it has none) — the only
     places its data is followed into. ``allow_http`` is the feed's word on
     whether a plain ``http`` store may be opened at all.
+
+    A vector field (ADR 0048) names no array: ``vector`` names the two it is
+    computed from and which quantity of them it is. Both are read at the same
+    step from the same opening of the store.
     """
 
     store: str
@@ -110,11 +118,24 @@ class StoreSlice:
     reference_time: datetime | None = None
     chunk_locations: Mapping[str, str] = field(default_factory=dict, hash=False, compare=False)
     allow_http: bool = False
+    vector: VectorComponents | None = None
 
     @property
     def key(self) -> tuple:
         """What tells two slices apart: the same field read with the same pins, opened the same way."""
-        return (self.store, self.array, self.time, self.reference_time, self.pins, self.allow_http)
+        return (
+            self.store,
+            self.array,
+            self.vector,
+            self.time,
+            self.reference_time,
+            self.pins,
+            self.allow_http,
+        )
+
+    def components(self) -> tuple[StoreSlice, StoreSlice]:
+        """The u and v fields a vector field is computed from."""
+        return tuple(replace(self, array=array, vector=None) for array in self.vector.arrays)
 
     @property
     def pins(self) -> tuple[tuple[str, str], ...]:
@@ -129,7 +150,7 @@ def store_slice(asset) -> StoreSlice:
 
     item = asset.item
     access = feed_store_access([asset.harvested_by_id]).get(asset.harvested_by_id, NO_FEED)
-    return StoreSlice(
+    wanted = StoreSlice(
         store=asset.href,
         array=asset.store_array,
         time=item.time,
@@ -137,6 +158,8 @@ def store_slice(asset) -> StoreSlice:
         chunk_locations=access.chunk_locations,
         allow_http=access.allow_http,
     )
+    # A vector Variable's asset names no array: its Variable names two (ADR 0048).
+    return replace(wanted, vector=asset.store_vector)
 
 
 def repository_storage(href: str, *, allow_http: bool = False, timeout: str = READ_TIMEOUT):
@@ -193,13 +216,27 @@ class OpenStores:
                 if held is not None:
                     self._fields.move_to_end(key)
                     return held
-            decoded = self._store(wanted).field(wanted)
+            decoded = self._computed(wanted) if wanted.vector else self._store(wanted).field(wanted)
             with self._lock:
                 self._fields[key] = decoded
                 while len(self._fields) > HELD_FIELDS:
                     evicted, _source = self._fields.popitem(last=False)
                     self._field_locks.pop(evicted, None)
             return decoded
+
+    def _computed(self, wanted: StoreSlice) -> _ArraySource:
+        """A vector field, from its u and v as held (ADR 0048)."""
+        from georiva.core.models import Variable
+        from georiva.geoprocessing.wind import wind_from_direction, wind_speed
+
+        vector = wanted.vector
+        u, v = (self.source(part) for part in wanted.components())
+        if u.transform != v.transform or u.shape != v.shape:
+            raise StoreUnreadable(f"The upstream arrays “{vector.u}” and “{vector.v}” are not on one grid.")
+        compute = wind_speed if vector.transform == Variable.TransformType.VECTOR_MAGNITUDE else wind_from_direction
+        with np.errstate(invalid="ignore"):
+            data = np.asarray(compute(u.read(1), v.read(1)), dtype=np.float32)
+        return _ArraySource(data, u.transform)
 
     def close(self) -> None:
         with self._lock:
@@ -303,6 +340,10 @@ class _ArraySource:
         self.transform = transform
         self.crs = CRS.from_epsg(4326)
         self.height, self.width = data.shape
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return (self.height, self.width)
 
     def read(self, band: int, window=None) -> np.ndarray:
         if window is None:

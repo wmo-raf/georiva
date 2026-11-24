@@ -481,6 +481,13 @@ A Remote asset whose `href` is an Upstream store. Every asset of the collection 
 one means is its Item's reference time and valid time, and the array it was mapped from (ADR 0044).
 _Avoid_: Zarr asset (that is a format), slice asset, chunk asset
 
+**Vector Variable** (of a store collection):
+A Variable computed when read from two of its store's mapped arrays — a wind's eastward (`u`) and northward (`v`)
+parts — as their magnitude (speed) or the bearing the wind blows from (direction). Declared by `transform_type` and
+`u_component` / `v_component` sources naming array paths; it has a Store asset, naming no array, wherever both parts
+are held. Nothing computed is stored (ADR 0048).
+_Avoid_: derived Variable (that is a recipe's output), wind Variable (it need not be wind)
+
 **Drawable asset**:
 An asset Titiler can draw: a COG, local or Remote, or a Store asset. Every surface that offers a map, a thumbnail or
 a preview offers exactly these; one rule decides it (`AssetLocation.is_drawable` / `drawable_q`, #686). Being

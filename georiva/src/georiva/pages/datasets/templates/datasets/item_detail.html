@@ -461,7 +461,16 @@
                             <dt>{{ asset.variable.name }}</dt>
                             <dd>
                                 <div>{% trans "Store" %}: <span class="gr-mono">{{ asset.href }}</span></div>
-                                <div>{% trans "Array" %}: <span class="gr-mono">{{ asset.store_array }}</span></div>
+                                {% if asset.store_array %}
+                                    <div>{% trans "Array" %}: <span class="gr-mono">{{ asset.store_array }}</span></div>
+                                {% else %}
+                                    {# A vector names no array of its own: it is computed from two (ADR 0048). #}
+                                    {% with parts=asset.store_vector %}
+                                        {% if parts %}
+                                            <div>{% trans "Computed from" %}: <span class="gr-mono">{{ parts.u }}</span>, <span class="gr-mono">{{ parts.v }}</span></div>
+                                        {% endif %}
+                                    {% endwith %}
+                                {% endif %}
                             </dd>
                         </div>
                     {% endfor %}

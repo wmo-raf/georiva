@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 from django.utils.functional import cached_property
@@ -62,6 +64,22 @@ class VariableSourceStreamBlock(StreamBlock):
             "u_component": {"max_num": 1},
             "v_component": {"max_num": 1},
         }
+
+
+@dataclass(frozen=True)
+class VectorComponents:
+    """What a vector Variable is computed from: the names of its eastward (`u`)
+    and northward (`v`) parts in its source, and which of the two quantities it
+    is (`transform`, a ``Variable.TransformType``). In a store collection the
+    names are array paths in the store (ADR 0048)."""
+
+    u: str
+    v: str
+    transform: str
+
+    @property
+    def arrays(self) -> tuple[str, str]:
+        return (self.u, self.v)
 
 
 class Variable(TimeStampedModel, ClusterableModel, Orderable):
@@ -296,6 +314,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         # ingested files; a harvested or recipe-written one has no bands to name.
         if self._reads_from_files():
             errors.update(self._sources_errors())
+        else:
+            errors.update(self._store_errors())
 
         if errors:
             raise ValidationError(errors)
@@ -391,9 +411,71 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                     )
         return errors
 
+    def _store_errors(self) -> dict:
+        """A Variable of a store collection (ADR 0048): one its feed maps shows
+        its array as it is, and a vector names two of the arrays the feed maps,
+        both stored in one unit — a speed's own. Of any other collection not
+        read from files there is nothing to check."""
+        try:
+            mapping = self.collection.store_mapping()
+        except ObjectDoesNotExist:
+            return {}
+        if mapping is None:
+            return {}
+        if self.pk is not None and any(variable.pk == self.pk for variable in mapping.values()):
+            if self.transform_type != self.TransformType.PASSTHROUGH:
+                return {
+                    "transform_type": _(
+                        "This Variable shows an array of the store as it is. Add a new Variable to compute "
+                        "something from it."
+                    )
+                }
+            return {}
+        if self.transform_type not in VECTOR_TRANSFORMS:
+            return {}
+        vector = self.vector_components
+        if vector is None:
+            missing = {"u_component", "v_component"} - {kind for kind, name in self._named_sources().items() if name}
+            return {"sources": f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."}
+        components = vector.arrays
+        unmapped = [name for name in components if name not in mapping]
+        if unmapped:
+            return {
+                "sources": _(
+                    "%(names)s is not an array this collection's harvest feed maps. Map it first, "
+                    "then name it here by its path in the store."
+                )
+                % {"names": ", ".join(unmapped)}
+            }
+        u, v = (mapping[name] for name in components)
+        if u.source_unit_id != v.source_unit_id:
+            return {
+                "sources": _("%(u)s and %(v)s are stored in different units, so they are not one vector's parts.")
+                % {"u": components[0], "v": components[1]}
+            }
+        if self.transform_type == self.TransformType.VECTOR_MAGNITUDE and self.source_unit_id != u.source_unit_id:
+            return {"source_unit": _("A speed is stored in its parts' unit: %(unit)s.") % {"unit": u.source_unit}}
+        return {}
+
     @property
     def is_derived(self):
         return self.transform_type != self.TransformType.PASSTHROUGH
+
+    def _named_sources(self) -> dict[str, str]:
+        """Each of its sources' kind (``primary``, ``u_component``, …) with the name it gives."""
+        return {block.block_type: block.value["source_name"] for block in self.sources or []}
+
+    @property
+    def vector_components(self) -> VectorComponents | None:
+        """Its u and v and which quantity of them it is, for a vector Variable
+        that names both; ``None`` for any other."""
+        if self.transform_type not in VECTOR_TRANSFORMS:
+            return None
+        named = self._named_sources()
+        u, v = named.get("u_component"), named.get("v_component")
+        if not u or not v:
+            return None
+        return VectorComponents(u=u, v=v, transform=self.transform_type)
 
     @cached_property
     def sources_param_list(self):
@@ -513,3 +595,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         """Set the range from served-unit numbers, stored in the source unit."""
         self.refresh_conversion()
         self.value_min, self.value_max = self.stored(value_min), self.stored(value_max)
+
+
+#: The transforms that compute a Variable from a u and a v.
+VECTOR_TRANSFORMS = (Variable.TransformType.VECTOR_MAGNITUDE, Variable.TransformType.VECTOR_DIRECTION)

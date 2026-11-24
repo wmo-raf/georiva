@@ -165,7 +165,10 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
             logger.warning("Harvest %s: store address %s refused — %s", feed.name, feed.store_href, refusal)
             raise RunStopped(f"store address refused — {refusal}")
     reach = _Reach.of(feed)
-    variables = feed.mapped_variables(collection)
+    by_array = feed.mapped_variables(collection)
+    # A store collection's vector Variables are indexed beside the arrays they are computed from (ADR 0048).
+    vectors = _vectors(collection, by_array) if reach.is_store else {}
+    variables = {**by_array, **vectors}
     mapped = {variable.pk for variable in variables.values()}
     # The closed runs every mapped Variable holds whole are not asked about again
     # — unless a row still names a store address the feed has since left.
@@ -176,7 +179,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
         if feed.is_store and described is None and undescribed:
             # The catalog was not reached: it was never asked what the store is (#685).
             raise RunStopped(f"source unavailable — {undescribed}")
-        listed, expected = _listed(feed, upstream, described, reach.window, list(variables), settled)
+        listed, expected = _listed(feed, upstream, described, reach.window, list(by_array), settled)
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable
     # An empty window is believed only of a collection something vouched for.
@@ -195,7 +198,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     # Each asset is located before anything looks at it: the href that is judged,
     # compared and stored is the one a reader will open (ADR 0042 §9).
     pins = PinnedBuckets(feed.pinned_buckets)
-    items = [_located(item, pins) for item in listed if reach.covers(item)]
+    items = [_with_vectors(_located(item, pins), vectors) for item in listed if reach.covers(item)]
     indexed = _Index(collection, reach)
     jurisdiction = _Jurisdiction(feed, collection, reach)
     created_items = []
@@ -240,7 +243,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
                 if place in judged:
                     continue
                 judged.add(place)
-                if mine.is_current(item, asset) or refused(key, asset, item):
+                if mine.is_current(item, asset, store=reach.is_store) or refused(key, asset, item):
                     continue
                 rewritten = jurisdiction.resync(mine, asset, item)
                 result.updated += rewritten
@@ -271,6 +274,8 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped, settled)
 
     if reach.is_store:
+        for _steps, by_array in expected.values():
+            by_array.update(_vector_steps(by_array, vectors))
         expected = {
             run: runs.Expected(steps, {variables[path].pk: n for path, n in by_array.items() if path in variables})
             for run, (steps, by_array) in expected.items()
@@ -407,6 +412,55 @@ def _listed(
 
 
 @dataclass(frozen=True)
+class VectorKey:
+    """Where a vector Variable stands among a harvest's asset keys: it is no
+    array of the store, so no path can be mistaken for it (ADR 0048)."""
+
+    variable_pk: int
+    u: str
+    v: str
+
+
+def _vectors(collection, by_array: dict) -> dict:
+    """The collection's vector Variables whose u and v are both mapped arrays, by :class:`VectorKey`.
+
+    One over an array the feed does not map is left out: its parts are not
+    asked of the store, so it would read as gone at every step."""
+    from georiva.core.models.variable import VECTOR_TRANSFORMS
+
+    found = {}
+    for variable in collection.variables.filter(transform_type__in=VECTOR_TRANSFORMS):
+        vector = variable.vector_components
+        if vector is None:
+            continue
+        if vector.u not in by_array or vector.v not in by_array:
+            logger.warning(
+                "Harvest of %s: vector Variable %s is over %r and %r, which the feed does not both map",
+                collection.slug,
+                variable.slug,
+                vector.u,
+                vector.v,
+            )
+            continue
+        found[VectorKey(variable.pk, vector.u, vector.v)] = variable
+    return found
+
+
+def _with_vectors(item: UpstreamItem, vectors: dict) -> UpstreamItem:
+    """`item` with a Store asset for each vector whose u and v it holds: the
+    store, and no array — its Variable names two (ADR 0048)."""
+    added = {
+        key: replace(item.assets[key.u], array="") for key in vectors if key.u in item.assets and key.v in item.assets
+    }
+    return replace(item, assets={**item.assets, **added}) if added else item
+
+
+def _vector_steps(by_array: dict, vectors: dict) -> dict:
+    """The steps of a run each vector is expected at: those both its arrays are."""
+    return {key: by_array[key.u] & by_array[key.v] for key in vectors if key.u in by_array and key.v in by_array}
+
+
+@dataclass(frozen=True)
 class _Reach:
     """What one harvest reads and judges: the kind of asset its feed writes,
     and the feed's window as it stood when the harvest began — a Rolling
@@ -523,15 +577,16 @@ class _Mine:
     href: str = ""
     store_array: str = ""
 
-    def is_current(self, item: UpstreamItem, asset: UpstreamAsset) -> bool:
+    def is_current(self, item: UpstreamItem, asset: UpstreamAsset, *, store: bool = False) -> bool:
         """Whether the upstream item's `updated` is the one this asset was last
         written from. An Upstream that changes an item and not its `updated`
         is not re-synced (ADR 0042, consequences).
 
         A step of a store has no `updated`. Its Store asset says where the
-        store is and which array it means, and is current while both still hold:
-        a store the feed now names at another address is followed there."""
-        if asset.array:
+        store is and which array it means — a vector one, none (ADR 0048) — and is
+        current while both still hold: a store the feed now names at another
+        address is followed there."""
+        if store or asset.array:
             return (self.href, self.store_array) == (asset.href, asset.array)
         return self.extra_fields.get(UPSTREAM_UPDATED) == _updated_stamp(item)
 

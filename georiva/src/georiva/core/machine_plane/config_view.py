@@ -73,7 +73,8 @@ index-free, being Titiler's rendering config and nothing more:
                  "served": {"vmin", "vmax", "unit", "stops": [[value, [r, g, b(, a)]], ...]}}
   Without one:  the same without ``colormap``, and ``served.stops`` empty.
   At a Remote timestep, also: {"remote_href": "https://…"}
-  At a Store asset's, also: {"remote_store": {"store", "array", "chunk_locations"}}
+  At a Store asset's, also: {"remote_store": {"store", "array", "chunk_locations", "allow_http"}}
+  — a vector Store asset's names {"vector": {"u", "v", "transform"}} in place of "array" (ADR 0048)
 """
 
 from datetime import UTC
