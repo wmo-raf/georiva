@@ -20,7 +20,9 @@ are served (ADR 0046 §15). ``under`` and ``over`` say whether each end is
 clamped, drawn with an arrow, or transparent, drawn without one.
 """
 
-from .colour_table import CLAMP, LINEAR, TOP_CODE, decode, encoding_curve, fraction, style_stops
+from georiva.core.models import OutOfRange
+
+from .colour_table import LINEAR, TOP_CODE, decode, encoding_curve, fraction, rgba, style_stops
 
 #: How many even steps a styleless Variable's bar is ticked at.
 STYLELESS_STEPS = 4
@@ -30,11 +32,6 @@ _PLACES = 6
 
 def _position(value: float) -> float:
     return round(value, _PLACES)
-
-
-def _rgba(colour) -> list:
-    colour = list(colour)
-    return colour + [255] if len(colour) == 3 else colour[:4]
 
 
 def _bands(stops: list):
@@ -47,7 +44,7 @@ def _bands(stops: list):
         return None
     bands = []
     for (low, low_colour), (high, high_colour) in zip(stops[::2], stops[1::2], strict=True):
-        if _rgba(low_colour) != _rgba(high_colour) or (bands and bands[-1][1] != low):
+        if rgba(low_colour) != rgba(high_colour) or (bands and bands[-1][1] != low):
             return None
         bands.append((low, high, low_colour))
     return bands
@@ -58,7 +55,7 @@ def _stepped(bands: list, served) -> dict:
     gradient, ticks = [], [[0.0, served(bands[0][0])]]
     for index, (_low, high, colour) in enumerate(bands):
         start, end = _position(index / count), _position((index + 1) / count)
-        gradient += [[start, _rgba(colour)], [end, _rgba(colour)]]
+        gradient += [[start, rgba(colour)], [end, rgba(colour)]]
         ticks.append([end, served(high)])
     return {"gradient": gradient, "ticks": ticks}
 
@@ -81,7 +78,7 @@ def _continuous(stops: list, vmin: float, vmax: float, curve: str, served) -> di
     def position(value):
         return _position((along(value) - low) / (high - low))
 
-    gradient = [[position(value), _rgba(colour)] for value, colour in stops]
+    gradient = [[position(value), rgba(colour)] for value, colour in stops]
     ticks = []
     for value, _colour in stops:
         tick = [position(value), served(value)]
@@ -111,7 +108,7 @@ def legend(variable, style=None) -> dict:
     curve = encoding_curve(variable)
     stops = sorted(style_stops(style), key=lambda stop: stop[0])
     if not stops:
-        return {**_styleless(vmin, vmax, curve, variable.served), "under": CLAMP, "over": CLAMP}
+        return {**_styleless(vmin, vmax, curve, variable.served), "under": OutOfRange.CLAMP, "over": OutOfRange.CLAMP}
     bands = _bands(stops)
     if bands:
         layout = _stepped(bands, variable.served)

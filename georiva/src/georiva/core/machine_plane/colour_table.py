@@ -27,6 +27,8 @@ or ``log`` Variable gets enough codes to be seen.
 
 import math
 
+from georiva.core.models import OutOfRange
+
 #: How many codes an encoded value can take: an 8-bit texture.
 CODES = 256
 TOP_CODE = CODES - 1
@@ -90,7 +92,8 @@ def decode(code: float, vmin: float, vmax: float, curve: str = LINEAR) -> float:
     return vmin + t * (vmax - vmin)
 
 
-def _rgba(colour) -> list:
+def rgba(colour) -> list:
+    """``colour`` as four channels: ``[r, g, b]`` gains an opaque alpha."""
     colour = list(colour)
     return colour + [255] if len(colour) == 3 else colour[:4]
 
@@ -102,20 +105,18 @@ def colour_at(stops: list, value: float) -> list:
     two stops share, a stepped style's boundary, the lower band's colour wins.
     """
     if value <= stops[0][0]:
-        return _rgba(stops[0][1])
+        return rgba(stops[0][1])
     for (low, low_colour), (high, high_colour) in zip(stops, stops[1:], strict=False):
         if value <= high:
             span = high - low
             t = (value - low) / span if span > 0 else 0.0
-            a, b = _rgba(low_colour), _rgba(high_colour)
+            a, b = rgba(low_colour), rgba(high_colour)
             return [round(a[k] + t * (b[k] - a[k])) for k in range(4)]
-    return _rgba(stops[-1][1])
+    return rgba(stops[-1][1])
 
 
 #: An undrawn code: what a transparent under or over gives (#788).
 TRANSPARENT = [0, 0, 0, 0]
-
-CLAMP = "clamp"
 
 
 def _is_under(code: int, first: float, vmin: float, vmax: float, curve: str) -> bool:
@@ -143,7 +144,12 @@ def _is_over(code: int, last: float, vmin: float, vmax: float, curve: str) -> bo
 
 
 def table_from_stops(
-    stops: list, vmin: float, vmax: float, under: str = CLAMP, over: str = CLAMP, curve: str = LINEAR
+    stops: list,
+    vmin: float,
+    vmax: float,
+    under: str = OutOfRange.CLAMP,
+    over: str = OutOfRange.CLAMP,
+    curve: str = LINEAR,
 ) -> list:
     """The 256-entry table of ``[[value, [r, g, b(, a)]], ...]`` stops over ``vmin``…``vmax``,
     each code decoded through ``curve``.
@@ -157,13 +163,13 @@ def table_from_stops(
         return [[code, code, code, 255] for code in range(CODES)]
     stops = sorted(stops, key=lambda stop: stop[0])
     if vmax == vmin:
-        return [_rgba(stops[0][1])] * CODES
+        return [rgba(stops[0][1])] * CODES
     first, last = stops[0][0], stops[-1][0]
     table = []
     for code in range(CODES):
-        if under != CLAMP and _is_under(code, first, vmin, vmax, curve):
+        if under != OutOfRange.CLAMP and _is_under(code, first, vmin, vmax, curve):
             table.append(list(TRANSPARENT))
-        elif over != CLAMP and _is_over(code, last, vmin, vmax, curve):
+        elif over != OutOfRange.CLAMP and _is_over(code, last, vmin, vmax, curve):
             table.append(list(TRANSPARENT))
         else:
             table.append(colour_at(stops, decode(code, vmin, vmax, curve)))
