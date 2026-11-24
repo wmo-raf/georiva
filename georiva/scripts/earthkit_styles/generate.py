@@ -111,8 +111,8 @@ def convert(entry, style, unit_strings, units):
     if style.get("type") != "Style":
         raise Dropped(f"a {style.get('type')} style, not a shaded one")
     levels = parse_levels(style.get("levels"))
-    if any(b <= a for a, b in zip(levels, levels[1:], strict=False)) or len(levels) < 2:
-        raise Dropped("levels are not strictly ascending boundaries of at least one band")
+    if any(b <= a for a, b in zip(levels, levels[1:], strict=False)) or len(levels) < 3:
+        raise Dropped("levels are not strictly ascending boundaries of at least two bands")
     extend = style.get("extend")
     colours = flatten_colours(style.get("colors"), len(levels) - 1, extend)
 
