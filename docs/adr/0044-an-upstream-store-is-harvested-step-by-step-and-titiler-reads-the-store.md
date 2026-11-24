@@ -11,6 +11,9 @@ Revises ADR 0043 §9 for stores only.
 Amended after a second real store was read (ECMWF AIFS Single, virtual): §11 now says which kinds of place a store's
 data may be pinned in, and what happens when an operator confirms some and not others. Nothing is reversed.
 
+Amended when the first time-invariant field was mapped (wmo-raf/georiva#782): §6 now expects a Fixed field, one
+the operator declares the store holds at a run's first step only, at that step alone. Nothing is reversed.
+
 Amended after the field trial against dynamical.org's GFS store (wmo-raf/georiva#665): §6 now counts a run's expected
 steps per array, because a field defined over the interval before each step is never held at a run's first step;
 the measured costs
@@ -105,6 +108,16 @@ the store, and Titiler draws maps by reading the store itself.**
    per-array list of steps, so an array is expected at the run's expected steps **from its own first Held step
    on** (wmo-raf/georiva#681). That needs nothing more of the store than the listing already reads, works on a
    store's first run, and holds for any field that starts late, whatever kind it is.
+
+   **A Fixed field is expected at its first Held step only** (wmo-raf/georiva#782). A time-invariant field —
+   orography, a land–sea mask — sits on the run's whole step axis like every other array, but the store writes its
+   first step alone. Counted from its first Held step on, it is expected at all of them, and the run never closes.
+   The store says so nowhere a harvest can read: `expected_forecast_length` is the run's, not the array's, and the
+   only sign is a free-text comment. So the operator declares it, on the Variable mapping row (`fixed_field`), and
+   the Harvest Feed Wizard proposes it when the run it samples holds the array at its first step only while another
+   array of that run holds more. Not inferred at harvest time: an array that is late would read as one that ends at
+   its first step, and its run would close before it arrived. A Fixed field held at later steps too gets a row at
+   each, and is still expected at its first only.
 
    **Which steps are held, not how many** (wmo-raf/georiva#672). A run is complete when each mapped Variable has a
    row at every one of its array's expected lead times. A step the store holds past the run's
