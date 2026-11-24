@@ -79,6 +79,24 @@ def encode(value: float, vmin: float, vmax: float, curve: str = LINEAR) -> int:
     return int(fraction(value, vmin, vmax, curve) * TOP_CODE)
 
 
+def render_expression(vmin: float, vmax: float, curve: str = LINEAR) -> str | None:
+    """:func:`fraction` as a Titiler ``expression`` over band ``b1``, or None for ``linear``.
+
+    What a STAC Render entry carries so an outside client encodes as Titiler
+    does: the expression takes a value to ``f(t)`` and a ``rescale`` of 0–1
+    then makes it ``int(255 · f(t))``. The value is clamped to the range first,
+    so nothing outside it becomes NaN under ``sqrt`` or ``log``; ``where``, not
+    ``clip``, because rio-tiler evaluates with numexpr, which has no ``clip``.
+    """
+    if curve == LINEAR:
+        return None
+    lo, hi = repr(float(vmin)), repr(float(vmax))
+    clamped = f"where(b1 < {lo}, {lo}, where(b1 > {hi}, {hi}, b1))"
+    if curve == LOG:
+        return f"log({clamped} / {lo}) / log({hi} / {lo})"
+    return f"sqrt(({clamped} - {lo}) / ({hi} - {lo}))"
+
+
 def decode(code: float, vmin: float, vmax: float, curve: str = LINEAR) -> float:
     """The value a code stands for over ``vmin``…``vmax``: :func:`encode`'s inverse through ``curve``."""
     fraction = code / TOP_CODE

@@ -64,7 +64,9 @@ A linear encoding starves uneven bands. Over 0–200 mm one code is about 0.8 mm
 - `sqrt` and `log` Variables look different after this ships, with more contrast at the low end. This is intended.
 - ADR 0022's #382 consequence, "a log-declared variable renders linearly on both sides", no longer holds: both sides
   now encode and decode through the curve.
-- A STAC Render extension entry still says `rescale` + `colormap`. A generic Titiler client applying it to a `sqrt`
-  or `log` Variable encodes linearly and so colours it with the wrong entries; GeoRiva's own Titiler does not. An
-  `expression` carrying the curve is a possible follow-up.
+- A STAC Render extension entry carries the curve too. For a `sqrt` or `log` Variable it says `expression` +
+  `rescale: [[0, 1]]` + `colormap`: the expression clamps band `b1` to the stored range and takes it to `f(t)`
+  (`where`, not `clip`, as rio-tiler evaluates with numexpr), and the rescale makes that `int(255 · f(t))`. A generic
+  Titiler client following the entry so picks the code GeoRiva's own Titiler does. A `linear` Variable's entry is
+  unchanged: `rescale` over its range, no expression.
 - Additional curves (symlog, power γ) and float textures stay out of scope (#784).

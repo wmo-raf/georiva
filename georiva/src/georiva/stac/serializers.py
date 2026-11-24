@@ -24,7 +24,7 @@ from datetime import timedelta
 from rest_framework import serializers
 
 from georiva.core.machine_plane import titiler_encoded_preview_url, titiler_preview_url
-from georiva.core.machine_plane.colour_table import as_colormap, colour_table
+from georiva.core.machine_plane.colour_table import as_colormap, colour_table, encoding_curve, render_expression
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Variable, visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
@@ -46,13 +46,20 @@ def build_style_renders(variable, *, with_colormap: bool) -> dict:
     and left off items, which list by the hundred; the render name is the
     join back to the collection's entry.
     """
+    # A sqrt or log Variable's codes follow its curve (#787): the entry says so
+    # with an expression to 0–1, so a client following it encodes as Titiler does.
+    has_range = variable.value_min is not None and variable.value_max is not None
+    expression = has_range and render_expression(variable.value_min, variable.value_max, encoding_curve(variable))
+    rescale = [[0.0, 1.0]] if expression else [[variable.value_min, variable.value_max]]
     renders = {}
     for style in variable.styles.all():
         entry = {
             "title": style.name,
             "assets": [f"{variable.slug}_cog"],
-            "rescale": [[variable.value_min, variable.value_max]],
+            "rescale": rescale,
         }
+        if expression:
+            entry["expression"] = expression
         if with_colormap:
             # The style's colour table, as Titiler and the browser colour it (#785).
             entry["colormap"] = as_colormap(colour_table(variable, style))

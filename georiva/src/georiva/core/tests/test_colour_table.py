@@ -10,6 +10,7 @@ at the render-payload seam.
 import json
 from datetime import UTC, datetime
 
+import numpy
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -128,6 +129,34 @@ class ColourTableTests(TestCase):
         for curve in CURVES:
             with self.subTest(curve=curve):
                 self.assert_renderers_agree(self.curved(variable, curve))
+
+    def render_client_code(self, entry, value):
+        """The code a generic Titiler client draws ``value`` as, following a
+        STAC Render ``entry``: its ``expression`` over the asset's band ``b1``
+        (numexpr's ``where``, ``sqrt`` and ``log``, as rio-tiler evaluates it),
+        then a linear ``rescale`` clipped and truncated to 0–255."""
+        x = numpy.array([value], dtype="float64")
+        if expression := entry.get("expression"):
+            names = {"b1": x, "where": numpy.where, "sqrt": numpy.sqrt, "log": numpy.log}
+            x = eval(expression, {"__builtins__": {}}, names)  # noqa: S307 — our own string, in a test
+        ((low, high),) = entry["rescale"]
+        x = numpy.clip(x, low, high)
+        return int(((x - low) / (high - low) * 255)[0])
+
+    def test_a_generic_client_following_a_stac_render_encodes_as_titiler_does(self):
+        """A Render entry is a recipe: an outside client following it picks the
+        code Titiler would, whatever the curve (#787)."""
+        variable = self.style(CONTINUOUS)
+        for curve in CURVES:
+            curved = self.curved(variable, curve)
+            entry = build_style_renders(curved, with_colormap=True)["style"]
+            payload = build_variable_payload(curved)
+            for value in probes():
+                with self.subTest(curve=curve, value=value):
+                    self.assertEqual(
+                        self.render_client_code(entry, value),
+                        encode(value, payload["vmin"], payload["vmax"], payload["curve"]),
+                    )
 
     def test_titiler_and_the_browser_agree_on_a_styleless_variable(self):
         for curve in CURVES:
