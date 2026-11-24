@@ -104,6 +104,21 @@ BRANCH = "main"
 
 
 @dataclass(frozen=True)
+class Vector:
+    """What a vector field (ADR 0048) is computed from: its eastward (``u``) and
+    northward (``v``) arrays, and which of :data:`VECTOR_TRANSFORMS` it is.
+    Django's ``VectorComponents``, as a published entry names it."""
+
+    u: str
+    v: str
+    transform: str
+
+    @property
+    def arrays(self) -> tuple[str, str]:
+        return (self.u, self.v)
+
+
+@dataclass(frozen=True)
 class StoreSlice:
     """One field of an Upstream store: what a Store asset at one timestep names.
 
@@ -113,9 +128,8 @@ class StoreSlice:
     requests naming the same pins share one open store. ``allow_http`` is the
     feed's word on whether a plain ``http`` store may be opened.
 
-    A vector field (ADR 0048) is computed from two arrays at the same step:
-    ``array`` is its eastward part, ``v_array`` its northward one, and
-    ``transform`` which of :data:`VECTOR_TRANSFORMS` it is.
+    A vector field (ADR 0048) names no array: ``vector`` names the two it is
+    computed from at the same step.
     """
 
     store: str
@@ -124,20 +138,18 @@ class StoreSlice:
     time: datetime
     reftime: datetime | None = None
     allow_http: bool = False
-    v_array: str = ""
-    transform: str = ""
+    vector: Vector | None = None
 
     @classmethod
     def published(cls, entry: dict, time: datetime, reftime: datetime | None) -> StoreSlice:
         """The slice a published entry names at this timestep. Raises
         :class:`StoreMisdescribed` for an entry that is not Django's shape."""
         store, arrays, chunk_locations, allow_http = published_store(entry)
-        transform = entry["vector"]["transform"] if len(arrays) == 2 else ""
+        vector = Vector(*arrays, transform=entry["vector"]["transform"]) if len(arrays) == 2 else None
         return cls(
             store=store,
-            array=arrays[0],
-            v_array=arrays[1] if transform else "",
-            transform=transform,
+            array="" if vector else arrays[0],
+            vector=vector,
             chunk_locations=chunk_locations,
             time=time,
             reftime=reftime,
@@ -146,12 +158,12 @@ class StoreSlice:
 
     def components(self) -> tuple[StoreSlice, StoreSlice]:
         """The u and v fields a vector field is computed from."""
-        u = replace(self, v_array="", transform="")
-        return u, replace(u, array=self.v_array)
+        return tuple(replace(self, array=array, vector=None) for array in self.vector.arrays)
 
     def __str__(self) -> str:
         at = self.time.isoformat() if self.reftime is None else f"{self.reftime.isoformat()}+{self.time.isoformat()}"
-        arrays = f"{self.transform}({self.array},{self.v_array})" if self.transform else self.array
+        vector = self.vector
+        arrays = f"{vector.transform}({vector.u},{vector.v})" if vector else self.array
         return f"{self.store}#{arrays}@{at}"
 
 
@@ -165,7 +177,9 @@ def is_store_entry(value: str) -> bool:
 
 #: What a vector field may be computed as, from its u and v (ADR 0048). Django's
 #: ``Variable.TransformType`` values for them.
-VECTOR_TRANSFORMS = ("vector_magnitude", "vector_direction")
+VECTOR_MAGNITUDE = "vector_magnitude"
+VECTOR_DIRECTION = "vector_direction"
+VECTOR_TRANSFORMS = (VECTOR_MAGNITUDE, VECTOR_DIRECTION)
 
 
 def published_store(entry) -> tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], bool]:
@@ -705,7 +719,7 @@ def forget_all() -> None:
 def read_field(target: StoreSlice) -> Field:
     """The field ``target`` names: kept by this process, or decoded now and kept.
     A vector field is computed from its u and v."""
-    return _fields.kept_or_read(target, _computed if target.transform else _decode)
+    return _fields.kept_or_read(target, _computed if target.vector else _decode)
 
 
 def _computed(target: StoreSlice) -> Field:
@@ -731,9 +745,9 @@ def _computed(target: StoreSlice) -> Field:
         v.x_resolution,
         v.y_resolution,
     ):
-        raise StoreMisdescribed(f"The upstream arrays “{target.array}” and “{target.v_array}” are not on one grid.")
+        raise StoreMisdescribed(f"The upstream arrays “{target.vector.u}” and “{target.vector.v}” are not on one grid.")
     with np.errstate(invalid="ignore"):
-        if target.transform == "vector_magnitude":
+        if target.vector.transform == VECTOR_MAGNITUDE:
             values = np.hypot(u.values, v.values)
         else:
             values = np.mod(np.degrees(np.arctan2(u.values, v.values)) + 180.0, 360.0)

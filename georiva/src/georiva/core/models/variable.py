@@ -433,11 +433,11 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
             return {}
         if self.transform_type not in VECTOR_TRANSFORMS:
             return {}
-        named = {block.block_type: block.value["source_name"] for block in self.sources or []}
-        missing = {"u_component", "v_component"} - set(named)
-        if missing:
+        vector = self.vector_components
+        if vector is None:
+            missing = {"u_component", "v_component"} - {kind for kind, name in self._named_sources().items() if name}
             return {"sources": f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."}
-        components = [named["u_component"], named["v_component"]]
+        components = vector.arrays
         unmapped = [name for name in components if name not in mapping]
         if unmapped:
             return {
@@ -461,13 +461,17 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def is_derived(self):
         return self.transform_type != self.TransformType.PASSTHROUGH
 
+    def _named_sources(self) -> dict[str, str]:
+        """Each of its sources' kind (``primary``, ``u_component``, …) with the name it gives."""
+        return {block.block_type: block.value["source_name"] for block in self.sources or []}
+
     @property
     def vector_components(self) -> VectorComponents | None:
         """Its u and v and which quantity of them it is, for a vector Variable
         that names both; ``None`` for any other."""
-        if self.transform_type not in VECTOR_TRANSFORMS or not self.sources:
+        if self.transform_type not in VECTOR_TRANSFORMS:
             return None
-        named = {block.block_type: block.value["source_name"] for block in self.sources}
+        named = self._named_sources()
         u, v = named.get("u_component"), named.get("v_component")
         if not u or not v:
             return None

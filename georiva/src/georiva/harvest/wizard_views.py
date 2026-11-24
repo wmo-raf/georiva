@@ -897,11 +897,16 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
 
 # ── Step 4, for an Upstream store: wind speed and direction over a u and a v (ADR 0048) ──
 
-#: What a vector over two fields can be shown as: the word for it, and the transform that computes it.
-_VECTOR_KINDS = (
-    ("speed", "vector_magnitude"),
-    ("direction", "vector_direction"),
-)
+
+def _vector_kinds() -> tuple[tuple[str, str], ...]:
+    """What a vector over two fields can be shown as: the word for it, and the transform that computes it."""
+    from georiva.core.models import Variable
+
+    return (
+        ("speed", Variable.TransformType.VECTOR_MAGNITUDE),
+        ("direction", Variable.TransformType.VECTOR_DIRECTION),
+    )
+
 
 #: A path's word that names one part of a vector: `u` or `v`, with a height before or after (`10u`, `u10`).
 _PART = re.compile(r"^(\d*)([uU])(\d*)$")
@@ -929,7 +934,7 @@ def _vector_pairs(fields: list[dict]) -> list[dict]:
             before, _part, after = found.groups()
             named = {
                 kind: "".join([*parts[:at], "_".join(filter(None, [before, kind, after])), *parts[at + 1 :]])
-                for kind, _transform in _VECTOR_KINDS
+                for kind, _transform in _vector_kinds()
             }
             pairs.append({"index": field["index"], "u": field["path"], "v": v_path, "named": named})
             break
@@ -943,7 +948,7 @@ def _offered_vectors(pairs: list[dict], earlier: list[dict], posted) -> list[dic
     offered = []
     for pair in pairs:
         offers = []
-        for kind, transform in _VECTOR_KINDS:
+        for kind, transform in _vector_kinds():
             name = f"{kind}_{pair['index']}"
             offers.append(
                 {
@@ -968,7 +973,7 @@ def _chosen_vectors(pairs: list[dict], posted) -> list[dict]:
             "name": _spelt(pair["named"][kind]),
         }
         for pair in pairs
-        for kind, transform in _VECTOR_KINDS
+        for kind, transform in _vector_kinds()
         if posted.get(f"{kind}_{pair['index']}")
     ]
 
@@ -992,7 +997,7 @@ def _planned_vectors(session: dict) -> list[PlannedVariable]:
     """The vector Variables chosen in step 4. A speed is in its parts' units and
     coloured from calm to the furthest either part reaches; a direction is in
     degrees, all the way round."""
-    from georiva.core.models import Unit
+    from georiva.core.models import Unit, Variable
 
     parts = {field["key"]: field for field in session.get("chosen") or []}
     planned = []
@@ -1000,7 +1005,7 @@ def _planned_vectors(session: dict) -> list[PlannedVariable]:
         u, v = parts.get(vector["u"]), parts.get(vector["v"])
         if u is None or v is None:
             continue
-        if vector["transform"] == "vector_magnitude":
+        if vector["transform"] == Variable.TransformType.VECTOR_MAGNITUDE:
             reach = max(abs(bound) for part in (u, v) for bound in (part["value_min"], part["value_max"]))
             units = {"unit_id": u["unit_id"], "source_unit_id": u["source_unit_id"], "value_max": reach}
         else:

@@ -44,7 +44,8 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   `values.readable(assets)` narrows a queryset to the assets it can read (COG
 │   │                         #   or Store asset) — callers ask it, never filter on `format` themselves;
 │   │                         #   store.py reads a Store asset: its store opened once per session at one
-│   │                         #   snapshot, with its feed's Pinned locations only (ADR 0044 §11, ADR 0046 §12).
+│   │                         #   snapshot, with its feed's Pinned locations only (ADR 0044 §11, ADR 0046 §12);
+│   │                         #   a vector Store asset (`asset.store_vector`) is computed from its u and v (ADR 0048).
 │   │                         #   Every value reader goes through it; core/tests/test_values_guard.py fails
 │   │                         #   any other rasterio.open / xarray.open_* / read_bytes outside its allow-list
 │   ├── derived_products/     # The derived-product contract (ADR 0008/0009)
@@ -88,7 +89,8 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   again, reopened by a re-check ("Run now"), forgotten once aged out (ADR 0044 §6)
 │   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows. `_listed` is the one
 │   │                         #   place it asks which shape its Upstream is: a store's Held steps become items, each
-│   │                         #   with a Store asset (`format=ZARR`, `store_array`) per array held there (ADR 0044 §6)
+│   │                         #   with a Store asset (`format=ZARR`, `store_array`) per array held there (ADR 0044 §6),
+│   │                         #   and one, naming no array, per vector Variable whose u and v are both held (ADR 0048)
 │   ├── materialize.py        # A feed's materialization window: each harvest sends its in-window Remote COGs to
 │   │                         #   `georiva-ingestion`, which fetches them past the allowlist and rewrites the same
 │   │                         #   Asset local via `AssetMaterializer`; it leaves the Jurisdiction (ADR 0042 §8)
@@ -123,7 +125,8 @@ georiva/src/georiva/          # Main Django application
 **Other top-level directories:**
 
 - `titiler-app/` — Custom Titiler tile server (FastAPI); `app/store.py` reads a Store asset's field from its
-  Upstream store, following only the feed's pinned places (ADR 0044 §9, §11); `app/warm.py` opens each published
+  Upstream store, following only the feed's pinned places (ADR 0044 §9, §11), and computes a vector one from its
+  u and v (ADR 0048); `app/warm.py` opens each published
   store as a worker starts, in the background (#684; `GEORIVA_STORE_WARM`)
 - `source-plugin-boilerplate/` — Cookiecutter template for new source plugins
 - `docs/` — Architecture docs, plugin guides, data model guide

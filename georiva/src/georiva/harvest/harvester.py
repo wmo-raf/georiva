@@ -165,10 +165,10 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
             logger.warning("Harvest %s: store address %s refused — %s", feed.name, feed.store_href, refusal)
             raise RunStopped(f"store address refused — {refusal}")
     reach = _Reach.of(feed)
-    arrays = feed.mapped_variables(collection)
+    by_array = feed.mapped_variables(collection)
     # A store collection's vector Variables are indexed beside the arrays they are computed from (ADR 0048).
-    vectors = _vectors(collection, arrays) if reach.is_store else {}
-    variables = {**arrays, **vectors}
+    vectors = _vectors(collection, by_array) if reach.is_store else {}
+    variables = {**by_array, **vectors}
     mapped = {variable.pk for variable in variables.values()}
     # The closed runs every mapped Variable holds whole are not asked about again
     # — unless a row still names a store address the feed has since left.
@@ -179,7 +179,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
         if feed.is_store and described is None and undescribed:
             # The catalog was not reached: it was never asked what the store is (#685).
             raise RunStopped(f"source unavailable — {undescribed}")
-        listed, expected = _listed(feed, upstream, described, reach.window, list(arrays), settled)
+        listed, expected = _listed(feed, upstream, described, reach.window, list(by_array), settled)
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable
     # An empty window is believed only of a collection something vouched for.
@@ -421,7 +421,7 @@ class VectorKey:
     v: str
 
 
-def _vectors(collection, arrays: dict) -> dict:
+def _vectors(collection, by_array: dict) -> dict:
     """The collection's vector Variables whose u and v are both mapped arrays, by :class:`VectorKey`.
 
     One over an array the feed does not map is left out: its parts are not
@@ -433,7 +433,7 @@ def _vectors(collection, arrays: dict) -> dict:
         vector = variable.vector_components
         if vector is None:
             continue
-        if vector.u not in arrays or vector.v not in arrays:
+        if vector.u not in by_array or vector.v not in by_array:
             logger.warning(
                 "Harvest of %s: vector Variable %s is over %r and %r, which the feed does not both map",
                 collection.slug,

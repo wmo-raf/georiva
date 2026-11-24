@@ -117,7 +117,7 @@ class STACAssetSerializer(serializers.Serializer):
         # A vector Store asset names no array: the two it is computed from are
         # named in its place, with which quantity of them it is (ADR 0048).
         if instance.location.is_store:
-            vector = instance.variable.vector_components if not instance.store_array else None
+            vector = instance.store_vector
             if vector is None:
                 data["georiva:array"] = instance.store_array
             else:

@@ -59,10 +59,14 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from django.db.models import Q
 
 from georiva.core.storage.asset_location import AssetLocation, remote_q, store_q
+
+if TYPE_CHECKING:
+    from georiva.core.models.variable import VectorComponents
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +113,9 @@ def _published_assets():
     return Asset.objects.filter((remote_q() & Q(format=Asset.Format.COG)) | store_q())
 
 
-def store_entry(href: str, array: str, chunk_locations: dict, allow_http: bool = False, vector=None) -> dict:
+def store_entry(
+    href: str, array: str, chunk_locations: dict, allow_http: bool = False, vector: VectorComponents | None = None
+) -> dict:
     """What Titiler is told of a Store asset: the store, the array, where the
     store's data may be followed (ADR 0044 §9, §11), and whether a plain
     ``http`` store may be opened at all (ADR 0042 §9). Titiler reads the same
@@ -128,12 +134,12 @@ def store_entry(href: str, array: str, chunk_locations: dict, allow_http: bool =
     return entry
 
 
-def _store_value(href: str, array: str, access: StoreAccess, vector=None) -> str:
+def _store_value(href: str, array: str, access: StoreAccess, vector: VectorComponents | None = None) -> str:
     """A Store asset's value in the hash: its :func:`store_entry` as JSON."""
     return json.dumps(store_entry(href, array, access.chunk_locations, access.allow_http, vector))
 
 
-def _vectors_of(variable_pks) -> dict:
+def _vectors_of(variable_pks) -> dict[int, VectorComponents]:
     """The u and v each of these Variables is computed from, for those that are vectors (ADR 0048)."""
     from georiva.core.models import Variable
     from georiva.core.models.variable import VECTOR_TRANSFORMS
@@ -331,8 +337,7 @@ def publish_asset(asset) -> None:
     location = asset.location
     if location.is_store:
         access = feed_store_access([asset.harvested_by_id]).get(asset.harvested_by_id, NO_FEED)
-        vector = asset.variable.vector_components if not asset.store_array else None
-        _write_timestep(asset, _store_value(asset.href, asset.store_array, access, vector))
+        _write_timestep(asset, _store_value(asset.href, asset.store_array, access, asset.store_vector))
     elif asset.format != Asset.Format.COG:
         return
     elif location.is_remote:

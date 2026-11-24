@@ -38,9 +38,13 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import numpy as np
 from affine import Affine
+
+if TYPE_CHECKING:
+    from georiva.core.models.variable import VectorComponents
 
 #: The branch a store is read at: its tip, as the session opens it (ADR 0044 §10).
 BRANCH = "main"
@@ -103,10 +107,9 @@ class StoreSlice:
     places its data is followed into. ``allow_http`` is the feed's word on
     whether a plain ``http`` store may be opened at all.
 
-    A vector field (ADR 0048) is computed from two arrays: ``array`` is its
-    eastward part, ``v_array`` its northward one, and ``transform`` which
-    quantity of them it is — a ``Variable.TransformType``. Both are read at the
-    same step from the same opening of the store.
+    A vector field (ADR 0048) names no array: ``vector`` names the two it is
+    computed from and which quantity of them it is. Both are read at the same
+    step from the same opening of the store.
     """
 
     store: str
@@ -115,8 +118,7 @@ class StoreSlice:
     reference_time: datetime | None = None
     chunk_locations: Mapping[str, str] = field(default_factory=dict, hash=False, compare=False)
     allow_http: bool = False
-    v_array: str = ""
-    transform: str = ""
+    vector: VectorComponents | None = None
 
     @property
     def key(self) -> tuple:
@@ -124,22 +126,16 @@ class StoreSlice:
         return (
             self.store,
             self.array,
-            self.v_array,
-            self.transform,
+            self.vector,
             self.time,
             self.reference_time,
             self.pins,
             self.allow_http,
         )
 
-    @property
-    def is_vector(self) -> bool:
-        return bool(self.transform)
-
     def components(self) -> tuple[StoreSlice, StoreSlice]:
         """The u and v fields a vector field is computed from."""
-        u = replace(self, v_array="", transform="")
-        return u, replace(u, array=self.v_array)
+        return tuple(replace(self, array=array, vector=None) for array in self.vector.arrays)
 
     @property
     def pins(self) -> tuple[tuple[str, str], ...]:
@@ -163,10 +159,7 @@ def store_slice(asset) -> StoreSlice:
         allow_http=access.allow_http,
     )
     # A vector Variable's asset names no array: its Variable names two (ADR 0048).
-    vector = asset.variable.vector_components if not asset.store_array else None
-    if vector is None:
-        return wanted
-    return replace(wanted, array=vector.u, v_array=vector.v, transform=vector.transform)
+    return replace(wanted, vector=asset.store_vector)
 
 
 def repository_storage(href: str, *, allow_http: bool = False, timeout: str = READ_TIMEOUT):
@@ -223,7 +216,7 @@ class OpenStores:
                 if held is not None:
                     self._fields.move_to_end(key)
                     return held
-            decoded = self._computed(wanted) if wanted.is_vector else self._store(wanted).field(wanted)
+            decoded = self._computed(wanted) if wanted.vector else self._store(wanted).field(wanted)
             with self._lock:
                 self._fields[key] = decoded
                 while len(self._fields) > HELD_FIELDS:
@@ -233,12 +226,14 @@ class OpenStores:
 
     def _computed(self, wanted: StoreSlice) -> _ArraySource:
         """A vector field, from its u and v as held (ADR 0048)."""
+        from georiva.core.models import Variable
         from georiva.geoprocessing.wind import wind_from_direction, wind_speed
 
+        vector = wanted.vector
         u, v = (self.source(part) for part in wanted.components())
         if u.transform != v.transform or u.shape != v.shape:
-            raise StoreUnreadable(f"The upstream arrays “{wanted.array}” and “{wanted.v_array}” are not on one grid.")
-        compute = wind_speed if wanted.transform == "vector_magnitude" else wind_from_direction
+            raise StoreUnreadable(f"The upstream arrays “{vector.u}” and “{vector.v}” are not on one grid.")
+        compute = wind_speed if vector.transform == Variable.TransformType.VECTOR_MAGNITUDE else wind_from_direction
         with np.errstate(invalid="ignore"):
             data = np.asarray(compute(u.read(1), v.read(1)), dtype=np.float32)
         return _ArraySource(data, u.transform)
