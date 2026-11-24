@@ -14,6 +14,7 @@ Three seams:
   contract the page hands it.
 """
 
+import json
 from datetime import UTC, datetime
 
 from django.core.exceptions import ValidationError
@@ -624,6 +625,46 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
             {"ramp": str(self.org_ramp.pk), "mode": "continuous"},
         )
         self.assertEqual(response.status_code, 404)
+
+
+class PreviewColourTableTests(StylingSurfaceTestCase):
+    """The map preview colours unsaved stops with the colour table they would
+    get once saved (#785), asked of the server rather than worked out in the page."""
+
+    STOPS = [
+        {"value": 0.0, "color": "#2166ac"},
+        {"value": 20.0, "color": "#2166ac"},
+        {"value": 20.0, "color": "#b2182b"},
+        {"value": 50.0, "color": "#b2182b"},
+    ]
+
+    @property
+    def colours_url(self):
+        return reverse("variable_style_colours", args=[self.collection.pk, self.variable.pk])
+
+    def test_unsaved_stops_get_the_table_titiler_colours_them_with_once_saved(self):
+        from georiva.core.machine_plane.palette_cache import build_variable_payload
+
+        response = self.client.get(self.colours_url, {"stops": json.dumps(self.STOPS)})
+        self.assertEqual(response.status_code, 200)
+
+        VariableStyle.objects.create(variable=self.variable, name="S", slug="s", is_default=True, stops=self.STOPS)
+        colormap = build_variable_payload(Variable.objects.get(pk=self.variable.pk))["colormap"]
+        self.assertEqual(response.json()["colourTable"], [colormap[code] for code in range(256)])
+
+    def test_no_stops_is_grayscale(self):
+        response = self.client.get(self.colours_url, {"stops": "[]"})
+        self.assertEqual(response.json()["colourTable"][128], [128, 128, 128, 255])
+
+    def test_malformed_stops_are_refused(self):
+        for stops in ("not json", '[{"value": "x", "color": "#fff"}]', '[{"value": 1, "color": "red"}]'):
+            with self.subTest(stops=stops):
+                self.assertEqual(self.client.get(self.colours_url, {"stops": stops}).status_code, 400)
+
+    def test_another_organisations_variable_is_not_found(self):
+        foreign = make_org_tree(self.other_org)
+        url = reverse("variable_style_colours", args=[foreign["collection"].pk, foreign["variable"].pk])
+        self.assertEqual(self.client.get(url, {"stops": "[]"}).status_code, 404)
 
 
 class StyleSetManagementTests(StylingSurfaceTestCase):

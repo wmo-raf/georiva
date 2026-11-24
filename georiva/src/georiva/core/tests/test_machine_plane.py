@@ -44,8 +44,8 @@ from georiva.core.machine_plane import (
     wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
+from georiva.core.machine_plane.colour_table import as_colormap, table_from_stops
 from georiva.core.machine_plane.palette_cache import (
-    build_colormap_256,
     build_variable_payload,
     get_palette_cache_key,
     variable_cache_key,
@@ -563,10 +563,12 @@ class StyledPayloadTests(TestCase):
             "scale": 1.0,
             "offset": 0.0,
             "unit": self.variable.unit.symbol,
-            "colormap": build_colormap_256(
-                [[0.0, [0, 0, 0]], [50.0, [255, 0, 0]]],
-                self.variable.value_min,
-                self.variable.value_max,
+            "colormap": as_colormap(
+                table_from_stops(
+                    [[0.0, [0, 0, 0]], [50.0, [255, 0, 0]]],
+                    self.variable.value_min,
+                    self.variable.value_max,
+                )
             ),
         }
         payload = build_variable_payload(self.variable)

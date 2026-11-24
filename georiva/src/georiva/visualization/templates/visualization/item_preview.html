@@ -749,6 +749,7 @@
                                  data-asset-name="{{ asset.variable.name }}"
                                  data-asset-palette='{{ asset.render_contract.palette|to_json }}'
                                  data-asset-image-unscale='{{ asset.render_contract.image_unscale|to_json }}'
+                                 data-asset-colour-table='{{ asset.render_contract.colour_table|to_json }}'
                                  data-asset-palette-min="{{ asset.render_contract.legend_range.0 }}"
                                  data-asset-palette-max="{{ asset.render_contract.legend_range.1 }}"
                                  data-visualizable="{% if asset.texture_url %}true{% else %}false{% endif %}">
@@ -899,6 +900,7 @@
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
     <script src="{% static 'js/georiva-basemap.js' %}"></script>
+    <script src="{% static 'js/colour_table.js' %}"></script>
     <script>
         (function async() {
             'use strict';
@@ -916,6 +918,8 @@
             let currentBasemap = 'light';
             let currentAsset = null;
             let currentPalette = null;
+            // What the shown layer's codes decode over, for the hover readout.
+            let currentImageUnscale = null;
             let tooltipControl = null;
 
 
@@ -1006,7 +1010,8 @@
                 deckgl.setProps({
                     onLoad: () => deckgl.getCanvas() && tooltipControl.addTo(deckgl.getCanvas().parentElement),
                     onHover: (event) => {
-                        tooltipControl.updatePickingInfo(event)
+                        // The layer picks a code; the readout shows the value it stands for.
+                        tooltipControl.updatePickingInfo(GeoRivaColourTable.decodePick(event, currentImageUnscale))
                     }
                 });
 
@@ -1150,8 +1155,12 @@
                 const textureUrl = assetElement.dataset.assetTextureUrl;
                 const bounds = parseBounds(assetElement.dataset.assetBounds); // [w,s,e,n]
 
-                // The texture's encoding range, from the server's render contract.
+                // The texture's encoding range, from the server's render contract:
+                // what a code decodes back into a value over, for the hover readout.
                 const imageUnscale = JSON.parse(assetElement.dataset.assetImageUnscale || 'null');
+                // The map is coloured code by code from the style's colour table,
+                // the one Titiler colours tiles with (#785).
+                const colourTable = JSON.parse(assetElement.dataset.assetColourTable || 'null');
 
                 if (!textureUrl) {
                     clearDeckLayers();
@@ -1170,6 +1179,7 @@
                     // Get palette from asset
                     const palette = getPaletteForAsset(assetElement);
                     currentPalette = palette;
+                    currentImageUnscale = imageUnscale;
 
                     const opacity = parseInt(document.getElementById('opacitySlider').value, 10) / 100;
 
@@ -1185,9 +1195,9 @@
                         bounds, // [west, south, east, north]
                         imageSmoothing: true,
                         imageInterpolation: "LINEAR",
-                        // The variable's range, never the stops' span
-                        imageUnscale,
-                        palette,
+                        // Codes, not values: identity unscale over the colour table.
+                        imageUnscale: GeoRivaColourTable.LAYER_UNSCALE,
+                        palette: GeoRivaColourTable.layerPalette(colourTable),
                         opacity,
                         visible: true,
                         pickable: true

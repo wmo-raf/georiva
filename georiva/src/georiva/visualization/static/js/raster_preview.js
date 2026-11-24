@@ -2,13 +2,16 @@
  * A raster preview map: MapLibre basemap, deck.gl overlay, one WeatherLayers
  * raster layer over Titiler's encoded texture (ADR 0021).
  *
- * The whole point of the shape is that the texture and the palette are
- * independent. The texture holds values, not colors — the browser unscales it
- * back to physical units with `imageUnscale` and colors it from the palette on
- * the GPU. So `setPalette()` repaints without refetching anything, which is
- * what lets the styling page follow an operator's unsaved stop edits live.
+ * The whole point of the shape is that the texture and the colours are
+ * independent. The texture holds codes, not colors, and the layer colors each
+ * code from the style's colour table on the GPU — the table Titiler colours
+ * tiles with (#785), so it is given whole, never worked out from stops here.
+ * `setColourTable()` repaints without refetching the texture, which is what
+ * lets the styling page follow an operator's unsaved stop edits live.
+ * `imageUnscale` is the variable's served range: what the hover readout
+ * decodes a code back into a value over.
  *
- * Expects `maplibregl`, `deck`, `WeatherLayers` and `GeoRivaBasemap` to be
+ * Expects `maplibregl`, `deck`, `WeatherLayers`, `GeoRivaColourTable` and `GeoRivaBasemap` to be
  * loaded already. The basemap is the shared GeoRiva style; switching it flips
  * layer groups rather than reloading, so the deck overlay is built once.
  *
@@ -16,10 +19,10 @@
  *       container: 'vs-map',
  *       basemapStyleUrl,
  *       textureUrl, bounds, imageUnscale, unit, compactAttribution,
- *       palette: [[value, [r, g, b, a]], ...],
+ *       colourTable: [[r, g, b, a], ...],  // 256 entries, one per code
  *       onStatus: (state, message) => { ... },
  *   });
- *   preview.setPalette(nextPalette);
+ *   preview.setColourTable(nextTable);
  */
 (function (global) {
     'use strict';
@@ -63,7 +66,7 @@
         }
 
         let basemap = options.basemap || 'light';
-        let palette = options.palette || null;
+        let colourTable = options.colourTable || null;
         let opacity = typeof options.opacity === 'number' ? options.opacity : 1;
         let image = null;
         let overlay = null;
@@ -85,14 +88,12 @@
                 bounds: bounds,
                 imageSmoothing: true,
                 imageInterpolation: 'LINEAR',
-                imageUnscale: options.imageUnscale,
-                palette: palette,
+                imageUnscale: GeoRivaColourTable.LAYER_UNSCALE,
+                palette: GeoRivaColourTable.layerPalette(colourTable),
                 opacity: opacity,
                 // Picking is what feeds the hover readout. The layer's picking
-                // pass writes the magnitude — not the drawn color — normalized
-                // over the palette's own bounds, so the value survives a
-                // stepped palette. It is 8-bit and saturates at the outermost
-                // stop, which is the same edge the range warning explains.
+                // pass writes the code — not the drawn color — so the value
+                // survives a stepped table; the readout decodes it.
                 pickable: true
             })];
         }
@@ -123,7 +124,7 @@
                     }
                 },
                 onHover: function (event) {
-                    tooltip.updatePickingInfo(event);
+                    tooltip.updatePickingInfo(GeoRivaColourTable.decodePick(event, options.imageUnscale));
                 }
             });
             instance.props.onLoad();
@@ -170,13 +171,13 @@
         });
 
         return {
-            setPalette: function (next) {
-                palette = next;
+            setColourTable: function (next) {
+                colourTable = next;
                 repaint();
             },
 
             /**
-             * Swap the drawn item in place. The palette, opacity and basemap
+             * Swap the drawn item in place. The colour table, opacity and basemap
              * stay; the old texture stays on screen until the new one has
              * loaded, so stepping through time does not flash empty. Resolves
              * true once drawn, false when the texture failed.

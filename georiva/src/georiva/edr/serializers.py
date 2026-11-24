@@ -110,6 +110,10 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
         # The texture's encoding range; palette_min/palette_max below are the
         # stops' span, for the legend only.
         x_georiva["image_unscale"] = contract.image_unscale
+        # The default style's 256 colours, one per code: what the map is
+        # coloured with, here as in Titiler (#785). ``palette`` stays the stops,
+        # in value space, for legends and choropleths.
+        x_georiva["colour_table"] = contract.colour_table
 
         style = variable.default_style
         if style:
