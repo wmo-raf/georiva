@@ -6,6 +6,12 @@
 > database write. Both are amendments to how the surface behaves, not to the
 > two-layer model, which is untouched. See the amendments under **Decision**.
 
+> **Amended by #806 — every style records its origin: template, ramp or custom.**
+> How a style was made is stored, and decides what drives its stops and which controls the editor shows. A ramp
+> style's stops are always its ramp's; a template style's are its template's; only a custom style's are tuned by
+> hand. "Customise stops" is the one way from the first two to the third. This replaces the #801 note about live
+> regeneration until stops are hand-tuned. See §3.
+
 > **Amended by [ADR-0046](0046-values-are-stored-as-produced-and-converted-when-read.md) — stops are in the source unit.**
 > A stop's "absolute physical value", and `value_min`/`value_max`, are stored in the Variable's source unit and
 > shown in its served unit; the styling surface converts at its boundary, and a ramp is applied in the served unit.
@@ -67,7 +73,8 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
 2. **`VariableStyle`** (new model, one-to-many from `Variable`) is the
    applied result: name/slug, `is_default` (exactly one per variable,
    enforced by a partial unique constraint), a nullable `ramp` FK kept for
-   lineage/re-apply only, step count + mode (continuous/stepped), and the
+   lineage/re-apply only (superseded by the #806 amendment in §3: a ramp
+   style's stops are its ramp's on every save), step count + mode (continuous/stepped), and the
    materialized absolute value→color **stops snapshot**. Applying a ramp
    over the variable's range *generates* stops; the operator may then
    fine-tune any stop, including pinning physical thresholds.
@@ -76,7 +83,9 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    after fine-tuning never silently rewrites stops; the styling UI offers
    "re-apply ramp", which regenerates the snapshot and discards fine-tuning
    with a warning. (A live-linked or pinned-stop hybrid is deferred until an
-   operator actually loses tuning they care about.)
+   operator actually loses tuning they care about.) *Superseded by the #806
+   amendment below: there is no "re-apply ramp" gesture; a ramp style is
+   regenerated on every save, and tuned stops exist only on a custom style.*
 
    **Amended (#382): applying a ramp writes nothing.** The gesture was a POST
    that regenerated the snapshot in the database, guarded by a confirm
@@ -93,6 +102,47 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
 
    This removes the surface's last no-JS path. The page now carries a WebGL map;
    assuming JavaScript there is not a new assumption.
+
+   **Amended (#806): every style records its origin.** #801 guessed whether a
+   style's stops were "as generated" by regenerating its ramp over the current
+   range and comparing, and let ramp changes regenerate live only while they
+   were. That guess is gone. `VariableStyle.origin` records how the style was
+   made, and is set once: applying a template gives `template`, starting from a
+   ramp gives `ramp`, starting from scratch gives `custom`.
+
+   - A **ramp** style's stops are always what its ramp, mode, steps and reverse
+     (now stored) produce over the Variable's range. Its editor shows those
+     controls and no stops table; any change refills the stops through the
+     read-only endpoint and repaints the map, and a save regenerates them on
+     the server — posted stops are never taken. Saving the range never
+     touches stops, so a ramp style saved over an older range keeps its old
+     stops until its next save; its editor shows the stops that save will
+     store, marked unsaved, with a note that they are laid out over the old
+     range.
+   - A **template** style's stops are its template's bands. No save changes
+     them, except a template picked in place (#807); its editor shows the name, the template it came from and the
+     out-of-range settings.
+   - A **custom** style's stops are what the operator saves: the stops or
+     classes table, JSON, and Reverse, which reverses colours in place. This is
+     the only place stops are tuned by hand, so pinning 0 °C means a custom
+     style.
+
+   "Customise stops" turns a ramp or template style into a custom one, after a
+   confirmation, keeping its stops; the ramp or template link stays as history
+   and never drives anything again. "Regenerate from ramp" and "Restyle from a
+   color ramp" are gone with the guess. The rule above holds more strictly than
+   before: tuned stops can only exist on a custom style, and nothing but its own
+   save rewrites them. A data migration recorded the origin of every existing
+   style by the #801 comparison, once: a hand-tuned ramp style became custom.
+
+   **Amended (#807): a style's path can be switched without making a new one.**
+   A template style's editor picks its template in place, from the catalogue
+   the chooser offers; another pick repaints the preview at once and a save
+   writes its bands and link. "Start over", on every path, reopens the chooser
+   for the selected style and, after a confirmation, replaces its origin, stops
+   and ramp or template link. Both keep the style's name, slug and default
+   status. Only the default style may take a template's range and curve this
+   way, as only a first style may in the chooser.
 
 4. **`Variable` keeps `value_min`/`value_max`/`scale_type`.** They are the
    encoding contract (`imageUnscale`, the ADR 0021 render-config token), not

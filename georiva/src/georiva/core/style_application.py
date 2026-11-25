@@ -19,13 +19,15 @@ clips.
 
 from dataclasses import dataclass
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.text import slugify
+from django.utils.translation import gettext as _
 
 from georiva.core.machine_plane.colour_table import CODES, encode, encoding_curve
 from georiva.core.models import Variable, VariableStyle
-from georiva.core.models.visualization import css_hex
-from georiva.core.unit_utils import Conversion, ConversionRefused
+from georiva.core.models.visualization import band_stops
+from georiva.core.unit_utils import Conversion, ConversionRefused, same_quantity_conversion
 from georiva.utils.slugs import free_slug
 
 #: A band given fewer codes than this is drawn as a sliver, or not at all.
@@ -39,7 +41,9 @@ __all__ = [
     "apply_template",
     "conversion",
     "current_encoding",
+    "new_style",
     "proposed_encoding",
+    "save_edit",
     "template_stops",
     "unique_style_slug",
     "warnings",
@@ -62,19 +66,19 @@ class Encoding:
 
 def conversion(template, variable) -> Conversion:
     """Values in ``template``'s unit into ``variable``'s source unit, or
-    :class:`ConversionRefused` with the reason it is not offered."""
-    return Conversion.between(template.unit.symbol, variable.source_unit.symbol, water=variable.water)
+    :class:`ConversionRefused` with the reason it is not offered.
+
+    Only between units of one quantity, water's bridge aside (#809): a
+    template drawn for CAPE in J/kg is no rainfall template, though the
+    registry's geopotential context would carry J/kg into mm.
+    """
+    return same_quantity_conversion(template.unit.symbol, variable.source_unit.symbol, water=variable.water)
 
 
 def template_stops(template, variable) -> list:
     """The template's bands as stepped stops in ``variable``'s source unit:
     each band two stops, at its lower and upper level, in the band's colour."""
-    convert = conversion(template, variable).forward
-    stops = []
-    for low, high, color in zip(template.levels[:-1], template.levels[1:], template.colors, strict=True):
-        stops.append({"value": convert(low), "color": css_hex(color)})
-        stops.append({"value": convert(high), "color": css_hex(color)})
-    return stops
+    return band_stops(template.levels, template.colors, conversion(template, variable).forward)
 
 
 def current_encoding(variable) -> Encoding:
@@ -145,35 +149,134 @@ def unique_style_slug(variable, name) -> str:
     return free_slug(slugify(name) or "style", set(variable.styles.values_list("slug", flat=True)))
 
 
-def apply_template(template, variable, *, make_default=False, name=None) -> VariableStyle:
-    """A new stepped style on ``variable`` with ``template``'s look.
+def new_style(variable, name, **fields) -> VariableStyle:
+    """An unsaved style on ``variable``: its slug minted from ``name``, the
+    default when it is the Variable's first."""
+    return VariableStyle(
+        variable=variable,
+        name=name,
+        slug=unique_style_slug(variable, name),
+        is_default=variable.new_style_is_default,
+        **fields,
+    )
 
-    The style is the default when asked, or when it is the Variable's first —
-    the first style is what serves. The Variable's range and curve are left
-    alone: :func:`proposed_encoding` is a proposal, set by
-    :func:`accept_encoding` only. Raises :class:`ConversionRefused` when the
-    template's unit does not convert into the Variable's source unit.
-    """
-    stops = template_stops(template, variable)
-    name = name or template.name
+
+def start_from_ramp(ramp, variable, *, mode=VariableStyle.Mode.CONTINUOUS, steps=None, style=None) -> VariableStyle:
+    """A new style on ``variable`` from ``ramp`` (#800): named after the ramp,
+    its stops generated over the Variable's current range, the default when it
+    is the Variable's first. ``steps`` counts only when ``mode`` is stepped.
+
+    Given ``style``, that style is remade from ``ramp`` instead ("Start over",
+    #807): its origin, stops and link replaced, its name, slug and default
+    status kept."""
     with transaction.atomic():
-        first = not variable.styles.exists()
-        style = VariableStyle(
-            variable=variable,
-            name=name,
-            slug=unique_style_slug(variable, name),
-            is_default=first,
-            mode=VariableStyle.Mode.STEPPED,
-            steps=len(template.colors),
-            stops=stops,
-            under=template.under,
-            over=template.over,
-            template=template,
-        )
+        if style is None:
+            style = new_style(variable, ramp.name)
+        style.start_over(VariableStyle.Origin.RAMP, ramp=ramp)
+        style.mode = mode
+        style.steps = steps if mode == VariableStyle.Mode.STEPPED else None
+        style.apply_ramp()
         style.full_clean()
         style.save()
-        if make_default and not first:
-            style.promote_to_default()
+    return style
+
+
+def _use_template(style, template):
+    """Give ``style`` ``template``'s bands, out-of-range settings and link,
+    unsaved: what applying a template writes, and what picking another
+    template in a template style's editor replaces (#807). Raises
+    :class:`ConversionRefused` when the template's unit does not convert into
+    the Variable's source unit."""
+    style.stops = template_stops(template, style.variable)
+    style.template = template
+    style.mode = VariableStyle.Mode.STEPPED
+    style.steps = len(template.colors)
+    style.under = template.under
+    style.over = template.over
+
+
+def _save_with_template(style, template, take_encoding):
+    """Save ``style`` and, when ``take_encoding``, set its Variable's range and
+    curve to ``template``'s proposal — together or not at all."""
+    with transaction.atomic():
+        style.save()
+        if take_encoding:
+            accept_encoding(style.variable, proposed_encoding(template, style.variable))
+
+
+def save_edit(
+    style,
+    *,
+    name,
+    under,
+    over,
+    stops=(),
+    ramp=None,
+    mode=None,
+    steps=None,
+    reverse=False,
+    template=None,
+    take_encoding=False,
+) -> VariableStyle:
+    """Save what ``style``'s editor posted, as its origin says (#806) — the one
+    place that decides what a save does to each kind of style:
+
+    * ``template``: the stops stay the template's bands. ``template`` names
+      another template picked in place (#807): its bands and link replace
+      them, and the default style takes its range and curve when
+      ``take_encoding``.
+    * ``ramp``: the stops are what ``ramp``, ``mode``, ``steps`` and
+      ``reverse`` give over the Variable's current range; ``stops`` is ignored.
+    * ``custom``: the stops are ``stops`` (source unit), and there must be
+      some — "from scratch" opens on an empty table but never stores one.
+
+    Every origin takes ``name``, ``under`` and ``over``. Raises
+    :class:`ValidationError` or :class:`ConversionRefused`, saving nothing.
+    """
+    style.name = name
+    if style.origin == VariableStyle.Origin.TEMPLATE:
+        if template is not None:
+            _use_template(style, template)
+    elif style.origin == VariableStyle.Origin.RAMP:
+        if ramp is None:
+            raise ValidationError({"ramp": _("Pick a ramp.")})
+        style.ramp = ramp
+        style.mode = mode or VariableStyle.Mode.CONTINUOUS
+        style.steps = steps
+        style.reverse = reverse
+        style.apply_ramp()
+    else:
+        if not stops:
+            raise ValidationError({"stops": _("Add at least one stop.")})
+        style.stops = list(stops)
+    style.under = under
+    style.over = over
+    style.full_clean()
+    # Only the default style may set the range and curve every style shares
+    # (#791), and only on a switch of template.
+    _save_with_template(style, template, template is not None and take_encoding and style.is_default)
+    return style
+
+
+def apply_template(template, variable, *, name=None, style=None, take_encoding=False) -> VariableStyle:
+    """A new stepped style on ``variable`` with ``template``'s look — or, given
+    ``style``, that style remade from ``template`` ("Start over", #807): its
+    origin, stops and link replaced, its name, slug and default status kept.
+
+    A new style is the default when it is the Variable's first
+    (:attr:`Variable.new_style_is_default`); a later one is promoted from its
+    own tab (#800). The Variable's range and curve are left alone unless
+    ``take_encoding``, when they become :func:`proposed_encoding` — the
+    caller offers that to the style that is or will be the default only.
+    Raises :class:`ConversionRefused` when the template's unit does not
+    convert into the Variable's source unit.
+    """
+    if style is None:
+        style = new_style(variable, name or template.name)
+    style.start_over(VariableStyle.Origin.TEMPLATE, template=template)
+    _use_template(style, template)
+    style.full_clean()
+    _save_with_template(style, template, take_encoding)
     return style
 
 

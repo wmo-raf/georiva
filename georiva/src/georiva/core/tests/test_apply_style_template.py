@@ -2,7 +2,7 @@
 
 One seam: the per-variable Styling page, driven through the admin test client.
 The picker it renders, the style an Apply posts into being, and the range and
-curve a default style proposes — accepted only when the operator says so.
+curve a first style takes from its template when the operator ticks to (#800).
 """
 
 from django.test import TestCase
@@ -126,6 +126,26 @@ class TemplatePickerTests(ApplyStyleTemplateTestCase):
 
         self.assertEqual(self.names(picker["offered"]), {"Precipitation": ["Rain bands"]})
 
+    def test_a_specific_energy_template_is_not_offered_for_a_depth_or_a_length(self):
+        # J/kg is m²/s², which the registry bridges to a length through gravity
+        # for geopotential height; CAPE in J/kg is still not a rainfall depth (#809).
+        _template(
+            name="CAPE",
+            slug="cape",
+            quantity=StyleTemplate.Quantity.CONVECTION,
+            unit=_unit("J/kg"),
+            levels=[50, 100, 4000],
+            colors=["#ffff00", "#ff0000"],
+        )
+        for source_unit in ("mm", "m"):
+            with self.subTest(source_unit=source_unit):
+                picker = self.picker(self.make_variable(f"v-{source_unit}", source_unit))
+
+                offered = [row["name"] for group in picker["offered"] for row in group["templates"]]
+                self.assertNotIn("CAPE", offered)
+                cape = next(row for group in picker["excluded"] for row in group["templates"] if row["name"] == "CAPE")
+                self.assertIn("J/kg", cape["reason"])
+
     def test_an_excluded_template_says_why(self):
         picker = self.picker(self.make_variable("dust", "kg/m²"))
 
@@ -199,7 +219,7 @@ class ApplyWritesASteppedStyleTests(ApplyStyleTemplateTestCase):
     def test_an_mm_template_is_refused_for_a_kg_per_square_metre_variable_that_is_not_water(self):
         dust = self.make_variable("dust", "kg/m²")
 
-        response = self.apply(_template(), dust, make_default="on")
+        response = self.apply(_template(), dust)
 
         self.assertEqual(response.status_code, 302)
         self.assertFalse(dust.styles.exists())
@@ -243,23 +263,21 @@ class ApplyWritesASteppedStyleTests(ApplyStyleTemplateTestCase):
         self.assertIsNone(style.template)
         self.assertEqual(style.stops, applied)
 
-    def test_a_second_style_is_not_the_default_unless_asked(self):
+    def test_only_the_first_style_is_the_default(self):
         rain = self.make_variable("tp", "mm")
         self.apply(_template(), rain)
         self.apply(_template(slug="other", name="Other"), rain)
+
         self.assertEqual(rain.default_style.name, "Rain bands")
 
-        self.apply(_template(slug="third", name="Third"), rain, make_default="on")
-        self.assertEqual(VariableStyle.objects.get(variable=rain, is_default=True).name, "Third")
 
-
-class ProposedEncodingTests(ApplyStyleTemplateTestCase):
-    """A template's range and curve change the Variable only on a default style,
-    and only once the operator confirms them."""
+class TakingTheTemplateEncodingTests(ApplyStyleTemplateTestCase):
+    """A template's range and curve change the Variable only for its first
+    style, and only when "Also use its range and curve" is ticked (#800)."""
 
     def setUp(self):
         super().setUp()
-        # Stored in kg/m², served in mm: the proposal reads in the served unit.
+        # Stored in kg/m², served in mm: the template's levels are in mm.
         self.rain = self.make_variable("tp", "kg/m²", "mm", water=True, value_min=0, value_max=50)
         self.template = _template(levels=[0.5, 1, 2, 200], scale_type=Variable.ScaleType.SQRT)
 
@@ -267,51 +285,33 @@ class ProposedEncodingTests(ApplyStyleTemplateTestCase):
         self.rain.refresh_from_db()
         return self.rain.value_min, self.rain.value_max, self.rain.scale_type
 
-    def accept(self, slug):
-        return self.client.post(self.form_url(self.rain), {"action": "accept-template-encoding", "style_slug": slug})
-
-    def test_applying_a_default_style_proposes_but_does_not_change_the_encoding(self):
-        response = self.apply(self.template, self.rain)
-
-        self.assertEqual(self.encoding(), (0, 50, Variable.ScaleType.LINEAR))
-        page = self.client.get(response.url)
-        proposal = page.context["encoding_proposal"]
-        self.assertEqual((proposal["value_min"], proposal["value_max"]), (0.5, 200))
-        self.assertEqual(proposal["scale_type"], Variable.ScaleType.SQRT)
-        self.assertContains(page, 'value="accept-template-encoding"')
-
-    def test_confirming_the_proposal_sets_the_range_and_curve(self):
+    def test_applying_unticked_leaves_the_encoding_alone(self):
         self.apply(self.template, self.rain)
 
-        response = self.accept("rain-bands")
+        self.assertEqual(self.encoding(), (0, 50, Variable.ScaleType.LINEAR))
+
+    def test_ticked_sets_the_range_and_curve(self):
+        response = self.apply(self.template, self.rain, accept_encoding="on")
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.encoding(), (0.5, 200, Variable.ScaleType.SQRT))
 
-    def test_a_non_default_style_proposes_nothing_and_cannot_be_confirmed(self):
-        VariableStyle.objects.create(variable=self.rain, name="House", slug="house", is_default=True)
-
-        response = self.apply(self.template, self.rain)
-        page = self.client.get(f"{response.url}&propose=encoding")
-        self.assertIsNone(page.context["encoding_proposal"])
-
-        self.accept("rain-bands")
-        self.assertEqual(self.encoding(), (0, 50, Variable.ScaleType.LINEAR))
-
-    def test_a_style_made_by_hand_has_nothing_to_confirm(self):
-        VariableStyle.objects.create(variable=self.rain, name="House", slug="house", is_default=True)
-
-        self.accept("house")
-
-        self.assertEqual(self.encoding(), (0, 50, Variable.ScaleType.LINEAR))
-
-    def test_a_log_template_whose_range_starts_at_zero_proposes_a_linear_curve(self):
+    def test_a_log_template_whose_range_starts_at_zero_sets_a_linear_curve(self):
         template = _template(slug="log-from-zero", levels=[0, 1, 10, 100], scale_type=Variable.ScaleType.LOG)
-        self.apply(template, self.rain)
 
-        self.accept("rain-bands")
+        self.apply(template, self.rain, accept_encoding="on")
 
         self.assertEqual(self.encoding(), (0, 100, Variable.ScaleType.LINEAR))
+
+    def test_a_refused_template_sets_neither_style_nor_encoding(self):
+        one_band = StyleTemplate.objects.create(
+            organisation=self.org, name="One band", slug="one-band", levels=[0, 1], colors=["#ffffff"], unit=_unit("mm")
+        )
+
+        self.apply(one_band, self.rain, accept_encoding="on")
+
+        self.assertFalse(self.rain.styles.exists())
+        self.assertEqual(self.encoding(), (0, 50, Variable.ScaleType.LINEAR))
 
 
 class WarningTests(ApplyStyleTemplateTestCase):
@@ -344,23 +344,18 @@ class WarningTests(ApplyStyleTemplateTestCase):
 
         self.assertEqual(self.warnings(response), [])
 
-    def test_the_proposal_warns_under_the_proposed_encoding(self):
-        response = self.apply(self.template, self.rain, follow=True)
+    def test_taking_the_template_encoding_warns_under_it(self):
+        response = self.apply(self.template, self.rain, follow=True, accept_encoding="on")
 
         # 0.5–300 mm on a sqrt curve: every band has codes, no level is clipped.
-        self.assertEqual(response.context["encoding_proposal"]["warnings"], [])
+        self.assertEqual(self.warnings(response), [])
 
-    def test_accepting_the_proposal_warns_under_the_new_encoding(self):
+    def test_a_narrow_band_is_starved_under_the_template_encoding_too(self):
         narrow = _template(
             slug="narrow", levels=[0, 0.1, 100], colors=["#111111", "#222222"], scale_type=Variable.ScaleType.LINEAR
         )
-        self.apply(narrow, self.rain, follow=True)
 
-        response = self.client.post(
-            self.form_url(self.rain),
-            {"action": "accept-template-encoding", "style_slug": "rain-bands"},
-            follow=True,
-        )
+        response = self.apply(narrow, self.rain, follow=True, accept_encoding="on")
 
         (starved,) = self.warnings(response)
         self.assertIn("0–0.1 mm", starved)

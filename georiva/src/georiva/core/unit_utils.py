@@ -291,6 +291,34 @@ def affine_conversion(source_symbol: str, served_symbol: str, *, water: bool = F
     return Conversion(significant(scale), significant(offset), served_symbol)
 
 
+def same_quantity_conversion(source_symbol: str, unit_symbol: str, *, water: bool = False) -> Conversion:
+    """:func:`affine_conversion`, refused also when the two units are of
+    different dimensions — the only bridge between quantities it crosses is
+    water's, mm ↔ kg m-2 (and their rates), and only with ``water`` set.
+
+    The registry's global geopotential context makes every m²/s² a length
+    through standard gravity, which serves geopotential in gpdam. But J/kg is
+    m²/s² too, so that bridge also makes CAPE a depth (#809): a conversion
+    between two units chosen for their *look* — a Style template's onto a
+    Variable's — must not cross it.
+    """
+    try:
+        source, served = ureg(source_symbol).units, ureg(unit_symbol).units
+    except (pint.errors.PintError, AttributeError, TypeError, ValueError):
+        source = served = None  # affine_conversion says why
+    if source is not None and source.dimensionality != served.dimensionality:
+        across = (source / served).dimensionality
+        if across not in (_WATER_DENSITY.dimensionality, (1 / _WATER_DENSITY).dimensionality):
+            raise ConversionRefused(
+                f"{source_symbol} and {unit_symbol} measure different quantities, so one cannot be shown as the other."
+            )
+    return affine_conversion(source_symbol, unit_symbol, water=water)
+
+
+#: Water's mass per volume: what divides a depth from a mass per area.
+_WATER_DENSITY = ureg("kg/m^3").units
+
+
 def _converts_as_water(f) -> bool:
     try:
         with ureg.context("precipitation"):

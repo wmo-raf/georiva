@@ -1,0 +1,134 @@
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    The editor of a custom style (#806) — one started from scratch, or a ramp
+    or template style whose stops were customised. Its stops are what the
+    operator saves: the stops or classes table, Edit as JSON and Reverse. No
+    disclosure: this is the whole editor. A ramp or template link stays as
+    history only, said here and never acted on.
+{% endcomment %}
+<div class="vs-field-row">
+    <div class="vs-field">
+        <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
+        {{ style_form.name }}
+    </div>
+</div>
+{% if starting_over and scratch %}
+    {# "Start over" from scratch (#807): this same style, remade by hand on save. #}
+    <input type="hidden" name="start_over" value="{{ start_values.scratch }}">
+    <p class="vs-template-lineage">
+        {% trans "Starting this style over from scratch. Saving replaces its stops and drops its ramp or template; its name, tab and default status stay." %}
+    </p>
+{% elif selected.template %}
+    <p class="vs-template-lineage">
+        {% blocktrans with template=selected.template.name %}Customised from the template “{{ template }}”. Editing these stops never changes the template, nor the template them.{% endblocktrans %}
+    </p>
+{% elif selected.ramp %}
+    <p class="vs-template-lineage">
+        {% blocktrans with ramp=selected.ramp.name %}Customised from the ramp “{{ ramp }}”. Editing these stops never changes the ramp, nor the ramp them.{% endblocktrans %}
+    </p>
+{% endif %}
+<h3 class="w-label-2">{% trans "Stops" %}</h3>
+<p class="help-text">
+    {% trans "Absolute data values mapped to colors, in ascending order. Edit values or colors to fine-tune — for example to pin a threshold like 0 °C to an exact color." %}
+</p>
+<table class="vs-stops-table" id="vs-stops-table">
+    <thead>
+    <tr>
+        <th>{% trans "Value" %}{% if variable.units %} ({{ variable.units }}){% endif %}</th>
+        <th>{% trans "Color" %}</th>
+        <th></th>
+        <th></th>
+    </tr>
+    </thead>
+    <tbody id="vs-stops-body">
+    {% for stop in stop_rows %}
+        {% include "core/_styling_stop_row.html" with value=stop.value color=stop.color %}
+    {% endfor %}
+    </tbody>
+</table>
+{# Stepped styles edit as classes; the rows above/below stay what Save reads (#566). #}
+<p class="help-text" id="vs-raw-note" hidden
+   data-stepped="{% if selected.mode == 'stepped' %}true{% else %}false{% endif %}">
+    {% trans "These stops are not clean class pairs (each class two stops of one color, each starting where the last ended), so they are shown as raw stops. Nothing is changed until you edit them." %}
+</p>
+<div id="vs-classes" hidden>
+    <table class="vs-stops-table vs-classes-table">
+        <thead>
+        <tr>
+            <th>{% trans "From" %}{% if variable.units %} ({{ variable.units }}){% endif %}</th>
+            <th>{% trans "To" %}{% if variable.units %} ({{ variable.units }}){% endif %}</th>
+            <th>{% trans "Color" %}</th>
+            <th></th>
+            <th></th>
+        </tr>
+        </thead>
+        <tbody id="vs-classes-body"></tbody>
+    </table>
+</div>
+<template id="vs-class-row-template">
+    <tr class="vs-class-row">
+        <td><input type="text" class="vs-class-from" readonly tabindex="-1"></td>
+        <td><input type="text" class="vs-class-to"></td>
+        <td><input type="text" class="vs-class-color"></td>
+        <td><input type="color" class="vs-stop-picker" aria-label="{% trans 'Pick color' %}"></td>
+        <td class="vs-class-actions">
+            <button type="button" class="button button-small button-secondary vs-class-transparent">{% trans "Transparent" %}</button>
+            <button type="button" class="button button-small button-secondary vs-class-add">{% trans "Add class" %}</button>
+            <button type="button" class="button button-small no vs-class-remove">{% trans "Remove" %}</button>
+        </td>
+    </tr>
+</template>
+<div class="vs-stop-tools">
+    <button type="button" class="button button-small button-secondary" id="vs-add-stop">{% trans "Add stop" %}</button>
+    {% comment %}
+        Reverse on a custom style reverses the colours in place, against the
+        same values: there is no ramp to run the other way.
+    {% endcomment %}
+    <button type="button" class="button button-small button-secondary" id="vs-reverse">{% trans "Reverse" %}</button>
+    <button type="button" class="button button-small button-secondary" id="vs-json-toggle"
+            aria-expanded="false" aria-controls="vs-json-panel">
+        {% trans "Edit as JSON" %}
+    </button>
+</div>
+{% comment %}
+    A second way to edit the same rows, not a second field:
+    the textarea has no name and is never posted. Applying
+    it rewrites the table, and Save reads the table.
+{% endcomment %}
+<div class="vs-json-panel" id="vs-json-panel" hidden>
+    <label for="vs-json-text">{% trans "Stops as JSON" %}</label>
+    <div class="vs-json-editor">
+        <div class="vs-json-gutter" id="vs-json-gutter" aria-hidden="true"></div>
+        <div class="vs-json-flag" id="vs-json-flag" aria-hidden="true" hidden></div>
+        <textarea id="vs-json-text" rows="12" spellcheck="false" wrap="off"
+                  aria-describedby="vs-json-help vs-json-error"></textarea>
+    </div>
+    <p class="help-text" id="vs-json-help">
+        {% trans 'An array of {"value": number, "color": "#RRGGBB" or "#RRGGBBAA"}, values not decreasing.' %}
+    </p>
+    {% comment %}
+        Wagtail's own critical help block (tinted, icon at the
+        start), as it draws field errors elsewhere in the admin.
+    {% endcomment %}
+    <div class="help-block help-critical vs-json-error" id="vs-json-error-box" hidden>
+        {% icon name="warning" classname="default" %}
+        <p id="vs-json-error" role="alert"
+        data-not-array="{% trans 'Expected a non-empty array of stops.' %}"
+        data-line="{% trans ' (line {line})' %}"
+        data-not-object="{% trans 'Stop {n}{at}: expected an object with value and color.' %}"
+        data-bad-value="{% trans 'Stop {n}{at}: value must be a number.' %}"
+        data-bad-color="{% trans 'Stop {n}{at}: color must be #RRGGBB or #RRGGBBAA.' %}"
+        data-decreasing="{% trans 'Stop {n}{at}: value is lower than the previous stop.' %}"></p>
+    </div>
+    <div class="vs-stop-tools">
+        <button type="button" class="button button-small button-secondary" id="vs-json-apply">
+            {% trans "Apply JSON" %}
+        </button>
+        <button type="button" class="button button-small button-secondary" id="vs-json-copy">
+            {% trans "Copy" %}
+        </button>
+        <span class="vs-json-status" id="vs-json-status" role="status" aria-live="polite"
+              data-copied="{% trans 'Copied' %}"
+              data-copy-failed="{% trans 'Could not copy' %}"></span>
+    </div>
+</div>

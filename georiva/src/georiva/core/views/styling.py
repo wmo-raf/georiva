@@ -46,6 +46,11 @@ GRAYSCALE_GRADIENT = "linear-gradient(to right, #000000 0%, #ffffff 100%)"
 #: around a word.
 NEW_STYLE = "__new__"
 
+#: The ``?start=`` values: the chooser reopened on a saved style ("Start
+#: over", #807), and the editor with an empty stops table ("From scratch").
+START_OVER = "over"
+START_SCRATCH = "scratch"
+
 #: Why the map preview has nothing to draw. A fresh feed that has ingested
 #: nothing, a variable served as something other than a COG, and an item whose
 #: ingest recorded no extent are three different problems with three different
@@ -100,13 +105,27 @@ class VariableRangeForm(forms.Form):
         return cleaned
 
 
+def require_steps_when_stepped(form, cleaned):
+    """The one rule every ramp-generating form shares: stepped mode needs a
+    number of classes."""
+    if cleaned.get("mode") == VariableStyle.Mode.STEPPED and not cleaned.get("steps"):
+        form.add_error("steps", _("Stepped mode needs a number of classes."))
+
+
 class VariableStyleForm(forms.Form):
-    """The style's own fields; the stops travel beside it as row inputs."""
+    """The style's own fields; the stops travel beside it as row inputs.
+
+    Which fields a save reads depends on the style's origin (#806): a ramp
+    style's ramp, mode, steps and reverse; a custom style's stop rows; a
+    template style's name, out-of-range settings and picked template (#807). The rest of the form
+    is optional so each editor posts only what it shows."""
 
     name = forms.CharField(max_length=255)
     ramp = forms.ModelChoiceField(queryset=ColorRamp.objects.none(), required=False)
-    mode = forms.ChoiceField(choices=VariableStyle.Mode.choices)
+    mode = forms.ChoiceField(choices=VariableStyle.Mode.choices, required=False)
     steps = forms.IntegerField(required=False, min_value=2)
+    # A ramp style's: runs its ramp's colours the other way over the same values.
+    reverse = forms.BooleanField(required=False)
     # What values beyond the stops are drawn as (#788); a post without them
     # keeps today's behaviour, clamping.
     under = forms.TypedChoiceField(choices=OutOfRange.choices, required=False, empty_value=OutOfRange.CLAMP)
@@ -118,9 +137,34 @@ class VariableStyleForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        if cleaned.get("mode") == VariableStyle.Mode.STEPPED and not cleaned.get("steps"):
-            self.add_error("steps", _("Stepped mode needs a number of classes."))
+        require_steps_when_stepped(self, cleaned)
         return cleaned
+
+
+class RampStartForm(forms.Form):
+    """Starting a style from a color ramp (#800): the ramp, smooth or stepped,
+    and the classes; the name is the ramp's, and the stops are generated over
+    the variable's current range."""
+
+    ramp = forms.ModelChoiceField(queryset=ColorRamp.objects.none(), error_messages={"required": _("Pick a ramp.")})
+    mode = forms.ChoiceField(choices=VariableStyle.Mode.choices)
+    steps = forms.IntegerField(required=False, min_value=2)
+
+    def __init__(self, *args, ramp_queryset, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["ramp"].queryset = ramp_queryset
+
+    def clean(self):
+        cleaned = super().clean()
+        require_steps_when_stepped(self, cleaned)
+        return cleaned
+
+
+class RampStopsForm(RampStartForm):
+    """What the generator endpoint reads (#801): a ramp start, plus whether to
+    run its colours the other way."""
+
+    reverse = forms.BooleanField(required=False)
 
 
 def _stop_rows(post):
@@ -147,6 +191,53 @@ def _parse_stops(post):
             raise ValidationError({"stops": _("Not a number: %(value)s") % {"value": row["value"]}}) from None
         entries.append({"value": value, "color": row["color"]})
     return entries
+
+
+def _switched_template(request, style):
+    """The template a template style's editor picked in place of its own
+    (#807), or None when it kept its own, picked nothing, or is not a template
+    style. Only a template the organisation may see counts."""
+    if style.origin != VariableStyle.Origin.TEMPLATE or style.pk is None:
+        return None
+    picked = _int_or_none(request.POST.get("template"))
+    if picked is None or picked == style.template_id:
+        return None
+    template = scoped_queryset(request, StyleTemplate.objects.select_related("unit")).filter(pk=picked).first()
+    if template is None:
+        raise ValidationError({"template": _("Pick a Style template.")})
+    return template
+
+
+def _start_flags(request, selected, creating):
+    """``(starting_over, scratch)``: where the editor starts from, as the
+    request says.
+
+    ``starting_over`` — a saved style reopened to be remade by another path
+    ("Start over", #807). ``scratch`` — the editor with an empty stops table,
+    for a new style (#800) or a start over. A GET names the start in
+    ``?start=``; a POST carries ``start_over``, which the chooser's starts
+    post as :data:`START_OVER` and a scratch start over's editor as
+    :data:`START_SCRATCH`.
+    """
+    if request.method == "GET":
+        start = request.GET.get("start", "")
+        starting_over = selected is not None and start in (START_OVER, START_SCRATCH)
+    else:
+        start = request.POST.get("start_over", "")
+        starting_over = selected is not None and bool(start)
+    return starting_over, start == START_SCRATCH and (creating or starting_over)
+
+
+def _report_saved(request, message, variable, *, template=None, took_encoding=False):
+    """Say a style was saved or started: ``message``, and that it set the
+    Variable's range and curve when ``took_encoding``. When the style now
+    uses ``template``, each warning the encoding in force gives its bands too."""
+    if took_encoding:
+        message = f"{message} {_('The range and curve every style shares are now the template’s.')}"
+    messages.success(request, message)
+    if template is not None:
+        for warning in style_application.warnings(template, variable, style_application.current_encoding(variable)):
+            messages.warning(request, warning)
 
 
 def _int_or_none(raw):
@@ -221,6 +312,24 @@ def _style_spans(variable, styles) -> list[dict]:
                 {"slug": style.slug, "name": style.name, "min": variable.served(low), "max": variable.served(high)}
             )
     return spans
+
+
+def _range_needs_attention(variable, style) -> bool:
+    """Whether the shared range section opens by itself (#799).
+
+    It does when the style on screen has stops outside the saved range — the
+    map draws them as flat clipped colour — or when the range is more than
+    twice as wide as the stops, the case "Fit range to stops" is for. The
+    page's JavaScript keeps the same two warnings live as stops are edited.
+    """
+    if style is None:
+        return False
+    low, high = style.min_max_from_stops()
+    if low is None:
+        return False
+    if low < variable.value_min or high > variable.value_max:
+        return True
+    return high > low and (high - low) * 2 < variable.value_max - variable.value_min
 
 
 def _preview_context(variable):
@@ -409,6 +518,13 @@ def _template_picker(templates, variable):
             "owner_label": template.owner_label(),
             "reason": reason,
         }
+        if reason is None:
+            row["encoding"] = _template_encoding(template, variable)
+            # What picking it shows at once, unsaved (#807): its stops as the
+            # form speaks them, in the served unit, and its out-of-range settings.
+            row["stops_json"] = json.dumps(variable.served_stops(style_application.template_stops(template, variable)))
+            row["under"] = template.under
+            row["over"] = template.over
         (excluded if reason else offered).setdefault(template.quantity, []).append(row)
 
     def groups(by_quantity):
@@ -421,27 +537,21 @@ def _template_picker(templates, variable):
     }
 
 
-def _encoding_proposal(variable, style):
-    """The range and curve ``style``'s template proposes, in the served unit,
-    with what they would do to its bands — or ``None`` when there is nothing to
-    propose: only a default style applied from a template sets the encoding
-    every style of the Variable shares (#791)."""
-    if style is None or not style.is_default or style.template is None:
-        return None
-    try:
-        encoding = style_application.proposed_encoding(style.template, variable)
-    except style_application.ConversionRefused:
-        return None
-    if encoding == style_application.current_encoding(variable):
-        return None
+def _template_encoding(template, variable):
+    """What choosing ``template`` would do to ``variable``'s encoding (#800), in
+    the served unit: the range and curve it is laid out for, whether they are
+    the ones in force already, and its warnings under each — the proposed
+    encoding when the operator also takes its range and curve, the current one
+    when they keep theirs. Shown beside the template before it is applied."""
+    current = style_application.current_encoding(variable)
+    proposed = style_application.proposed_encoding(template, variable)
     return {
-        "template": style.template,
-        "value_min": variable.served(encoding.value_min),
-        "value_max": variable.served(encoding.value_max),
-        "scale_type": encoding.scale_type,
-        "scale_type_label": Variable.ScaleType(encoding.scale_type).label,
-        "unit": variable.units,
-        "warnings": style_application.warnings(style.template, variable, encoding),
+        "value_min": variable.served(proposed.value_min),
+        "value_max": variable.served(proposed.value_max),
+        "scale_type_label": Variable.ScaleType(proposed.scale_type).label,
+        "same": proposed == current,
+        "warnings_accepted": style_application.warnings(template, variable, proposed),
+        "warnings_kept": style_application.warnings(template, variable, current),
     }
 
 
@@ -471,10 +581,9 @@ def variable_styling(request, collection_pk, variable_pk):
 
     form_url = reverse("variable_styling", args=[collection.pk, variable.pk])
 
-    def style_url(style=None):
-        if style is None:
-            return f"{form_url}?style={NEW_STYLE}"
-        return f"{form_url}?style={style.slug}"
+    def style_url(style=None, start=None):
+        url = f"{form_url}?style={NEW_STYLE if style is None else style.slug}"
+        return f"{url}&start={start}" if start else url
 
     # Which style the editor pane shows: the one asked for, else the default,
     # else the first, else a blank "new style" pane.
@@ -488,6 +597,18 @@ def variable_styling(request, collection_pk, variable_pk):
         selected = variable.default_style or (styles[0] if styles else None)
         creating = selected is None
 
+    # A new style opens on the chooser (#800) — a template, a ramp, or scratch;
+    # "scratch" is the editor with an empty stops table. A rejected save of a
+    # new style re-renders the editor, never the chooser. "Start over" (#807)
+    # reopens the chooser on a saved style, to remake that same style; its
+    # scratch is the same empty editor, and a rejected save of it stays there.
+    starting_over, scratch = _start_flags(request, selected, creating)
+    show_chooser = request.method == "GET" and (creating or starting_over) and not scratch
+    # The range and curve every style shares are set only with the default
+    # style (#791, #800): a new style when it will be the first, a saved one
+    # when it is the default.
+    offer_template_encoding = selected.is_default if selected else variable.new_style_is_default
+
     served_min, served_max = variable.served_range
     range_form = VariableRangeForm(
         variable=variable,
@@ -500,6 +621,7 @@ def variable_styling(request, collection_pk, variable_pk):
     style_form = VariableStyleForm(
         ramp_queryset=ramp_queryset,
         initial={
+            "reverse": bool(selected and selected.reverse),
             "name": selected.name if selected else "",
             "ramp": selected.ramp_id if selected else None,
             "mode": selected.mode if selected else VariableStyle.Mode.CONTINUOUS,
@@ -509,7 +631,15 @@ def variable_styling(request, collection_pk, variable_pk):
         },
     )
     # The form speaks the served unit; stops are stored in the source unit (ADR 0046 §3).
-    stop_rows = variable.served_stops(selected.stops) if selected else []
+    stop_rows = variable.served_stops(selected.stops) if selected and not scratch else []
+    # A ramp style saved over a range since changed (#806): its next save lays
+    # the ramp over the current range, so the editor shows those stops now,
+    # unsaved, rather than the ones a save would silently replace.
+    laid_over_old_range = request.method == "GET" and bool(selected) and not scratch and selected.laid_over_old_range()
+    if laid_over_old_range:
+        stop_rows = variable.served_stops(selected.ramp_stops())
+    # Where a refused start goes back to: the chooser it came from.
+    chooser_url = style_url(selected, START_OVER) if starting_over else style_url()
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -519,9 +649,9 @@ def variable_styling(request, collection_pk, variable_pk):
             if range_form.is_valid():
                 variable.set_served_range(range_form.cleaned_data["value_min"], range_form.cleaned_data["value_max"])
                 variable.scale_type = range_form.cleaned_data["scale_type"]
-                # A range edit alone never rewrites any style's stops — the
-                # snapshot is the operator's (ADR 0022); regeneration is only
-                # ever the explicit re-apply gesture below.
+                # A range edit alone never rewrites any style's stops (ADR
+                # 0022): a ramp style is laid over the new range when it is
+                # next saved, and its editor shows that before then (#806).
                 variable.save(update_fields=["value_min", "value_max", "scale_type", "modified"])
                 messages.success(request, _("Range saved."))
                 return redirect(style_url(selected))
@@ -531,33 +661,42 @@ def variable_styling(request, collection_pk, variable_pk):
             if style_form.is_valid():
                 data = style_form.cleaned_data
                 if creating:
-                    style = VariableStyle(
-                        variable=variable,
-                        slug=style_application.unique_style_slug(variable, data["name"]),
-                        # The first style is what serves, so it is the default;
-                        # later ones stage until explicitly promoted.
-                        is_default=not styles,
-                    )
+                    # A new style saved here starts from scratch (#800): custom.
+                    style = style_application.new_style(variable, data["name"], origin=VariableStyle.Origin.CUSTOM)
                 else:
                     style = selected
-                style.name = data["name"]
-                style.ramp = data["ramp"]
-                style.mode = data["mode"]
-                style.steps = data["steps"]
-                style.under = data["under"]
-                style.over = data["over"]
+                    if scratch:
+                        # "Start over" from scratch (#807): the same style,
+                        # custom now, its ramp or template link dropped.
+                        style.start_over(VariableStyle.Origin.CUSTOM)
                 try:
-                    stops = variable.stored_stops(_parse_stops(request.POST))
-                    if creating and not stops and style.ramp:
-                        style.apply_ramp()
-                    else:
-                        style.stops = stops
-                    style.full_clean()
+                    switched = _switched_template(request, style)
+                    take_encoding = bool(request.POST.get("accept_encoding"))
+                    style_application.save_edit(
+                        style,
+                        name=data["name"],
+                        under=data["under"],
+                        over=data["over"],
+                        stops=variable.stored_stops(_parse_stops(request.POST)),
+                        ramp=data["ramp"],
+                        mode=data["mode"],
+                        steps=data["steps"],
+                        reverse=data["reverse"],
+                        template=switched,
+                        take_encoding=take_encoding,
+                    )
+                except style_application.ConversionRefused as refused:
+                    style_form.add_error(None, str(refused))
                 except ValidationError as error:
                     _add_model_errors(style_form, error)
                 else:
-                    style.save()
-                    messages.success(request, _("Style saved."))
+                    _report_saved(
+                        request,
+                        _("Style saved."),
+                        variable,
+                        template=switched,
+                        took_encoding=switched is not None and take_encoding and style.is_default,
+                    )
                     return redirect(style_url(style))
             stop_rows = _stop_rows(request.POST)
 
@@ -569,43 +708,69 @@ def variable_styling(request, collection_pk, variable_pk):
             )
             if template is None:
                 messages.error(request, _("Pick a Style template to apply."))
-                return redirect(form_url)
+                return redirect(chooser_url)
+            # The range and curve are shared by every style, so only the style
+            # that is or will be the default may set them (#791), and only when
+            # the operator ticks to (#800). Posted otherwise, ignored.
+            take_encoding = offer_template_encoding and bool(request.POST.get("accept_encoding"))
             try:
                 style = style_application.apply_template(
-                    template, variable, make_default=bool(request.POST.get("make_default"))
+                    template, variable, style=selected if starting_over else None, take_encoding=take_encoding
                 )
             except style_application.ConversionRefused as refused:
                 messages.error(request, str(refused))
-                return redirect(form_url)
+                return redirect(chooser_url)
             except ValidationError as invalid:
                 messages.error(
                     request,
                     _('The "%(template)s" template cannot be applied: %(why)s')
                     % {"template": template.name, "why": " ".join(invalid.messages)},
                 )
-                return redirect(form_url)
-            messages.success(
-                request, _('Applied the "%(template)s" template as a new style.') % {"template": template.name}
+                return redirect(chooser_url)
+            applied = (
+                _('Started this style over from the "%(template)s" template.')
+                if starting_over
+                else _('Applied the "%(template)s" template as a new style.')
             )
-            for warning in style_application.warnings(template, variable, style_application.current_encoding(variable)):
-                messages.warning(request, warning)
-            if style.is_default:
-                return redirect(f"{style_url(style)}&propose=encoding")
+            _report_saved(
+                request,
+                applied % {"template": template.name},
+                variable,
+                template=template,
+                took_encoding=take_encoding,
+            )
             return redirect(style_url(style))
 
-        elif action == "accept-template-encoding":
-            if selected is None or not selected.is_default or selected.template is None:
-                messages.error(request, _("Only the default style's template can set the range and curve."))
-                return redirect(style_url(selected) if selected else form_url)
-            try:
-                encoding = style_application.proposed_encoding(selected.template, variable)
-                style_application.accept_encoding(variable, encoding)
-            except (style_application.ConversionRefused, ValidationError) as refused:
-                messages.error(request, _("The template's range and curve were not set: %(why)s") % {"why": refused})
-                return redirect(style_url(selected))
-            messages.success(request, _("Range and curve set from the template."))
-            for warning in style_application.warnings(selected.template, variable, encoding):
-                messages.warning(request, warning)
+        elif action == "start-from-ramp":
+            ramp_form = RampStartForm(request.POST, ramp_queryset=ramp_queryset)
+            if not ramp_form.is_valid():
+                for error in ramp_form.errors.values():
+                    messages.error(request, " ".join(error))
+                return redirect(chooser_url)
+            data = ramp_form.cleaned_data
+            style = style_application.start_from_ramp(
+                data["ramp"],
+                variable,
+                mode=data["mode"],
+                steps=data["steps"],
+                style=selected if starting_over else None,
+            )
+            started = (
+                _('Started this style over from the "%(ramp)s" ramp.')
+                if starting_over
+                else _('Started a style from the "%(ramp)s" ramp.')
+            )
+            _report_saved(request, started % {"ramp": data["ramp"].name}, variable)
+            return redirect(style_url(style))
+
+        elif action == "customise-stops":
+            if selected is None:
+                messages.error(request, _("No such style."))
+                return redirect(form_url)
+            if selected.origin != VariableStyle.Origin.CUSTOM:
+                selected.customise()
+                selected.save()
+                messages.success(request, _("The stops are yours to edit now. Nothing else changed."))
             return redirect(style_url(selected))
 
         elif action == "promote":
@@ -640,10 +805,20 @@ def variable_styling(request, collection_pk, variable_pk):
     except (TypeError, ValueError):
         selected_ramp_id = None
     ramp_groups = _ramp_groups(ramp_queryset, selected_ramp_id)
+    # Which editor the style gets (#806): only its own path's controls. A new
+    # style here is one started from scratch, and so is a style started over
+    # from scratch (#807).
+    origin = selected.origin if selected and not scratch else VariableStyle.Origin.CUSTOM
     selected_ramp = next(
         (ramp for group in ramp_groups for ramp in group["ramps"] if ramp["selected"]),
         None,
     )
+    # A template style's picker (#807, #810): its own template checked, unless
+    # a rejected save picked another, which comes back checked with "Change
+    # template" open.
+    picked_template_id = selected.template_id if selected else None
+    if origin == VariableStyle.Origin.TEMPLATE and request.method == "POST":
+        picked_template_id = _int_or_none(request.POST.get("template")) or picked_template_id
 
     context = {
         "breadcrumbs_items": [
@@ -668,8 +843,18 @@ def variable_styling(request, collection_pk, variable_pk):
         "selected": selected,
         "creating": creating,
         "range_form": range_form,
+        "range_open": bool(range_form.errors) or _range_needs_attention(variable, selected),
         "style_form": style_form,
         "stop_rows": stop_rows,
+        "origin": origin,
+        "starting_over": starting_over,
+        "laid_over_old_range": laid_over_old_range,
+        # The values templates compare and post, never spelled there (#806, #807).
+        "Origin": VariableStyle.Origin,
+        "origin_values": {origin.name: origin.value for origin in VariableStyle.Origin},
+        "start_values": {"over": START_OVER, "scratch": START_SCRATCH},
+        "new_scratch_url": style_url(None, START_SCRATCH),
+        "start_over_url": style_url(selected, START_OVER) if selected else None,
         "ramp_groups": ramp_groups,
         "selected_ramp": selected_ramp,
         "ramp_catalog_url": reverse("colorramp:index"),
@@ -678,14 +863,27 @@ def variable_styling(request, collection_pk, variable_pk):
         "new_style_url": style_url(),
         "grayscale_gradient": GRAYSCALE_GRADIENT,
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,
+        "mode_choices": VariableStyle.Mode.choices,
         "preview": _preview_context(variable),
-        "template_picker": _template_picker(
-            scoped_queryset(request, StyleTemplate.objects.select_related("unit", "organisation")).in_catalogue_order(),
-            variable,
+        "show_chooser": show_chooser,
+        "scratch": scratch,
+        "template_picker": (
+            _template_picker(
+                scoped_queryset(
+                    request, StyleTemplate.objects.select_related("unit", "organisation")
+                ).in_catalogue_order(),
+                variable,
+            )
+            # The chooser's, and a template style's in-place picker (#807).
+            if show_chooser or origin == VariableStyle.Origin.TEMPLATE
+            else None
         ),
-        "encoding_proposal": (
-            _encoding_proposal(variable, selected) if request.GET.get("propose") == "encoding" else None
-        ),
+        "offer_template_encoding": offer_template_encoding,
+        "picked_template_id": picked_template_id,
+        # Open, too, when the style's template no longer exists: there is
+        # nothing to show closed.
+        "template_change_open": bool(selected)
+        and (selected.template_id is None or picked_template_id != selected.template_id),
     }
     return render(request, "core/variable_styling.html", context)
 
@@ -693,11 +891,12 @@ def variable_styling(request, collection_pk, variable_pk):
 def variable_style_stops(request, collection_pk, variable_pk):
     """A ramp's stops over the variable's range, generated and *not* saved.
 
-    What the styling form's "Apply ramp" reads. Applying used to be a POST that
-    regenerated the snapshot in the database behind a confirm round-trip, so the
-    only way to see a ramp on real data was to destroy the tuning it replaced.
-    Here the stops come back as JSON, fill the form unsaved, and the map
-    repaints — nothing is lost until Save, and a reload undoes it.
+    What a ramp style's editor reads whenever its ramp, mode, steps or reverse
+    change (#806), to show the stops a save will store. Applying used to be a POST
+    that regenerated the snapshot in the database behind a confirm round-trip,
+    so the only way to see a ramp on real data was to destroy the tuning it
+    replaced. Here the stops come back as JSON, fill the form unsaved, and the
+    map repaints — nothing is lost until Save, and a reload undoes it.
 
     It runs the same :func:`served_ramp_stops` the model's ``apply_ramp()`` does
     over the same saved range, so what the form fills in is exactly what a saved
@@ -707,33 +906,18 @@ def variable_style_stops(request, collection_pk, variable_pk):
     collection = get_org_object_or_404(request, Collection, pk=collection_pk)
     variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
 
-    try:
-        ramp_pk = int(request.GET.get("ramp", ""))
-    except ValueError:
-        ramp_pk = None
-    ramp = (
-        scoped_queryset(request, ColorRamp.objects.prefetch_related("stops")).filter(pk=ramp_pk).first()
-        if ramp_pk
-        else None
+    params = request.GET.copy()
+    params.setdefault("mode", VariableStyle.Mode.CONTINUOUS)
+    stops_form = RampStopsForm(
+        params, ramp_queryset=scoped_queryset(request, ColorRamp.objects.prefetch_related("stops"))
     )
-    if ramp is None:
-        return JsonResponse({"error": _("Pick a ramp to apply.")}, status=400)
-
-    mode = request.GET.get("mode", VariableStyle.Mode.CONTINUOUS)
-    if mode not in VariableStyle.Mode.values:
-        return JsonResponse({"error": _("Unknown rendering mode.")}, status=400)
-
-    steps = None
-    if mode == VariableStyle.Mode.STEPPED:
-        try:
-            steps = int(request.GET.get("steps", ""))
-        except ValueError:
-            steps = 0
-        if steps < 2:
-            return JsonResponse({"error": _("Stepped mode needs at least two classes.")}, status=400)
-
+    if not stops_form.is_valid():
+        first_error = next(iter(stops_form.errors.values()))[0]
+        return JsonResponse({"error": first_error}, status=400)
+    data = stops_form.cleaned_data
+    steps = data["steps"] if data["mode"] == VariableStyle.Mode.STEPPED else None
     return JsonResponse(
         {
-            "stops": served_ramp_stops(ramp, variable, mode=mode, steps=steps),
+            "stops": served_ramp_stops(data["ramp"], variable, mode=data["mode"], steps=steps, reverse=data["reverse"]),
         }
     )

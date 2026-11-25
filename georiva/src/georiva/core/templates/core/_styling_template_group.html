@@ -2,6 +2,12 @@
 {% comment %}
     One quantity's Style templates in the picker (#791). ``excluded`` rows are
     the ones whose unit does not convert: disabled, with the reason.
+
+    ``in_place`` is a template style's own editor (#807): the style's template
+    (or the one a rejected save picked, #810) comes checked and none is
+    required, since keeping it is the usual save.
+    Each offered row carries its stops and out-of-range settings, so picking
+    it repaints the preview before anything is saved.
 {% endcomment %}
 <fieldset class="vs-template-group">
     <legend class="w-label-3">{{ group.label }}</legend>
@@ -9,7 +15,7 @@
         {% for template in group.templates %}
             <li>
                 <label class="vs-template{% if excluded %} vs-template--excluded{% endif %}">
-                    <input type="radio" name="template" value="{{ template.pk }}"{% if excluded %} disabled{% else %} required{% endif %}>
+                    <input type="radio" name="template" value="{{ template.pk }}"{% if excluded %} disabled{% else %} data-stops="{{ template.stops_json }}" data-under="{{ template.under }}" data-over="{{ template.over }}"{% if in_place %}{% if template.pk == picked_template_id %} checked{% endif %}{% else %} required{% endif %}{% endif %}>
                     <span class="vs-template-name">{{ template.name }}</span>
                     {# The bands are data: their colours are the template's. #}
                     <span class="vs-template-swatch" style="background: {{ template.gradient }};"></span>
@@ -18,6 +24,32 @@
                         <span class="vs-template-reason">{{ template.reason }}</span>
                     {% endif %}
                 </label>
+                {% comment %}
+                    What choosing it does to the encoding (#800), shown once it
+                    is picked: its range and curve beside the variable's, and
+                    the warnings for whichever encoding would be in force —
+                    its own when "Also use its range and curve" is ticked, the
+                    current one otherwise. CSS picks which, from the inputs.
+                {% endcomment %}
+                {% if template.encoding %}
+                    <div class="vs-template-encoding">
+                        <p>
+                            {% if template.encoding.same %}
+                                {% trans "Laid out for this variable's current range and curve." %}
+                            {% else %}
+                                {% blocktrans with min=template.encoding.value_min max=template.encoding.value_max unit=variable.units curve=template.encoding.scale_type_label|lower %}Laid out for {{ min }} – {{ max }} {{ unit }}, {{ curve }}.{% endblocktrans %}
+                            {% endif %}
+                        </p>
+                        {% if offer_template_encoding %}
+                            {% for warning in template.encoding.warnings_accepted %}
+                                <div class="help-block help-warning" data-when="accept">{{ warning }}</div>
+                            {% endfor %}
+                        {% endif %}
+                        {% for warning in template.encoding.warnings_kept %}
+                            <div class="help-block help-warning"{% if offer_template_encoding %} data-when="keep"{% endif %}>{{ warning }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
             </li>
         {% endfor %}
     </ul>

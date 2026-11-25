@@ -53,6 +53,76 @@
             font-weight: 600;
         }
 
+        /* A field never reaches past its card (#805): Wagtail sizes its
+           inputs at 100%, which a wrapping flex row resolves against the
+           field's own content, so the Classes input is given its width. */
+        .vs-field {
+            min-inline-size: 0;
+            max-inline-size: 100%;
+        }
+
+        .vs-field input,
+        .vs-field select {
+            max-inline-size: 100%;
+        }
+
+        #vs-steps-field input[type="number"] {
+            inline-size: 6rem;
+        }
+
+        /*
+         * One compact size for every field on this page (#808), smaller than
+         * Wagtail's default: text, number and select inputs in the chooser,
+         * the editors, the stops and classes tables and the range section.
+         * Scoped to .vs-layout, so Wagtail's inputs elsewhere are untouched.
+         *
+         * One height for all of them (#810): a fixed border-box height with
+         * no vertical padding, the text centred by its line-height, so an
+         * input, a select and a stops-table cell cannot differ by a padding
+         * or a min-height Wagtail sets for its own larger fields.
+         */
+        .vs-layout input[type="text"],
+        .vs-layout input[type="number"],
+        .vs-layout select {
+            box-sizing: border-box;
+            block-size: 2rem;
+            min-height: 2rem;
+            padding-block: 0;
+            line-height: calc(2rem - 2px);
+            font-size: 0.875rem;
+            border-radius: 4px;
+        }
+
+        .vs-layout input[type="text"],
+        .vs-layout input[type="number"] {
+            padding-inline: 0.5rem;
+        }
+
+        /* Wagtail draws a select's chevron as two background gradients,
+           placed for its own height: re-place them for this one. */
+        .vs-layout select {
+            padding-inline: 0.5rem 2rem;
+            background-position-x: calc(100% - 1rem), calc(100% - 0.625rem);
+            background-position-y: 0.8125rem, 0.8125rem;
+        }
+
+        /* Compact radios, in line with their label: a 1rem ring and dot in
+           place of Wagtail's 1.5rem box. */
+        .vs-layout input[type="radio"] {
+            inline-size: 1rem;
+            block-size: 1rem;
+            margin: 0;
+            border-radius: 50%;
+            vertical-align: middle;
+        }
+
+        .vs-layout input[type="radio"]::before {
+            inline-size: 0.625rem;
+            block-size: 0.625rem;
+            inset-inline-start: 0.125rem;
+            top: 0.125rem;
+        }
+
         .vs-errors {
             color: var(--w-color-critical-200);
             margin: 0.5rem 0 0;
@@ -84,7 +154,8 @@
             align-items: center;
             gap: 0.5rem;
             inline-size: 100%;
-            padding: 0.4rem 0.5rem;
+            min-block-size: 2rem;
+            padding: 0.25rem 0.5rem;
             border: 1px solid var(--w-color-border-field-default);
             border-radius: 3px;
             background: var(--w-color-surface-field);
@@ -136,14 +207,6 @@
             border: 1px solid var(--w-color-border-furniture);
         }
 
-        .vs-ramp-option-swatch--none {
-            background: repeating-linear-gradient(
-                45deg,
-                var(--w-color-border-furniture) 0 4px,
-                var(--w-color-surface-page) 4px 8px
-            );
-        }
-
         .vs-ramp-group {
             margin: 0.5rem 0 0.15rem;
             padding-inline: 0.75rem;
@@ -161,10 +224,26 @@
             margin-block-end: 0.75rem;
         }
 
+        /* Each quantity's templates (or a ramp group) as a subtle card,
+           its name as the header (#808). A floated legend sits inside the
+           border, not on it. */
         .vs-template-group {
-            border: 0;
-            padding: 0;
-            margin: 0 0 0.75rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 5px;
+            padding: 0.5rem 0.5rem 0.35rem;
+            margin: 0 0 0.6rem;
+            background: color-mix(in srgb, var(--w-color-text-label) 3%, var(--w-color-surface-page));
+        }
+
+        .vs-template-group > legend {
+            float: left;
+            inline-size: 100%;
+            padding: 0 0.5rem;
+            margin-block-end: 0.25rem;
+        }
+
+        .vs-template-group > legend + * {
+            clear: both;
         }
 
         .vs-template-list {
@@ -177,8 +256,8 @@
             display: grid;
             grid-template-columns: auto minmax(0, 1fr) 120px;
             align-items: center;
-            gap: 0.15rem 0.6rem;
-            padding: 0.3rem 0.5rem;
+            gap: 0.1rem 0.5rem;
+            padding: 0.25rem 0.5rem;
             border-radius: 4px;
             cursor: pointer;
         }
@@ -210,10 +289,128 @@
             margin-block-end: 0.5rem;
         }
 
-        .vs-template-default {
+        /* The new-style chooser (#800): three starts, one open at a time. */
+        .vs-chooser-current {
+            color: var(--w-color-text-meta);
+        }
+
+        /* Each start is a tile that reads as an action (#808): a title, a
+           one-line description and a chevron, the whole tile clickable. The
+           open one is outlined, and its form opens inside it. */
+        .vs-chooser-options {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .vs-chooser-option {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 5px;
+            background: var(--w-color-surface-page);
+            transition: border-color 0.15s ease;
+        }
+
+        .vs-chooser-option:hover,
+        .vs-chooser-option[open] {
+            border-color: var(--w-color-secondary);
+        }
+
+        .vs-chooser-option > summary {
+            display: grid;
+            grid-template-columns: auto auto minmax(0, 1fr) auto;
+            grid-template-areas:
+                "title badge . toggle"
+                "blurb blurb blurb toggle";
+            align-items: center;
+            gap: 0.2rem 0.6rem;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .vs-chooser-option > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .vs-chooser-option > summary:hover {
+            background: color-mix(in srgb, var(--w-color-secondary) 6%, transparent);
+        }
+
+        .vs-chooser-option[open] > summary {
+            border-end-start-radius: 0;
+            border-end-end-radius: 0;
+            border-block-end: 1px solid var(--w-color-border-furniture);
+        }
+
+        .vs-chooser-title {
+            grid-area: title;
+            font-weight: 700;
+            color: var(--w-color-text-label);
+        }
+
+        .vs-chooser-option > summary > .w-status {
+            grid-area: badge;
+            justify-self: start;
+        }
+
+        .vs-chooser-blurb {
+            grid-area: blurb;
+            color: var(--w-color-text-meta);
+            font-size: 0.9em;
+        }
+
+        .vs-chooser-option > summary > .vs-disclosure-toggle {
+            grid-area: toggle;
+        }
+
+        .vs-chooser-option > summary:hover .vs-disclosure-toggle {
+            border-color: var(--w-color-border-interactive-more-contrast-hover);
+            color: var(--w-color-icon-primary-hover);
+        }
+
+        .vs-chooser-option[open] > summary .vs-disclosure-icon {
+            transform: none;
+        }
+
+        .vs-chooser-option > form,
+        .vs-chooser-option > p {
+            margin: 0;
+            padding: 0.75rem 1rem;
+        }
+
+        .vs-chooser-option > p + p {
+            padding-block-start: 0;
+        }
+
+        .vs-chooser-mode {
+            border: 0;
+            padding: 0;
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .vs-template-encoding-choice {
             display: flex;
             align-items: center;
             gap: 0.4rem;
+        }
+
+        /* A template's range, curve and warnings show once it is picked; which
+           warnings follow the "Also use its range and curve" checkbox. */
+        .vs-template-encoding {
+            display: none;
+            margin: 0.25rem 0.5rem 0.5rem 2rem;
+            font-size: 0.9em;
+        }
+
+        li:has(> .vs-template input:checked) .vs-template-encoding {
+            display: block;
+        }
+
+        .vs-template-picker:has([name="accept_encoding"]:checked) [data-when="keep"],
+        .vs-template-picker:not(:has([name="accept_encoding"]:checked)) [data-when="accept"] {
+            display: none;
         }
 
         .vs-template-lineage {
@@ -248,6 +445,21 @@
             width: 100%;
         }
 
+        /*
+         * A colour cell holds a full #RRGGBBAA (#805): the column never
+         * squeezes below it, and the picker beside it keeps to its own
+         * narrow cell rather than sitting over the end of the text.
+         */
+        .vs-stops-table input[name="stop_color"],
+        .vs-stops-table input.vs-class-color {
+            min-inline-size: 7.5rem;
+        }
+
+        .vs-stops-table td:has(> .vs-stop-picker) {
+            inline-size: 2rem;
+            padding-inline: 0 0.5rem;
+        }
+
         .vs-classes-table input[readonly] {
             background: transparent;
             border-color: transparent;
@@ -262,41 +474,204 @@
         }
 
         .vs-stop-picker {
-            inline-size: 2.2rem;
-            block-size: 2.2rem;
+            inline-size: 2rem;
+            block-size: 2rem;
             padding: 0;
             border: 1px solid var(--w-color-border-furniture);
             border-radius: 3px;
             background: none;
         }
 
-        .vs-style-list {
+        /*
+         * The styles as tabs above the editor (#799). One line, however many
+         * styles or however long their names (#804): the strip scrolls
+         * sideways, each name is cut short with its full text as the link's
+         * title, and "+ New style" stays pinned at the strip's end.
+         *
+         * The strip's baseline is an inset shadow, not a border: a scrolling
+         * box clips to its padding box, so a tab pulled over a border by a
+         * negative margin would lose its bottom edge. The selected tab's
+         * bottom border, in the page colour, covers the shadow beneath it.
+         */
+        .vs-style-tab-list {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 0.25rem;
             list-style: none;
-            margin: 0;
+            margin: 0 0 1rem;
             padding: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            box-shadow: inset 0 -1px 0 var(--w-color-border-furniture);
         }
 
-        .vs-style-list li {
-            border-bottom: 1px solid var(--w-color-border-furniture);
-            padding: 0.6rem 0;
+        .vs-style-tab-list > li {
+            flex: 0 0 auto;
+            display: flex;
         }
 
-        .vs-style-list li:last-child {
-            border-bottom: none;
+        .vs-style-tab-list > li:last-child {
+            position: sticky;
+            inset-inline-end: 0;
+            padding-inline-start: 0.25rem;
+            background: var(--w-color-surface-page);
         }
 
-        .vs-style-list .vs-style-swatch {
-            display: block;
-            height: 10px;
+        .vs-style-tab {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.85rem;
+            border: 1px solid transparent;
+            border-radius: 5px 5px 0 0;
+            color: var(--w-color-text-label);
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .vs-style-tab:hover {
+            background: color-mix(in srgb, var(--w-color-text-label) 6%, transparent);
+        }
+
+        .vs-style-tab[aria-current="page"] {
+            border-color: var(--w-color-border-furniture);
+            border-bottom-color: var(--w-color-surface-page);
+            background: var(--w-color-surface-page);
+            font-weight: 700;
+        }
+
+        .vs-style-tab--new {
+            color: var(--w-color-secondary);
+        }
+
+        .vs-style-tab-name {
+            max-inline-size: 14rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .vs-style-tab-icon {
+            flex: 0 0 auto;
+            inline-size: 0.9rem;
+            block-size: 0.9rem;
+        }
+
+        .vs-style-tab-swatch {
+            flex: 0 0 auto;
+            inline-size: 2.5rem;
+            block-size: 12px;
             border-radius: 3px;
             border: 1px solid var(--w-color-border-furniture);
-            margin: 0.35rem 0;
+        }
+
+        .vs-style-tabs-empty {
+            margin-top: -0.5rem;
+        }
+
+        .vs-style-header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .vs-style-header h2 {
+            margin: 0;
         }
 
         .vs-style-actions {
             display: flex;
             gap: 0.5rem;
             align-items: center;
+        }
+
+        /* The shared range and curve, below the editor (#799). */
+        .vs-range-summary {
+            flex-wrap: wrap;
+            gap: 0.25rem 0.75rem;
+        }
+
+        /*
+         * Every disclosure's summary (#798): Wagtail's collapsible-panel toggle —
+         * a ringed chevron, pointing right while closed and down while open —
+         * in place of the browser's marker, which display: flex drops anyway.
+         */
+        .vs-disclosure {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .vs-disclosure::-webkit-details-marker {
+            display: none;
+        }
+
+        .vs-disclosure-toggle {
+            display: inline-grid;
+            place-content: center;
+            flex-shrink: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            border: 1px solid var(--w-color-border-interactive-more-contrast);
+            border-radius: 100%;
+            color: var(--w-color-icon-primary);
+        }
+
+        .vs-disclosure:hover .vs-disclosure-toggle {
+            border-color: var(--w-color-border-interactive-more-contrast-hover);
+            color: var(--w-color-icon-primary-hover);
+        }
+
+        .vs-disclosure-icon {
+            width: 1rem;
+            height: 1rem;
+            transform: rotate(-90deg);
+            transition: transform 0.15s ease;
+        }
+
+        details[open] > .vs-disclosure .vs-disclosure-icon {
+            transform: none;
+        }
+
+        .vs-range-summary h2 {
+            display: inline;
+            margin: 0;
+        }
+
+        .vs-range-scope,
+        .vs-range-current {
+            color: var(--w-color-text-meta);
+            font-size: 0.9em;
+        }
+
+        .vs-range-current {
+            margin-inline-start: auto;
+        }
+
+        .vs-range-panel[open] .vs-range-summary {
+            margin-bottom: 1rem;
+        }
+
+        /* Minimum, maximum and the curve one per row, label over a compact
+           input; the save button below them (#808). */
+        .vs-range-fields {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        /* A number's width, not half the card (#810). */
+        .vs-range-fields > .vs-field {
+            inline-size: 12rem;
+            max-inline-size: 100%;
+        }
+
+        .vs-range-fields > .button {
+            align-self: flex-start;
         }
 
         .vs-style-actions form {
@@ -316,11 +691,98 @@
          * `display`, and .button sets one — so both toggled controls need this
          * spelled out.
          */
-        .vs-apply-ramp[hidden],
         #vs-add-stop[hidden],
         .vs-range-hint[hidden],
         .vs-unsaved[hidden] {
             display: none;
+        }
+
+        /* Reverse sits in the row beside mode and classes, its box before its word (#801). */
+        .vs-reverse-field .vs-reverse-label {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+            min-height: 2rem;
+        }
+
+        /* The path a style was made by (#806), beside its name in the header. */
+        .vs-origin-label {
+            color: var(--w-color-text-meta);
+            font-size: 0.85em;
+            font-weight: normal;
+        }
+
+        /*
+         * The one way to take a ramp or template style's stops in hand (#806).
+         */
+        .vs-customise {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            margin-block: 0.75rem;
+        }
+
+        .vs-customise p {
+            margin: 0;
+        }
+
+        /* A template style's template, picked in place (#807). */
+        .vs-template-source {
+            margin-block: 0.75rem;
+        }
+
+        .vs-template-source > legend {
+            margin-bottom: 0.5rem;
+        }
+
+        .vs-template-source > p {
+            margin: 0 0 0.5rem;
+        }
+
+        /* "Change template" (#810): the template in use on one line, the
+           toggle's chevron before it and its label at the end. */
+        .vs-template-current {
+            flex-wrap: wrap;
+            gap: 0.25rem 0.6rem;
+            padding: 0.4rem 0.5rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 5px;
+        }
+
+        .vs-template-current .vs-template-name {
+            font-weight: 600;
+        }
+
+        .vs-template-current .vs-template-swatch {
+            inline-size: 120px;
+        }
+
+        .vs-template-current .vs-template-swatch[hidden] {
+            display: none;
+        }
+
+        .vs-template-current .vs-template-levels {
+            color: var(--w-color-text-meta);
+            font-size: 0.85em;
+        }
+
+        .vs-template-change-label {
+            margin-inline-start: auto;
+            color: var(--w-color-text-link-default);
+            font-size: 0.9em;
+        }
+
+        .vs-template-current:hover .vs-template-change-label {
+            text-decoration: underline;
+        }
+
+        .vs-template-change[open] > .vs-template-current {
+            margin-block-end: 0.75rem;
+        }
+
+        .vs-out-of-range {
+            margin-top: 1rem;
         }
 
         .vs-unsaved {
@@ -453,6 +915,21 @@
             margin: 0.75rem 0;
         }
 
+        .vs-save-bar {
+            position: sticky;
+            bottom: 0;
+            z-index: 2;
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+            padding: 0.75rem 0;
+            border-top: 1px solid var(--w-color-border-furniture);
+            background: var(--w-color-surface-page);
+        }
+
         .vs-json-status {
             font-size: 0.85em;
             color: var(--w-color-text-meta);
@@ -481,9 +958,9 @@
              */
             top: 5.5rem;
             /*
-             * Wagtail's `.button` is `position: relative` at `z-index: auto`
-             * and the "New style" button comes later in the DOM, so without a
-             * layer of our own it paints over the pinned map.
+             * Wagtail's `.button` is `position: relative` at `z-index: auto`,
+             * so a button later in the DOM paints over the pinned map without
+             * a layer of our own.
              */
             z-index: 1;
         }
@@ -662,47 +1139,241 @@
         <div>
 
             {% comment %}
-                What a default style's template proposes for the variable's
-                encoding (#791). The range and curve are shared by every style,
-                so nothing changes until the operator accepts here.
+                The variable's styles as tabs (#799), so which one the editor
+                below holds is never in doubt. Each is a link: picking a style
+                is a page load, as it always was.
             {% endcomment %}
-            {% if encoding_proposal %}
-                <section class="vs-panel vs-proposal" id="vs-encoding-proposal">
-                    <h2 class="w-label-1">{% trans "Use the template's range and curve?" %}</h2>
-                    <p>
-                        {% blocktrans with template=encoding_proposal.template.name min=encoding_proposal.value_min max=encoding_proposal.value_max unit=encoding_proposal.unit curve=encoding_proposal.scale_type_label %}“{{ template }}” is laid out for a range of {{ min }} to {{ max }} {{ unit }} and a {{ curve }} curve.{% endblocktrans %}
-                    </p>
-                    {% for warning in encoding_proposal.warnings %}
-                        <div class="help-block help-warning">{{ warning }}</div>
+            <nav class="vs-style-tabs" aria-label="{% trans 'Styles' %}" data-unsaved-guard>
+                <ul class="vs-style-tab-list">
+                    {% for style in styles %}
+                        <li>
+                            <a href="{{ form_url }}?style={{ style.slug }}" class="vs-style-tab" title="{{ style.name }}"{% if not creating and style.pk == selected.pk %} aria-current="page"{% endif %}>
+                                <span class="vs-style-tab-swatch"
+                                      style="background: {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
+                                <span class="vs-style-tab-name">{{ style.name }}</span>
+                                {% if style.is_default %}
+                                    <span class="w-status w-status--primary">{% trans "Default" %}</span>
+                                {% endif %}
+                            </a>
+                        </li>
                     {% endfor %}
-                    <form method="post" action="{{ form_url }}" class="vs-actions">
-                        {% csrf_token %}
-                        <input type="hidden" name="style_slug" value="{{ selected.slug }}">
-                        <button type="submit" name="action" value="accept-template-encoding" class="button">
-                            {% trans "Use this range and curve" %}
-                        </button>
-                        <a href="{{ form_url }}?style={{ selected.slug }}" class="button button-secondary">
-                            {% trans "Keep the current encoding" %}
+                    <li>
+                        <a href="{{ new_style_url }}" class="vs-style-tab vs-style-tab--new"{% if creating %} aria-current="page"{% endif %}>
+                            {% icon name="plus" classname="vs-style-tab-icon" %}
+                            {% trans "New style" %}
                         </a>
-                    </form>
-                </section>
+                    </li>
+                </ul>
+            </nav>
+            {% if not styles %}
+                <p class="help-text vs-style-tabs-empty">
+                    {% trans "No styles yet — this variable renders as grayscale. Choose how its first style starts." %}
+                </p>
             {% endif %}
 
+            {% if show_chooser %}
+                {% include "core/_styling_chooser.html" %}
+            {% endif %}
+
+            {# Hidden, not left out, behind the chooser (#800): the page script and the map read its stop rows. #}
+            <section class="vs-panel vs-style-editor" id="vs-style-editor"{% if show_chooser %} hidden{% endif %}>
+                {% comment %}
+                    The selected style's header: what is being edited, the path
+                    it was made by (#806), and the actions that act on it as a
+                    whole: Start over (#807), Make default and Delete. Their
+                    forms sit outside #vs-style-form, which a form cannot nest in.
+                {% endcomment %}
+                <header class="vs-style-header">
+                    <h2 class="w-label-1">
+                        {% if creating %}
+                            {% trans "New style" %}
+                        {% else %}
+                            {% blocktrans with name=selected.name %}Style: {{ name }}{% endblocktrans %}
+                            {% if selected.is_default %}
+                                <span class="w-status w-status--primary">{% trans "Default" %}</span>
+                            {% endif %}
+                        {% endif %}
+                    </h2>
+                    {% if selected %}
+                        <div class="vs-style-actions">
+                            <span class="vs-origin-label" id="vs-origin-label">{{ selected.get_origin_display }}</span>
+                            {# "Start over" (#807): the chooser, for this style. Guarded like the tabs: it leaves unsaved edits behind. #}
+                            <span data-unsaved-guard>
+                                <a href="{{ start_over_url }}" class="button button-small button-secondary" id="vs-start-over">
+                                    {% trans "Start over" %}
+                                </a>
+                            </span>
+                            {% if not selected.is_default %}
+                                <form method="post" action="{{ form_url }}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="promote">
+                                    <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                                    <button type="submit" class="button button-small button-secondary">
+                                        {% trans "Make default" %}
+                                    </button>
+                                </form>
+                            {% endif %}
+                            {# Deleting throws the style's unsaved edits away too, so the unsaved guard leaves its confirm to ask alone. #}
+                            <form method="post" action="{{ form_url }}"
+                                  data-confirm="{% trans 'Delete this style?' %}"
+                                  data-unsaved-discards="vs-style-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete-style">
+                                <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                                <button type="submit" class="button button-small no">
+                                    {% trans "Delete" %}
+                                </button>
+                            </form>
+                        </div>
+                    {% endif %}
+                </header>
+
+                {% comment %}
+                    One editor per origin (#806): each include holds only its
+                    own path's controls. What every path shares — "Outside the
+                    stops", the preview and the save bar — follows it here.
+                {% endcomment %}
+                {% comment %}
+                    A start over from scratch asks before its save replaces the
+                    style (#807), as the chooser's template and ramp starts do.
+                {% endcomment %}
+                <form method="post" action="{{ form_url }}" id="vs-style-form"
+                      data-origin="{{ origin }}"{% if starting_over and scratch %}
+                      data-confirm="{% trans 'Replace this style with these stops? Its ramp or template is dropped; its name, tab and default status stay.' %}"{% endif %}
+                      data-unsaved-note="vs-unsaved"
+                      data-unsaved-message="{% trans 'This style has unsaved changes.' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="style_slug"
+                           value="{% if creating %}{% else %}{{ selected.slug }}{% endif %}">
+
+                    {% include "core/_styling_form_errors.html" with form=style_form %}
+
+                    {% if origin == Origin.RAMP %}
+                        {% include "core/_style_editor_ramp.html" %}
+                    {% elif origin == Origin.TEMPLATE %}
+                        {% include "core/_style_editor_template.html" %}
+                    {% else %}
+                        {% include "core/_style_editor_custom.html" %}
+                    {% endif %}
+
+                    {% comment %}
+                        A ramp or template style has no stops table: its rows
+                        ride here unseen, for the preview and the map to read.
+                        A save never takes them (#806) — a ramp style's stops
+                        are regenerated from its ramp, a template style's are
+                        left as they are.
+                    {% endcomment %}
+                    {% if origin != Origin.CUSTOM %}
+                        <table class="vs-stops-carrier" hidden>
+                            <tbody id="vs-stops-body">
+                            {% for stop in stop_rows %}
+                                {% include "core/_styling_stop_row.html" with value=stop.value color=stop.color %}
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    {% endif %}
+                    <template id="vs-stop-row-template">
+                        {% include "core/_styling_stop_row.html" with value="" color="" %}
+                    </template>
+
+                    {# "Outside the stops" (#788): what values beyond the stops are drawn as, on every path. #}
+                    <div class="vs-field-row vs-out-of-range">
+                        <div class="vs-field">
+                            <label for="{{ style_form.under.id_for_label }}">{% trans "Below the first stop" %}</label>
+                            {{ style_form.under }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ style_form.over.id_for_label }}">{% trans "Above the last stop" %}</label>
+                            {{ style_form.over }}
+                        </div>
+                    </div>
+
+                    <h3 class="w-label-2">{% trans "Preview" %}</h3>
+                    <div class="vs-preview" id="vs-preview"></div>
+                    <div class="vs-preview-labels">
+                        <span id="vs-preview-min"></span>
+                        <span id="vs-preview-max"></span>
+                    </div>
+
+                    {% comment %}
+                        The one "Save style" (#802), pinned to the foot of the
+                        viewport while the form runs past it, so saving is in
+                        reach however tall the stops table grows. Keep it last
+                        in the form.
+                    {% endcomment %}
+                    <div class="vs-save-bar" id="vs-save-bar">
+                        {# Shown from the start when the stops are not the saved ones (#806). #}
+                        <p class="vs-unsaved" id="vs-unsaved"{% if not laid_over_old_range %} hidden{% endif %}>
+                            {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
+                        </p>
+                        <button type="submit" name="action" value="save-style" class="button">
+                            {% trans "Save style" %}
+                        </button>
+                    </div>
+                </form>
+
+                {% comment %}
+                    "Customise stops" (#806), submitted by the button in the
+                    ramp or template editor. It keeps the saved stops, so the
+                    style's unsaved edits are thrown away: the guard leaves the
+                    question to this form's own confirm.
+                {% endcomment %}
+                {% if selected and origin != Origin.CUSTOM %}
+                    <form method="post" action="{{ form_url }}" id="vs-customise-form"
+                          data-confirm="{% trans 'Edit these stops by hand? The style keeps its saved stops and becomes custom: its ramp or template will never change them again. Unsaved changes are lost.' %}"
+                          data-unsaved-discards="vs-style-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="customise-stops">
+                        <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                    </form>
+                {% endif %}
+            </section>
+
             {% comment %}
-                The variable's encoding contract. Saving here never touches any
-                style's stops (ADR 0022): regeneration is only the explicit
-                re-apply gesture in the style editor below.
+                The variable's encoding contract, shared by every style (ADR
+                0049). Saving here never touches any style's stops (ADR 0022):
+                a ramp style is regenerated over it when that style is next
+                saved (#806).
+
+                Collapsed unless something needs attention (#799): the view
+                opens it on a rejected range or when the selected style's
+                saved stops fall outside the range or fill less than half of
+                it; the page's script opens it when an edit raises either
+                warning.
             {% endcomment %}
-            <section class="vs-panel">
-                <h2 class="w-label-1">{% trans "Value range" %}</h2>
-                <form method="post" action="{{ form_url }}">
+            <details class="vs-panel vs-range-panel" id="vs-range"{% if range_open %} open{% endif %}>
+                <summary class="vs-disclosure vs-range-summary">
+                    <span class="vs-disclosure-toggle" aria-hidden="true">{% icon name="arrow-down" classname="vs-disclosure-icon" %}</span>
+                    <h2 class="w-label-1">{% trans "Range and curve" %}</h2>
+                    <span class="vs-range-scope">{% trans "shared by every style of this variable" %}</span>
+                    <span class="vs-range-current">
+                        {{ variable.served_range.0 }} – {{ variable.served_range.1 }}{% if variable.units %} {{ variable.units }}{% endif %},
+                        {{ variable.get_scale_type_display|lower }}
+                    </span>
+                </summary>
+                <form method="post" action="{{ form_url }}"
+                      data-unsaved-note="vs-range-unsaved"
+                      data-unsaved-message="{% trans 'The range and curve have unsaved changes.' %}">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="save-range">
                     {% if selected %}
                         <input type="hidden" name="style_slug" value="{{ selected.slug }}">
                     {% endif %}
                     {% include "core/_styling_form_errors.html" with form=range_form %}
-                    <div class="vs-field-row">
+                    {# Counterpart of the clip warning in the preview: that one is stops beyond the range, this one is range beyond the stops. #}
+                    <div class="help-block help-warning vs-range-hint" id="vs-range-hint" hidden
+                         data-selected-slug="{{ selected.slug }}"
+                         data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
+                         data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
+                        {% icon name="warning" classname="default" %}
+                        <p>
+                            <span id="vs-range-hint-text"></span>
+                            <button type="button" class="button button-small button-secondary" id="vs-fit-range">
+                                {% trans "Fit range to stops" %}
+                            </button>
+                        </p>
+                    </div>
+                    <div class="vs-field-row vs-range-fields">
                         <div class="vs-field">
                             <label for="{{ range_form.value_min.id_for_label }}">
                                 {% trans "Minimum" %}
@@ -721,369 +1392,16 @@
                             <label for="{{ range_form.scale_type.id_for_label }}">{% trans "Scale type" %}</label>
                             {{ range_form.scale_type }}
                         </div>
-                        <button type="submit" class="button">{% trans "Save range" %}</button>
+                        <button type="submit" class="button">{% trans "Save range for all styles" %}</button>
                     </div>
                     <p class="vs-unsaved" id="vs-range-unsaved" hidden>
-                        {% trans "Unsaved — the range is not saved until you press “Save range”." %}
+                        {% trans "Unsaved — the range is not saved until you press “Save range for all styles”." %}
                     </p>
                     <p class="help-text">
-                        {% trans "Changing the range never rewrites existing stops — use “Apply ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
+                        {% trans "Changing the range never rewrites existing stops. A style made from a ramp is laid over the new range the next time it is saved. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
                     </p>
                 </form>
-            </section>
-
-            <section class="vs-panel">
-                <h2 class="w-label-1">
-                    {% if creating %}
-                        {% trans "New style" %}
-                    {% else %}
-                        {% blocktrans with name=selected.name %}Style: {{ name }}{% endblocktrans %}
-                        {% if selected.is_default %}
-                            <span class="w-status w-status--primary">{% trans "Default" %}</span>
-                        {% endif %}
-                    {% endif %}
-                </h2>
-                {% if selected.template %}
-                    <p class="vs-template-lineage">
-                        {% blocktrans with template=selected.template.name %}Applied from the Style template “{{ template }}”. These stops are a snapshot: editing them never changes the template, nor the template them.{% endblocktrans %}
-                    </p>
-                {% endif %}
-
-                <form method="post" action="{{ form_url }}" id="vs-style-form">
-                    {% csrf_token %}
-                    <input type="hidden" name="style_slug"
-                           value="{% if creating %}{% else %}{{ selected.slug }}{% endif %}">
-
-                    {% include "core/_styling_form_errors.html" with form=style_form %}
-
-                    <div class="vs-field-row">
-                        <div class="vs-field">
-                            <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
-                            {{ style_form.name }}
-                        </div>
-                        {% comment %}
-                            The ramp picker (#383). A native <option> cannot
-                            render a gradient — Chrome and Safari ignore
-                            background-image on one — so choosing by color at
-                            all means replacing the select. The markup is
-                            Wagtail's own w-dropdown Stimulus contract rather
-                            than the {% templatetag openblock %} dropdown {% templatetag closeblock %} tag, because the
-                            tag renders its toggle label as escaped text and
-                            this toggle has to carry a gradient bar the browser
-                            repaints on every pick.
-
-                            The field itself is unchanged: a hidden input named
-                            `ramp`, so validation and org scoping stay exactly
-                            where they were.
-                        {% endcomment %}
-                        <div class="vs-field vs-ramp-field">
-                            <label id="vs-ramp-label">{% trans "Color ramp" %}</label>
-                            <input type="hidden" name="ramp" id="vs-ramp-input"
-                                   value="{{ selected_ramp.pk|default_if_none:'' }}">
-                            <div class="w-dropdown vs-ramp-dropdown"
-                                 data-controller="w-dropdown"
-                                 data-w-dropdown-hide-on-click-value="true">
-                                <button type="button"
-                                        class="w-dropdown__toggle vs-ramp-toggle"
-                                        data-w-dropdown-target="toggle"
-                                        aria-labelledby="vs-ramp-label vs-ramp-toggle-name">
-                                    <span class="vs-ramp-toggle-bar" id="vs-ramp-toggle-bar"
-                                          {% if selected_ramp %}style="background: {{ selected_ramp.gradient }};"{% endif %}></span>
-                                    <span class="vs-ramp-toggle-name" id="vs-ramp-toggle-name">
-                                        {% if selected_ramp %}{{ selected_ramp.name }}{% else %}{% trans "Choose a ramp" %}{% endif %}
-                                    </span>
-                                    {% icon name="arrow-down" classname="w-dropdown__toggle-icon" %}
-                                </button>
-                                <div data-w-dropdown-target="content"
-                                     class="w-dropdown__content vs-ramp-menu" hidden>
-                                    <button type="button" class="vs-ramp-option" data-ramp-pk=""
-                                            data-ramp-name="{% trans 'Choose a ramp' %}" data-ramp-gradient="">
-                                        <span class="vs-ramp-option-swatch vs-ramp-option-swatch--none"></span>
-                                        <span class="vs-ramp-option-name">{% trans "No ramp" %}</span>
-                                    </button>
-                                    {% for group in ramp_groups %}
-                                        <p class="vs-ramp-group">{{ group.label }}</p>
-                                        {% for ramp in group.ramps %}
-                                            <button type="button" class="vs-ramp-option"
-                                                    data-ramp-pk="{{ ramp.pk }}"
-                                                    data-ramp-name="{{ ramp.name }}"
-                                                    data-ramp-gradient="{{ ramp.gradient }}"
-                                                    {% if ramp.selected %}aria-current="true"{% endif %}>
-                                                <span class="vs-ramp-option-swatch"
-                                                      style="background: {{ ramp.gradient }};"></span>
-                                                <span class="vs-ramp-option-name">{{ ramp.name }}</span>
-                                            </button>
-                                        {% endfor %}
-                                    {% empty %}
-                                        <p class="vs-ramp-group">
-                                            {% trans "No color ramps yet." %}
-                                            <a href="{{ ramp_catalog_url }}">{% trans "Add one" %}</a>
-                                        </p>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            {% comment %}
-                                The day-to-day route to the ramp catalog, which
-                                otherwise lives under Settings. Below the toggle
-                                rather than inside the menu, which scrolls — a
-                                link at the foot of a long catalog is one nobody
-                                finds. A new tab, so unsaved stop edits on this
-                                form survive the detour.
-                            {% endcomment %}
-                            <a class="vs-ramp-manage" href="{{ ramp_catalog_url }}"
-                               target="_blank" rel="noopener">{% trans "Manage color ramps" %}</a>
-                        </div>
-                    </div>
-
-                    <div class="vs-field-row">
-                        <div class="vs-field">
-                            <label for="{{ style_form.mode.id_for_label }}">{% trans "Rendering" %}</label>
-                            {{ style_form.mode }}
-                        </div>
-                        <div class="vs-field" id="vs-steps-field">
-                            <label for="{{ style_form.steps.id_for_label }}">{% trans "Classes" %}</label>
-                            {{ style_form.steps }}
-                        </div>
-                        {% comment %}
-                            The same gesture as the one below the stops table.
-                            It is duplicated rather than moved because the two
-                            ends of the form are two different moments: here it
-                            sits beside the ramp and mode that feed it, which is
-                            where an operator who has just changed either one
-                            reaches for it, and the stops table is taller than a
-                            screen.
-                        {% endcomment %}
-                        <button type="button" class="button button-small button-secondary vs-apply-ramp"
-                                data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
-                            {% trans "Apply ramp" %}
-                        </button>
-                    </div>
-
-                    {# What values beyond the stops are drawn as (#788): the end colour, or nothing. #}
-                    <div class="vs-field-row">
-                        <div class="vs-field">
-                            <label for="{{ style_form.under.id_for_label }}">{% trans "Below the first stop" %}</label>
-                            {{ style_form.under }}
-                        </div>
-                        <div class="vs-field">
-                            <label for="{{ style_form.over.id_for_label }}">{% trans "Above the last stop" %}</label>
-                            {{ style_form.over }}
-                        </div>
-                    </div>
-
-                    <h3 class="w-label-2">{% trans "Preview" %}</h3>
-                    <div class="vs-preview" id="vs-preview"></div>
-                    <div class="vs-preview-labels">
-                        <span id="vs-preview-min"></span>
-                        <span id="vs-preview-max"></span>
-                    </div>
-
-                    <h3 class="w-label-2">{% trans "Stops" %}</h3>
-                    <p class="help-text">
-                        {% trans "Absolute data values mapped to colors, in ascending order. Edit values or colors to fine-tune — for example to pin a threshold like 0 °C to an exact color." %}
-                    </p>
-                    {# Counterpart of the clip warning in the preview: that one is stops beyond the range, this one is range beyond the stops. #}
-                    <div class="help-block help-warning vs-range-hint" id="vs-range-hint" hidden
-                         data-selected-slug="{{ selected.slug }}"
-                         data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
-                         data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
-                        {% icon name="warning" classname="default" %}
-                        <p>
-                            <span id="vs-range-hint-text"></span>
-                            <button type="button" class="button button-small button-secondary" id="vs-fit-range">
-                                {% trans "Fit range to stops" %}
-                            </button>
-                        </p>
-                    </div>
-                    <table class="vs-stops-table" id="vs-stops-table">
-                        <thead>
-                        <tr>
-                            <th>{% trans "Value" %}{% if variable.units %} ({{ variable.units }}){% endif %}</th>
-                            <th>{% trans "Color" %}</th>
-                            <th></th>
-                            <th></th>
-                        </tr>
-                        </thead>
-                        <tbody id="vs-stops-body">
-                        {% for stop in stop_rows %}
-                            {% include "core/_styling_stop_row.html" with value=stop.value color=stop.color %}
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                    <template id="vs-stop-row-template">
-                        {% include "core/_styling_stop_row.html" with value="" color="" %}
-                    </template>
-                    {# Stepped styles edit as classes; the rows above/below stay what Save reads (#566). #}
-                    <p class="help-text" id="vs-raw-note" hidden>
-                        {% trans "These stops are not clean class pairs (each class two stops of one color, each starting where the last ended), so they are shown as raw stops. Nothing is changed until you edit them." %}
-                    </p>
-                    <div id="vs-classes" hidden>
-                        <table class="vs-stops-table vs-classes-table">
-                            <thead>
-                            <tr>
-                                <th>{% trans "From" %}{% if variable.units %} ({{ variable.units }}){% endif %}</th>
-                                <th>{% trans "To" %}{% if variable.units %} ({{ variable.units }}){% endif %}</th>
-                                <th>{% trans "Color" %}</th>
-                                <th></th>
-                                <th></th>
-                            </tr>
-                            </thead>
-                            <tbody id="vs-classes-body"></tbody>
-                        </table>
-                    </div>
-                    <template id="vs-class-row-template">
-                        <tr class="vs-class-row">
-                            <td><input type="text" class="vs-class-from" readonly tabindex="-1"></td>
-                            <td><input type="text" class="vs-class-to"></td>
-                            <td><input type="text" class="vs-class-color"></td>
-                            <td><input type="color" class="vs-stop-picker" aria-label="{% trans 'Pick color' %}"></td>
-                            <td class="vs-class-actions">
-                                <button type="button" class="button button-small button-secondary vs-class-transparent">{% trans "Transparent" %}</button>
-                                <button type="button" class="button button-small button-secondary vs-class-add">{% trans "Add class" %}</button>
-                                <button type="button" class="button button-small no vs-class-remove">{% trans "Remove" %}</button>
-                            </td>
-                        </tr>
-                    </template>
-                    <div class="vs-stop-tools">
-                        <button type="button" class="button button-small button-secondary" id="vs-add-stop">{% trans "Add stop" %}</button>
-                        {% comment %}
-                            Reversal lives here rather than in the ramp menu,
-                            where QGIS puts it. There the ramp is the live
-                            style; under ADR 0022 it is only a seed and the
-                            snapshot is the truth — so reversing the snapshot
-                            reverses hand-tuned stops and pinned thresholds
-                            too, not only freshly generated ones.
-                        {% endcomment %}
-                        <button type="button" class="button button-small button-secondary" id="vs-reverse-stops">
-                            {% trans "Reverse colors" %}
-                        </button>
-                        <button type="button" class="button button-small button-secondary" id="vs-json-toggle"
-                                aria-expanded="false" aria-controls="vs-json-panel">
-                            {% trans "Edit as JSON" %}
-                        </button>
-                    </div>
-                    {% comment %}
-                        A second way to edit the same rows, not a second field:
-                        the textarea has no name and is never posted. Applying
-                        it rewrites the table, and Save reads the table.
-                    {% endcomment %}
-                    <div class="vs-json-panel" id="vs-json-panel" hidden>
-                        <label for="vs-json-text">{% trans "Stops as JSON" %}</label>
-                        <div class="vs-json-editor">
-                            <div class="vs-json-gutter" id="vs-json-gutter" aria-hidden="true"></div>
-                            <div class="vs-json-flag" id="vs-json-flag" aria-hidden="true" hidden></div>
-                            <textarea id="vs-json-text" rows="12" spellcheck="false" wrap="off"
-                                      aria-describedby="vs-json-help vs-json-error"></textarea>
-                        </div>
-                        <p class="help-text" id="vs-json-help">
-                            {% trans 'An array of {"value": number, "color": "#RRGGBB" or "#RRGGBBAA"}, values not decreasing.' %}
-                        </p>
-                        {% comment %}
-                            Wagtail's own critical help block (tinted, icon at the
-                            start), as it draws field errors elsewhere in the admin.
-                        {% endcomment %}
-                        <div class="help-block help-critical vs-json-error" id="vs-json-error-box" hidden>
-                            {% icon name="warning" classname="default" %}
-                            <p id="vs-json-error" role="alert"
-                            data-not-array="{% trans 'Expected a non-empty array of stops.' %}"
-                            data-line="{% trans ' (line {line})' %}"
-                            data-not-object="{% trans 'Stop {n}{at}: expected an object with value and color.' %}"
-                            data-bad-value="{% trans 'Stop {n}{at}: value must be a number.' %}"
-                            data-bad-color="{% trans 'Stop {n}{at}: color must be #RRGGBB or #RRGGBBAA.' %}"
-                            data-decreasing="{% trans 'Stop {n}{at}: value is lower than the previous stop.' %}"></p>
-                        </div>
-                        <div class="vs-stop-tools">
-                            <button type="button" class="button button-small button-secondary" id="vs-json-apply">
-                                {% trans "Apply JSON" %}
-                            </button>
-                            <button type="button" class="button button-small button-secondary" id="vs-json-copy">
-                                {% trans "Copy" %}
-                            </button>
-                            <span class="vs-json-status" id="vs-json-status" role="status" aria-live="polite"
-                                  data-copied="{% trans 'Copied' %}"
-                                  data-copy-failed="{% trans 'Could not copy' %}"></span>
-                        </div>
-                    </div>
-
-                    <div class="vs-actions">
-                        <button type="submit" name="action" value="save-style" class="button">
-                            {% trans "Save style" %}
-                        </button>
-                        {% comment %}
-                            Applying a ramp fills the table above from the
-                            server's own generator and repaints the map — it
-                            writes nothing. Whatever it replaces is unsaved
-                            work, recoverable by reloading, so the confirm is
-                            about the form and not about the database.
-                        {% endcomment %}
-                        <button type="button" class="button button-secondary vs-apply-ramp"
-                                data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
-                            {% trans "Apply ramp" %}
-                        </button>
-                        <p class="vs-unsaved" id="vs-unsaved" hidden>
-                            {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
-                        </p>
-                    </div>
-                    <ul class="vs-errors" id="vs-apply-error" hidden
-                        data-pick-ramp="{% trans 'Pick a ramp to apply.' %}"
-                        data-unreachable="{% trans 'Could not reach the server.' %}"></ul>
-                    <p class="help-text">
-                        {% trans "“Apply ramp” regenerates the stops from the selected ramp over the variable's saved range and shows them on the map. Nothing is written until you save." %}
-                    </p>
-                </form>
-            </section>
-
-            {% comment %}
-                The Style template picker (#791). Applying one writes a new
-                stepped style: the template's bands converted into this
-                variable's source unit, a snapshot it never follows again. Only
-                templates whose unit converts are offered; "Show all" lists the
-                rest, disabled, with the reason each is not.
-            {% endcomment %}
-            <section class="vs-panel" id="vs-templates">
-                <h2 class="w-label-1">{% trans "Style templates" %}</h2>
-                <form method="post" action="{{ form_url }}">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="apply-template">
-                    {% if template_picker.offered %}
-                        <div class="vs-template-catalogue">
-                            {% for group in template_picker.offered %}
-                                {% include "core/_styling_template_group.html" with group=group %}
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <p class="help-text">
-                            {% blocktrans with unit=variable.source_unit.symbol %}No Style template is in a unit that converts into {{ unit }}.{% endblocktrans %}
-                        </p>
-                    {% endif %}
-                    {% if template_picker.excluded %}
-                        <details class="vs-template-excluded">
-                            <summary>
-                                {% blocktrans count counter=template_picker.excluded_count %}Show all templates ({{ counter }} more, not offered for this unit){% plural %}Show all templates ({{ counter }} more, not offered for this unit){% endblocktrans %}
-                            </summary>
-                            <div class="vs-template-catalogue">
-                                {% for group in template_picker.excluded %}
-                                    {% include "core/_styling_template_group.html" with group=group excluded=True %}
-                                {% endfor %}
-                            </div>
-                        </details>
-                    {% endif %}
-                    {% if template_picker.offered %}
-                        <div class="vs-field">
-                            <label class="vs-template-default">
-                                <input type="checkbox" name="make_default"{% if not styles %} checked disabled{% endif %}>
-                                {% trans "Make it the default style" %}
-                            </label>
-                            <p class="help-text">
-                                {% trans "A default style then proposes the template's range and curve. The variable's encoding changes only if you accept." %}
-                            </p>
-                        </div>
-                        <div class="vs-actions">
-                            <button type="submit" class="button">{% trans "Apply template" %}</button>
-                        </div>
-                    {% endif %}
-                </form>
-            </section>
+            </details>
         </div>
 
         <aside>
@@ -1143,61 +1461,12 @@
                     </div>
                 {% endif %}
             </section>
-
-            <section class="vs-panel">
-                <h2 class="w-label-1">{% trans "Styles" %}</h2>
-                {% if styles %}
-                    <ul class="vs-style-list">
-                        {% for style in styles %}
-                            <li>
-                                <a href="{{ form_url }}?style={{ style.slug }}">{{ style.name }}</a>
-                                {% if style.is_default %}
-                                    <span class="w-status w-status--primary">{% trans "Default" %}</span>
-                                {% endif %}
-                                <span class="vs-style-swatch"
-                                      style="background:
-                                              {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
-                                <div class="vs-style-actions">
-                                    {% if not style.is_default %}
-                                        <form method="post" action="{{ form_url }}">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="action" value="promote">
-                                            <input type="hidden" name="style_slug" value="{{ style.slug }}">
-                                            <button type="submit" class="button button-small button-secondary">
-                                                {% trans "Make default" %}
-                                            </button>
-                                        </form>
-                                    {% endif %}
-                                    <form method="post" action="{{ form_url }}"
-                                          data-confirm="{% trans 'Delete this style?' %}">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="action" value="delete-style">
-                                        <input type="hidden" name="style_slug" value="{{ style.slug }}">
-                                        <button type="submit" class="button button-small no">
-                                            {% trans "Delete" %}
-                                        </button>
-                                    </form>
-                                </div>
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p class="help-text">
-                        {% trans "No styles yet — this variable renders as grayscale. Pick a ramp and save the first style." %}
-                    </p>
-                {% endif %}
-                <p>
-                    <a href="{{ new_style_url }}" class="button button-small bicolor button--icon">
-                        {% icon name="plus" wrapped=1 %}
-                        {% trans "New style" %}
-                    </a>
-                </p>
-            </section>
         </aside>
     </div>
 
     {{ preview.config|json_script:"vs-preview-config" }}
     {{ style_spans|json_script:"vs-style-spans" }}
+    {{ origin_values|json_script:"vs-origin-values" }}
 {% endblock %}
 
 {% block extra_js %}
@@ -1209,9 +1478,31 @@
     <script src="{% static 'js/colour_table.js' %}"></script>
     <script src="{% static 'js/raster_preview.js' %}"></script>
     <script src="{% static 'core/js/stepped_classes.js' %}"></script>
+    <script src="{% static 'core/js/unsaved_guard.js' %}"
+            data-confirm-suffix="{% trans 'Discard them and continue?' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            /**
+             The unsaved guard's markers, called through a no-op when
+             unsaved_guard.js did not load (#798): regenerating and fitting the
+             range must keep working without it.
+             **/
+            function markDirty(marker) {
+                if (typeof window[marker] === 'function') {
+                    window[marker]();
+                }
+            }
+
             const form = document.getElementById('vs-style-form');
+            /**
+             Which editor is on the page (#806): `ramp` (ramp picker, mode,
+             classes and Reverse; stops regenerated on every change, no stops
+             table), `template` (nothing that changes the stops) or `custom`
+             (the stops or classes table, JSON and Reverse in place). Every
+             control below that belongs to one editor is null on the others.
+             **/
+            const origin = form.dataset.origin;
+            const ORIGIN = JSON.parse(document.getElementById('vs-origin-values').textContent);
             const rampInput = document.getElementById('vs-ramp-input');
             const rampToggleBar = document.getElementById('vs-ramp-toggle-bar');
             const rampToggleName = document.getElementById('vs-ramp-toggle-name');
@@ -1230,64 +1521,48 @@
                 : null;
             const clipWarning = document.getElementById('vs-clip-warning');
             const mapStatus = document.getElementById('vs-map-status');
-            const applyButtons = [...document.querySelectorAll('.vs-apply-ramp')];
+            const reverseInput = form.querySelector('[name="reverse"]');
+            const reverseButton = document.getElementById('vs-reverse');
             const applyError = document.getElementById('vs-apply-error');
-            const unsavedNote = document.getElementById('vs-unsaved');
 
             /**
-             Two pieces of state the page keeps about itself.
-
-             `appliedSignature` is the ramp, mode and class count the stops in
-             the table were last generated from — the saved style's own on load,
-             the chosen ones after an apply. Apply shows only when pressing it
-             would actually change something: when those inputs have moved on,
-             when the stops have been edited away from what they produced, or
-             when there are no stops at all. Editing counts because otherwise
-             applying would hide itself the moment an operator hand-tuned a
-             stop, leaving no way back to the clean ramp.
-
-             `styleDirty` is the simpler one: anything on this form that the
-             database has not been told about. Applying a ramp writes nothing,
-             and the swatch in the Styles list keeps showing the saved style —
-             so without saying so, the page would show two different palettes
-             and claim both.
+             `styleDirty`: anything on this form that the database has not been
+             told about. Regenerating writes nothing, and the swatch in the
+             style tabs keeps showing the saved style — so without saying so,
+             the page would show two different palettes and claim both.
              **/
 
-            let appliedSignature = null;
-            let stopsEdited = false;
             let styleDirty = false;
 
-            function currentSignature() {
-                return JSON.stringify([
-                    rampInput.value,
-                    modeSelect.value,
-                    modeSelect.value === 'stepped' ? stepsInput.value : ''
-                ]);
-            }
-
             function refreshState() {
-                const changed = currentSignature() !== appliedSignature
-                    || stopsEdited
-                    || !body.querySelector('.vs-stop-row');
-                applyButtons.forEach(function (button) {
-                    button.hidden = !changed;
-                });
-                unsavedNote.hidden = !styleDirty;
+                // Shown only, never hidden here: the guard (#802) may have
+                // marked the form dirty from an edit this script does not track.
+                if (styleDirty) {
+                    markDirty('markStyleDirty');
+                }
             }
 
             function markStopsEdited() {
-                stopsEdited = true;
                 styleDirty = true;
                 refreshState();
+            }
+
+            /**
+             A ramp style's ramp, mode, classes or reverse changed: its stops
+             are always what the ramp produces (#806), so they follow at once.
+             **/
+            function rampInputsChanged() {
+                styleDirty = true;
+                refreshState();
+                regenerate();
             }
             const stopsUrl = '{{ stops_url }}';
             let mapPreview = null;
 
             /**
-             Picking a ramp only picks it — "Apply ramp" is still the one thing
-             that fills the stops table. Each option carries its own gradient,
-             so the toggle repaints from the row that was clicked and the page
-             needs no lookup table beside the markup.
+             Picking a ramp regenerates the stops. Each option carries its own
+             gradient, so the toggle repaints from the row that was clicked and
+             the page needs no lookup table beside the markup.
              **/
 
             function selectRamp(option) {
@@ -1305,8 +1580,7 @@
                 if (option.dataset.rampPk) {
                     option.setAttribute('aria-current', 'true');
                 }
-                styleDirty = true;
-                refreshState();
+                rampInputsChanged();
             }
 
             /**
@@ -1325,6 +1599,9 @@
             });
 
             function toggleSteps() {
+                if (!modeSelect) {
+                    return;
+                }
                 const stepped = modeSelect.value === 'stepped';
                 stepsField.style.display = stepped ? '' : 'none';
                 if (stepped && !stepsInput.value) {
@@ -1361,19 +1638,30 @@
              edited range, so most of the encoded texture's resolution sits
              where no stop colors it. Reads the Range inputs, not the saved
              range, so it follows an unsaved edit. "Fit range to stops" only
-             fills those inputs — Save range is still the one thing that
+             fills those inputs — Save range for all styles is still the one thing that
              persists. The range is shared by every style (ADR 0023), so the
              hint names saved siblings whose stops the fitted range would clip.
              **/
 
             const rangeHint = document.getElementById('vs-range-hint');
             const rangeHintText = document.getElementById('vs-range-hint-text');
-            const rangeUnsaved = document.getElementById('vs-range-unsaved');
             const rangeMinInput = document.querySelector('input[name="value_min"]');
             const rangeMaxInput = document.querySelector('input[name="value_max"]');
             const styleSpansEl = document.getElementById('vs-style-spans');
             const styleSpans = styleSpansEl ? JSON.parse(styleSpansEl.textContent) : [];
+            const rangeSection = document.getElementById('vs-range');
             let fitted = null;
+
+            /**
+             The shared range section opens by itself when either warning shows
+             (#799), and is never closed by the page: an operator who opened it
+             keeps it open.
+             **/
+            function openRangeSection() {
+                if (rangeSection) {
+                    rangeSection.open = true;
+                }
+            }
 
             function fill(template, values) {
                 return template.replace(/\{(\w+)\}/g, function (match, key) {
@@ -1414,6 +1702,7 @@
                 }
                 rangeHintText.textContent = text;
                 rangeHint.hidden = false;
+                openRangeSection();
             }
 
             if (rangeHint) {
@@ -1423,12 +1712,12 @@
                     }
                     rangeMinInput.value = fitted[0];
                     rangeMaxInput.value = fitted[1];
-                    rangeUnsaved.hidden = false;
+                    markDirty('markRangeDirty');
                     updateRangeHint(readStops());
                 });
                 [rangeMinInput, rangeMaxInput].forEach(function (input) {
                     input.addEventListener('input', function () {
-                        rangeUnsaved.hidden = false;
+                        markDirty('markRangeDirty');
                         updateRangeHint(readStops());
                     });
                 });
@@ -1522,6 +1811,9 @@
                 clipWarning.hidden = !stops.some(function (stop) {
                     return stop.value < low || stop.value > high;
                 });
+                if (!clipWarning.hidden) {
+                    openRangeSection();
+                }
             }
 
             function paintMap(stops) {
@@ -1587,7 +1879,7 @@
              Save reads; the class table is another way to fill them. Which
              editor shows follows the shape of the stops, not the Rendering
              dropdown, and is re-decided only when stops arrive wholesale (load,
-             Apply ramp, Apply JSON) — never mid-edit, so typing a boundary
+             a regenerate from the ramp, Apply JSON) — never mid-edit, so typing a boundary
              cannot swap the table out from under the cursor.
              **/
 
@@ -1601,6 +1893,10 @@
             let classModel = null;
 
             function chooseEditor() {
+                // Only a custom style has a stops table to choose for.
+                if (!rawTable) {
+                    return;
+                }
                 const stops = readStops();
                 // A row readStops skips (blank or half typed) would vanish
                 // from a class table, so it keeps the raw one.
@@ -1610,7 +1906,7 @@
                 classPanel.hidden = !classMode;
                 rawTable.hidden = classMode;
                 addStopButton.hidden = classMode;
-                rawNote.hidden = classMode || !stops.length || modeSelect.value !== 'stepped';
+                rawNote.hidden = classMode || !stops.length || rawNote.dataset.stepped !== 'true';
                 if (classMode) {
                     renderClasses();
                 }
@@ -1739,20 +2035,23 @@
                 markStopsEdited();
             }
 
-            addStopButton.addEventListener('click', function () {
-                addRow('', '');
-                markStopsEdited();
-            });
+            if (addStopButton) {
+                addStopButton.addEventListener('click', function () {
+                    addRow('', '');
+                    markStopsEdited();
+                });
+            }
 
             /**
              Reverse the colors against fixed values, which is what "reverse a
-             ramp" means once the ramp has been applied. Stepped snapshots
-             survive it because they are a list of doubled class colors, and
-             reversing a doubled list is still a doubled list — the class
-             boundaries stay paired and the values stay ascending.
+             ramp" means once the ramp has been applied — what Reverse does to
+             a custom style's stops. Stepped snapshots survive it because they are
+             a list of doubled class colors, and reversing a doubled list is
+             still a doubled list — the class boundaries stay paired and the
+             values stay ascending.
              **/
 
-            document.getElementById('vs-reverse-stops').addEventListener('click', function () {
+            function reverseStopsInPlace() {
                 const rows = [...body.querySelectorAll('.vs-stop-row')];
                 const colors = rows.map(function (row) {
                     return row.querySelector('[name="stop_color"]').value;
@@ -1766,12 +2065,12 @@
                 if (classModel) {
                     chooseEditor();
                 }
-            });
+            }
 
             /**
              The same rows as JSON, for pasting a scale in or copying one out.
              The textarea is only another way to fill the table: Apply rewrites
-             the rows exactly as Apply ramp does, and Save still reads the rows.
+             the rows exactly as regenerating from the ramp does, and Save still reads the rows.
              Colors are held to what VariableStyle.clean() accepts, so a scale
              that applies here cannot be refused on save.
              **/
@@ -1922,77 +2221,80 @@
                 return {stops: stops};
             }
 
-            jsonToggle.addEventListener('click', function () {
-                const open = jsonPanel.hidden;
-                jsonPanel.hidden = !open;
-                jsonToggle.setAttribute('aria-expanded', String(open));
-                if (open) {
-                    setJsonText(rowsAsJson());
+            if (jsonToggle) {
+                jsonToggle.addEventListener('click', function () {
+                    const open = jsonPanel.hidden;
+                    jsonPanel.hidden = !open;
+                    jsonToggle.setAttribute('aria-expanded', String(open));
+                    if (open) {
+                        setJsonText(rowsAsJson());
+                        showJsonError('');
+                        flagJsonLine(null);
+                        setJsonStatus('');
+                        jsonText.focus();
+                    }
+                });
+
+                jsonText.addEventListener('input', function () {
+                    renderGutter();
+                    // The text moved under the band, so it no longer marks anything.
+                    flagJsonLine(null);
+                });
+                jsonText.addEventListener('scroll', function () {
+                    jsonGutter.scrollTop = jsonText.scrollTop;
+                    placeJsonFlag();
+                });
+
+                document.getElementById('vs-json-apply').addEventListener('click', function () {
+                    const result = parseStopsJson(jsonText.value);
+                    if (result.error) {
+                        showJsonError(result.error);
+                        flagJsonLine(result.line);
+                        return;
+                    }
                     showJsonError('');
                     flagJsonLine(null);
-                    setJsonStatus('');
-                    jsonText.focus();
-                }
-            });
-
-            jsonText.addEventListener('input', function () {
-                renderGutter();
-                // The text moved under the band, so it no longer marks anything.
-                flagJsonLine(null);
-            });
-            jsonText.addEventListener('scroll', function () {
-                jsonGutter.scrollTop = jsonText.scrollTop;
-                placeJsonFlag();
-            });
-
-            document.getElementById('vs-json-apply').addEventListener('click', function () {
-                const result = parseStopsJson(jsonText.value);
-                if (result.error) {
-                    showJsonError(result.error);
-                    flagJsonLine(result.line);
-                    return;
-                }
-                showJsonError('');
-                flagJsonLine(null);
-                body.replaceChildren();
-                result.stops.forEach(function (stop) {
-                    addRow(stop.value, stop.color);
+                    body.replaceChildren();
+                    result.stops.forEach(function (stop) {
+                        addRow(stop.value, stop.color);
+                    });
+                    body.querySelectorAll('.vs-stop-row').forEach(syncPicker);
+                    renderPreview();
+                    markStopsEdited();
+                    chooseEditor();
+                    setJsonText(rowsAsJson());
                 });
-                body.querySelectorAll('.vs-stop-row').forEach(syncPicker);
-                renderPreview();
-                markStopsEdited();
-                chooseEditor();
-                setJsonText(rowsAsJson());
-            });
 
-            document.getElementById('vs-json-copy').addEventListener('click', async function () {
-                try {
-                    await navigator.clipboard.writeText(jsonText.value);
-                    setJsonStatus(jsonStatus.dataset.copied);
-                    return;
-                } catch (error) {
-                    // Falls through: clipboard access needs a secure context.
-                }
-                jsonText.select();
-                setJsonStatus(document.execCommand('copy')
-                    ? jsonStatus.dataset.copied
-                    : jsonStatus.dataset.copyFailed);
-            });
+                document.getElementById('vs-json-copy').addEventListener('click', async function () {
+                    try {
+                        await navigator.clipboard.writeText(jsonText.value);
+                        setJsonStatus(jsonStatus.dataset.copied);
+                        return;
+                    } catch (error) {
+                        // Falls through: clipboard access needs a secure context.
+                    }
+                    jsonText.select();
+                    setJsonStatus(document.execCommand('copy')
+                        ? jsonStatus.dataset.copied
+                        : jsonStatus.dataset.copyFailed);
+                });
+            }
 
             /**
-             Applying a ramp asks the server for the stops it would generate
+             Regenerating asks the server for the stops the ramp would produce
              and fills the form with them — the same generate_stops() the
              model's apply_ramp() runs, so there is one implementation of the
              sampling and it lives in Python. Nothing is written; the map
              repaints and Save is still the only thing that persists.
+
+             Live regeneration can fire several times while an operator types
+             a class count, so only the newest request fills the table.
              **/
 
-            async function applyRamp(trigger) {
+            let regenerateRequest = 0;
+
+            async function regenerate() {
                 if (!rampInput.value) {
-                    showApplyError(applyError.dataset.pickRamp);
-                    return;
-                }
-                if (readStops().length && !window.confirm(trigger.dataset.confirm)) {
                     return;
                 }
                 const params = new URLSearchParams({
@@ -2002,14 +2304,18 @@
                 if (modeSelect.value === 'stepped') {
                     params.set('steps', stepsInput.value);
                 }
-                applyButtons.forEach(function (button) {
-                    button.disabled = true;
-                });
+                if (reverseInput.checked) {
+                    params.set('reverse', '1');
+                }
+                const request = ++regenerateRequest;
                 try {
                     const response = await fetch(stopsUrl + '?' + params.toString(), {
                         headers: {'Accept': 'application/json'}
                     });
                     const payload = await response.json();
+                    if (request !== regenerateRequest) {
+                        return;
+                    }
                     if (!response.ok) {
                         showApplyError(payload.error || response.statusText);
                         return;
@@ -2020,21 +2326,12 @@
                         addRow(stop.value, stop.color);
                     });
                     renderPreview();
-                    chooseEditor();
-                    // The table is now exactly what these inputs produce, so
-                    // Apply has nothing left to do — but the database still
-                    // holds the old snapshot.
-                    appliedSignature = currentSignature();
-                    stopsEdited = false;
+                    // The database still holds the old snapshot.
                     styleDirty = true;
                     refreshState();
                 } catch (error) {
-                    console.error('Applying the ramp failed', error);
+                    console.error('Regenerating the stops failed', error);
                     showApplyError(applyError.dataset.unreachable);
-                } finally {
-                    applyButtons.forEach(function (button) {
-                        button.disabled = false;
-                    });
                 }
             }
 
@@ -2045,18 +2342,9 @@
                     const item = document.createElement('li');
                     item.textContent = message;
                     applyError.appendChild(item);
-                    // There is one error list but two buttons, at opposite
-                    // ends of a form taller than the screen — so bring it to
-                    // whoever pressed one.
-                    applyError.scrollIntoView({block: 'nearest'});
                 }
             }
 
-            applyButtons.forEach(function (button) {
-                button.addEventListener('click', function () {
-                    applyRamp(button);
-                });
-            });
 
             document.querySelectorAll('form[data-confirm]').forEach(function (confirmForm) {
                 confirmForm.addEventListener('submit', function (event) {
@@ -2201,15 +2489,65 @@
             }
 
             body.querySelectorAll('.vs-stop-row').forEach(wireRow);
-            modeSelect.addEventListener('change', function () {
-                toggleSteps();
-                styleDirty = true;
-                refreshState();
-            });
-            stepsInput.addEventListener('input', function () {
-                styleDirty = true;
-                refreshState();
-            });
+            if (origin === ORIGIN.RAMP) {
+                modeSelect.addEventListener('change', function () {
+                    toggleSteps();
+                    rampInputsChanged();
+                });
+                // A class count is typed a digit at a time; regenerate once it
+                // settles, and never for one the generator would refuse.
+                let stepsTimer = null;
+                stepsInput.addEventListener('input', function () {
+                    styleDirty = true;
+                    refreshState();
+                    clearTimeout(stepsTimer);
+                    if (parseInt(stepsInput.value, 10) >= 2) {
+                        stepsTimer = setTimeout(rampInputsChanged, 300);
+                    }
+                });
+                reverseInput.addEventListener('change', rampInputsChanged);
+            }
+            /**
+             "Change template"'s closed line (#810) names the template the
+             form will save: the picked one, copied from its row.
+             **/
+            const showPickedTemplate = function (radio) {
+                const row = radio.closest('.vs-template');
+                const swatch = document.getElementById('vs-template-current-swatch');
+                document.getElementById('vs-template-current-name').textContent =
+                    row.querySelector('.vs-template-name').textContent;
+                document.getElementById('vs-template-current-levels').textContent =
+                    row.querySelector('.vs-template-levels').textContent.split(' · ')[0];
+                swatch.style.background = row.querySelector('.vs-template-swatch').style.background;
+                swatch.hidden = false;
+            };
+            /**
+             A template style's picker (#807): picking another template shows
+             its bands, and its out-of-range settings, at once. Each radio
+             carries them, so nothing is fetched; Save writes them. The guard
+             sees the change itself, as it does any input in this form.
+             **/
+            if (origin === ORIGIN.TEMPLATE) {
+                form.querySelectorAll('input[name="template"][data-stops]').forEach(function (radio) {
+                    radio.addEventListener('change', function () {
+                        if (!radio.checked) {
+                            return;
+                        }
+                        body.replaceChildren();
+                        JSON.parse(radio.dataset.stops).forEach(function (stop) {
+                            addRow(stop.value, stop.color);
+                        });
+                        underSelect.value = radio.dataset.under;
+                        overSelect.value = radio.dataset.over;
+                        showPickedTemplate(radio);
+                        markStopsEdited();
+                        renderPreview();
+                    });
+                });
+            }
+            if (reverseButton) {
+                reverseButton.addEventListener('click', reverseStopsInPlace);
+            }
             [underSelect, overSelect].forEach(function (select) {
                 select.addEventListener('change', function () {
                     styleDirty = true;
@@ -2226,10 +2564,23 @@
             initMap();
             renderPreview();
             chooseEditor();
-            // The stops on the page came from the saved style, so this is what
-            // they were generated from until something says otherwise.
-            appliedSignature = currentSignature();
             refreshState();
+        });
+    </script>
+    <script>
+        /** The new-style chooser (#800). **/
+        document.addEventListener('DOMContentLoaded', function () {
+            // "change" beside the ramp start's read-only range opens the
+            // shared range section and goes to it.
+            document.querySelectorAll('.vs-open-range').forEach(function (link) {
+                link.addEventListener('click', function () {
+                    document.getElementById('vs-range').open = true;
+                });
+            });
+            {% if scratch %}
+                // "From scratch" lands with the stops as JSON open, to paste into.
+                document.getElementById('vs-json-toggle')?.click();
+            {% endif %}
         });
     </script>
 {% endblock %}
