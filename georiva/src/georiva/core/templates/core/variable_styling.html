@@ -53,6 +53,23 @@
             font-weight: 600;
         }
 
+        /* A field never reaches past its card (#805): Wagtail sizes its
+           inputs at 100%, which a wrapping flex row resolves against the
+           field's own content, so the Classes input is given its width. */
+        .vs-field {
+            min-inline-size: 0;
+            max-inline-size: 100%;
+        }
+
+        .vs-field input,
+        .vs-field select {
+            max-inline-size: 100%;
+        }
+
+        #vs-steps-field input[type="number"] {
+            inline-size: 6rem;
+        }
+
         /*
          * One compact size for every field on this page (#808), smaller than
          * Wagtail's default: text, number and select inputs in the chooser,
@@ -428,6 +445,21 @@
             width: 100%;
         }
 
+        /*
+         * A colour cell holds a full #RRGGBBAA (#805): the column never
+         * squeezes below it, and the picker beside it keeps to its own
+         * narrow cell rather than sitting over the end of the text.
+         */
+        .vs-stops-table input[name="stop_color"],
+        .vs-stops-table input.vs-class-color {
+            min-inline-size: 7.5rem;
+        }
+
+        .vs-stops-table td:has(> .vs-stop-picker) {
+            inline-size: 2rem;
+            padding-inline: 0 0.5rem;
+        }
+
         .vs-classes-table input[readonly] {
             background: transparent;
             border-color: transparent;
@@ -450,15 +482,39 @@
             background: none;
         }
 
-        /* The styles as tabs above the editor (#799). */
+        /*
+         * The styles as tabs above the editor (#799). One line, however many
+         * styles or however long their names (#804): the strip scrolls
+         * sideways, each name is cut short with its full text as the link's
+         * title, and "+ New style" stays pinned at the strip's end.
+         *
+         * The strip's baseline is an inset shadow, not a border: a scrolling
+         * box clips to its padding box, so a tab pulled over a border by a
+         * negative margin would lose its bottom edge. The selected tab's
+         * bottom border, in the page colour, covers the shadow beneath it.
+         */
         .vs-style-tab-list {
             display: flex;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
             gap: 0.25rem;
             list-style: none;
             margin: 0 0 1rem;
             padding: 0;
-            border-bottom: 1px solid var(--w-color-border-furniture);
+            overflow-x: auto;
+            overflow-y: hidden;
+            box-shadow: inset 0 -1px 0 var(--w-color-border-furniture);
+        }
+
+        .vs-style-tab-list > li {
+            flex: 0 0 auto;
+            display: flex;
+        }
+
+        .vs-style-tab-list > li:last-child {
+            position: sticky;
+            inset-inline-end: 0;
+            padding-inline-start: 0.25rem;
+            background: var(--w-color-surface-page);
         }
 
         .vs-style-tab {
@@ -466,11 +522,11 @@
             align-items: center;
             gap: 0.5rem;
             padding: 0.5rem 0.85rem;
-            margin-bottom: -1px;
             border: 1px solid transparent;
             border-radius: 5px 5px 0 0;
             color: var(--w-color-text-label);
             text-decoration: none;
+            white-space: nowrap;
         }
 
         .vs-style-tab:hover {
@@ -488,7 +544,14 @@
             color: var(--w-color-secondary);
         }
 
+        .vs-style-tab-name {
+            max-inline-size: 14rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .vs-style-tab-icon {
+            flex: 0 0 auto;
             inline-size: 0.9rem;
             block-size: 0.9rem;
         }
@@ -1084,7 +1147,7 @@
                 <ul class="vs-style-tab-list">
                     {% for style in styles %}
                         <li>
-                            <a href="{{ form_url }}?style={{ style.slug }}" class="vs-style-tab"{% if not creating and style.pk == selected.pk %} aria-current="page"{% endif %}>
+                            <a href="{{ form_url }}?style={{ style.slug }}" class="vs-style-tab" title="{{ style.name }}"{% if not creating and style.pk == selected.pk %} aria-current="page"{% endif %}>
                                 <span class="vs-style-tab-swatch"
                                       style="background: {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
                                 <span class="vs-style-tab-name">{{ style.name }}</span>

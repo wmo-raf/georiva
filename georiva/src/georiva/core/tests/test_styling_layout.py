@@ -71,6 +71,20 @@ class StyleTabsTests(StylingSurfaceTestCase):
         self.assertLess(tabs.index("Official"), tabs.index("Default"))
         self.assertLess(tabs.index("Default"), tabs.index("Analyst"))
 
+    def test_each_tab_carries_its_full_name_as_its_title(self):
+        # A long name is cut short on one line of tabs (#804); the title keeps it whole.
+        self.analyst.name = "Analyst view of two-metre temperature anomalies"
+        self.analyst.save()
+
+        tabs = self.tabs(self.client.get(self.form_url))
+
+        self.assertRegex(
+            tabs,
+            rf'href="{re.escape(self.form_url)}\?style=analyst"[^>]*'
+            r'title="Analyst view of two-metre temperature anomalies"',
+        )
+        self.assertIn('title="Official"', tabs)
+
 
 class SelectedStyleHeaderTests(StylingSurfaceTestCase):
     def setUp(self):
