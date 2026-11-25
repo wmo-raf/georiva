@@ -154,6 +154,35 @@ class TemplateStartTests(ChooserPageTestCase):
         self.assertIn("Laid out for 0.5 – 200.0 mm, square root.", chooser)
 
 
+class TemplateSourceTests(ChooserPageTestCase):
+    """Shipped templates come from two catalogues (#811): each row says which,
+    and the upstream style it was converted from."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.variable = cls.mm_variable()
+
+    def row(self, chooser, name):
+        rows = re.findall(r'<label class="vs-template[^"]*">.*?</label>', chooser, re.S)
+        return next(row for row in rows if f'<span class="vs-template-name">{name}</span>' in row)
+
+    def test_magics_and_earthkit_plots_templates_are_both_offered_each_with_its_source(self):
+        chooser = self.chooser(self.client.get(self.form_url))
+
+        magics = self.row(chooser, "Precipitation, 0.5 to 250 mm, 7 bands")
+        self.assertIn('<span class="vs-template-source">Magics · sh_blured_f05t300lst</span>', magics)
+        earthkit = self.row(chooser, "Precipitation, 0.5 to 200 mm, 17 bands")
+        self.assertIn('<span class="vs-template-source">earthkit-plots · ', earthkit)
+
+    def test_an_organisations_own_template_has_no_source(self):
+        own = _template(name="Our rain")
+
+        row = self.row(self.chooser(self.client.get(self.form_url)), own.name)
+
+        self.assertNotIn("vs-template-source", row)
+
+
 class TemplateWarningsBeforeApplyingTests(ChooserPageTestCase):
     """The warnings for the encoding that would be in force show with the
     template, before it is applied."""

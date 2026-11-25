@@ -1,7 +1,8 @@
 """The shipped Style template catalogue (#789).
 
 A catalogue is a vendored JSON file written by a dev-only generator
-(``georiva/scripts/earthkit_styles/generate.py``): the units its templates are
+(``georiva/scripts/earthkit_styles/generate.py``, or
+``georiva/scripts/magics_styles/generate.py`` for Magics, #811): the units its templates are
 declared in, and the templates themselves. :func:`load_catalogue` puts one into
 the database, and a data migration is what calls it. A refresh is a new JSON
 file beside this module and a one-line migration that loads it.
@@ -20,6 +21,9 @@ CATALOGUES = Path(__file__).resolve().parent
 
 #: The current earthkit-plots catalogue (© ECMWF, Apache-2.0 — see NOTICE).
 EARTHKIT_PLOTS = CATALOGUES / "earthkit-plots-1.0.4.json"
+
+#: The current Magics catalogue, an additional source beside it (© ECMWF, Apache-2.0 — see NOTICE).
+MAGICS = CATALOGUES / "magics-cb97794b.json"
 
 _TEMPLATE_FIELDS = ("name", "quantity", "levels", "colors", "under", "over", "scale_type", "source_name")
 

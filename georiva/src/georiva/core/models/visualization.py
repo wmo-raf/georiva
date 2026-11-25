@@ -445,13 +445,25 @@ class StyleTemplate(TimeStampedModel):
     Tiered like the ramp catalog (ADR 0011): no organisation is the
     instance-wide tier every organisation reads and only the instance admin
     writes. One rule goes further: a template with an ``origin`` was shipped by
-    GeoRiva (the earthkit-plots catalogue) and is read-only to everyone, the
+    GeoRiva (the earthkit-plots or the Magics catalogue) and is read-only to everyone, the
     instance admin included, so a later release can refresh it. Anyone adapts
     one by copying it into their organisation.
     """
 
     ORGANISATION_LOOKUP = "organisation"
     ORGANISATION_GLOBAL_TIER = True
+
+    class Origin(models.TextChoices):
+        """The shipped catalogues, by the source name their catalogue file gives
+        (``origin``), with the label an operator sees. A new source is one entry
+        here, its catalogue file and the migration that loads it.
+
+        Not the field's ``choices``: only :func:`~georiva.core.style_catalogue.load_catalogue`
+        writes ``origin``, never a form, so choices would validate nothing and
+        would cost a migration for every new source."""
+
+        EARTHKIT_PLOTS = "earthkit-plots", "earthkit-plots"
+        MAGICS = "magics", "Magics"
 
     class Quantity(models.TextChoices):
         TEMPERATURE = "temperature", "Temperature"
@@ -625,6 +637,18 @@ class StyleTemplate(TimeStampedModel):
         return "Instance-wide (shipped)" if self.is_shipped else "Instance-wide"
 
     owner_label.short_description = "Owner"
+
+    def source_label(self):
+        """Where a shipped template comes from and the upstream style it was
+        converted from, "Magics · sh_blured_f05t300lst"; empty for one an
+        organisation authored (#811). An origin :class:`Origin` does not know
+        reads as it is stored."""
+        if not self.is_shipped:
+            return ""
+        origin = self.Origin(self.origin).label if self.origin in self.Origin.values else self.origin
+        return f"{origin} · {self.source_name}" if self.source_name else origin
+
+    source_label.short_description = "Source"
 
     # -------- presentation helpers --------
 

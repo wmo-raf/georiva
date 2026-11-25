@@ -16,7 +16,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from georiva.core.models import StyleTemplate, Unit
-from georiva.core.style_catalogue import EARTHKIT_PLOTS, load_catalogue
+from georiva.core.style_catalogue import EARTHKIT_PLOTS, MAGICS, load_catalogue
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
 from georiva.organisations.tests.factories import PASSWORD, add_member, grant_everything, make_user
@@ -97,6 +97,43 @@ class ShippedCatalogueTests(TestCase):
         self.assertEqual(template.levels[0], 0.5)
         self.assertEqual(template.unit.symbol, "mm")
         self.assertEqual(template.scale_type, "sqrt")
+
+
+class ShippedMagicsCatalogueTests(TestCase):
+    """The Magics catalogue (#811), an additional source beside earthkit-plots."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.vendored = json.loads(MAGICS.read_text())
+
+    def test_every_vendored_magics_template_is_shipped_with_its_style_name(self):
+        for entry in self.vendored["templates"]:
+            with self.subTest(slug=entry["slug"]):
+                template = StyleTemplate.objects.get(organisation=None, slug=entry["slug"])
+                self.assertEqual(template.origin, "magics")
+                self.assertEqual(template.source_name, entry["source_name"])
+                self.assertEqual(template.unit.symbol, entry["unit"])
+                self.assertEqual((template.levels, template.colors), (entry["levels"], entry["colors"]))
+                template.full_clean()
+
+    def test_the_earthkit_plots_catalogue_is_left_as_it_was(self):
+        earthkit = _vendored()["templates"]
+        self.assertEqual(StyleTemplate.objects.filter(origin="earthkit-plots").count(), len(earthkit))
+        self.assertFalse({t["slug"] for t in earthkit} & {t["slug"] for t in self.vendored["templates"]})
+
+    def test_precipitation_is_magics_level_list_as_magics_draws_it(self):
+        template = StyleTemplate.objects.get(organisation=None, slug="magics-sh-blured-f05t300lst-mm")
+        self.assertEqual(template.name, "Precipitation, 0.5 to 250 mm, 7 bands")
+        self.assertEqual(template.quantity, "precipitation")
+        self.assertEqual(template.levels, [0.5, 2, 4, 10, 25, 50, 100, 250])
+        self.assertEqual(len(template.colors), 7)
+        self.assertEqual((template.under, template.over), ("transparent", "transparent"))
+        self.assertEqual(template.unit.symbol, "mm")
+
+    def test_every_magics_templates_unit_resolves_in_the_unit_registry(self):
+        for symbol in {t["unit"] for t in self.vendored["templates"]}:
+            with self.subTest(symbol=symbol):
+                Unit.objects.get(symbol=symbol).full_clean()
 
 
 class LoaderTests(TestCase):

@@ -1,0 +1,187 @@
+# What generate.py beside this file reads from Magics, and how it names what it takes (#811).
+#
+# It writes georiva/src/georiva/core/style_catalogue/magics-<commit>.json. Changing this file
+# is a deliberate choice, reviewed in the PR: regenerate and commit both.
+#
+# Every shaded (sh_) style that a Magics rule file lists is a candidate. A rule file says which
+# fields a style is for (GRIB shortName, NetCDF long_name ...) and, often, the unit Magics
+# converts the field to first (prefered_units). From it the template takes:
+#
+#   unit      prefered_units, through unit_strings; when the rule names none, the unit of its
+#             parameter below — the unit Magics plots that field in, read off the levels.
+#             A parameter with no unit here is not guessed at: such a rule is skipped.
+#   label     the parameter's, which starts the template's name ("Precipitation, 0.5 to 250 mm, 7 bands")
+#   quantity  the parameter's: the group the picker lists it under (a StyleTemplate.Quantity value,
+#             the same groups the earthkit-plots catalogue uses)
+#
+# The parameter is the first of the rule's shortNames listed under `parameters`. `rules`
+# overrides label, quantity or unit for one rule file: an ensemble spread is a difference of
+# the field, not the field. A rule whose parameter is not listed is skipped, and reported.
+
+source:
+  name: magics
+  repository: https://github.com/ecmwf/magics
+  commit: cb97794b8830e9fdcd2f40e659d8070d74bf60af  # develop, 2026-11-20
+  styles_path: share/magics/styles/ecmwf
+  colours_path: src/common/Colour.cc
+
+# Magics prefered_units -> GeoRiva unit symbols. Not mapped, so skipped: "10**5/sec"
+# (vorticity, divergence in 1e-5 s-1), "pv units", "ppbv".
+unit_strings:
+  C: "°C"
+  mm: mm
+  cm: cm
+  m: m
+  hPa: hPa
+  dam: gpdam
+  g/kg: g/kg
+  "kg m**-2 h**-1": "kg/m²/h"
+
+# Every GeoRiva unit a template may be declared in, with the slug its template slugs end in
+# and, where it differs from the symbol, how a template name shows it.
+# The loader creates any the instance lacks, as shared reference data.
+units:
+  - {symbol: "°C", slug: degc, name: Degree Celsius, description: "Celsius temperature scale. Common display unit for surface temperature."}
+  - {symbol: delta_degC, slug: delta-degc, shown: "°C", name: Celsius difference, description: "A difference of temperatures in degrees Celsius, such as an anomaly or a range."}
+  - {symbol: mm, slug: mm, name: Millimetre, description: "Standard unit for precipitation accumulation."}
+  - {symbol: cm, slug: cm, name: Centimetre, description: "A hundredth of a metre. Used for snowmelt and snow evaporation."}
+  - {symbol: m, slug: m, name: Metre, description: "SI unit of length. Used for geopotential height, wave height, visibility."}
+  - {symbol: gpdam, slug: gpdam, shown: dam, name: Geopotential decametre, description: "Ten geopotential metres. The unit geopotential height is charted in."}
+  - {symbol: hPa, slug: hpa, name: Hectopascal, description: "Standard unit for atmospheric pressure in meteorology."}
+  - {symbol: "kg/m²/h", slug: kg-m2-h, name: Kilogram per square metre per hour, description: "Precipitation rate as a water mass flux. 1 kg/m²/h of water is 1 mm/h."}
+  - {symbol: m/s, slug: ms, name: Metre per second, description: "SI unit of speed. Native unit for wind components in NWP output."}
+  - {symbol: Pa/s, slug: pa-s, name: Pascal per second, description: "Pressure tendency. Used for vertical velocity (omega)."}
+  - {symbol: s, slug: s, name: Second, description: "SI unit of time. Used for wave and swell periods."}
+  - {symbol: "%", slug: percent, name: Percent, description: "Used for relative humidity, cloud cover, soil moisture fraction."}
+  - {symbol: g/kg, slug: g-kg, name: Gram per kilogram, description: "Mass mixing ratio. Used for specific humidity."}
+  - {symbol: J/kg, slug: j-kg, name: Joule per kilogram, description: "Specific energy unit. Used for CAPE, CIN, geopotential."}
+  - {symbol: "µg/m³", slug: ug-m3, name: Microgram per cubic metre, description: "Mass concentration. Used for particulate matter (PM2.5, PM10)."}
+  - {symbol: dimensionless, slug: dimensionless, shown: "", name: Dimensionless, description: "Unitless quantity. Used for indices (NDVI, SPI, anomaly scores etc)."}
+
+# GRIB shortName -> how a template for it is named and grouped, and (only where its rules
+# name no prefered_units) the unit Magics plots it in.
+parameters:
+  # Precipitation. tp has no unit of its own here: GRIB holds it in metres, and the rules that
+  # name no unit (nc_tp_interval) are for NetCDF fields whose unit Magics does not know.
+  tp: {label: Precipitation, quantity: precipitation}
+  cp: {label: Precipitation, quantity: precipitation}
+  lsp: {label: Precipitation, quantity: precipitation}
+  sf: {label: Snowfall, quantity: precipitation}
+  csf: {label: Snowfall, quantity: precipitation}
+  lsf: {label: Snowfall, quantity: precipitation}
+  prate: {label: Precipitation rate, quantity: precipitation}
+  crr: {label: Precipitation rate, quantity: precipitation}
+  fzra: {label: Freezing rain, quantity: precipitation}
+  ro: {label: Runoff, quantity: precipitation}
+  smlt: {label: Snowmelt, quantity: precipitation}
+  es: {label: Snow evaporation, quantity: precipitation}
+
+  # Temperature (rules name °C)
+  2t: {label: 2 m temperature, quantity: temperature}
+  mn2t: {label: 2 m minimum temperature, quantity: temperature}
+  mx2t: {label: 2 m maximum temperature, quantity: temperature}
+  mean2t: {label: 2 m temperature, quantity: temperature}
+  t: {label: Temperature, quantity: temperature}
+  skt: {label: Skin temperature, quantity: temperature}
+  istl1: {label: Sea-ice temperature, quantity: temperature}
+  istl3: {label: Sea-ice temperature, quantity: temperature}
+  istl4: {label: Sea-ice temperature, quantity: temperature}
+  lblt: {label: Lake bottom temperature, quantity: temperature}
+  lict: {label: Lake ice temperature, quantity: temperature}
+  lmlt: {label: Lake temperature, quantity: temperature}
+  pt: {label: Wet-bulb potential temperature, quantity: temperature, unit: "°C"}
+
+  # Wind
+  ws: {label: Wind speed, quantity: wind, unit: m/s}
+  10si: {label: 10 m wind speed, quantity: wind, unit: m/s}
+  10fg: {label: 10 m wind gust, quantity: wind, unit: m/s}
+  i10fg: {label: 10 m wind gust, quantity: wind, unit: m/s}
+  10u: {label: Wind component (u or v), quantity: wind, unit: m/s}
+  u: {label: Wind component (u or v), quantity: wind, unit: m/s}
+  w: {label: Vertical velocity, quantity: wind, unit: Pa/s}
+
+  # Humidity
+  2d: {label: 2 m dewpoint, quantity: humidity}
+  r: {label: Relative humidity, quantity: humidity, unit: "%"}
+  q: {label: Specific humidity, quantity: humidity}
+
+  # Cloud (cover is a 0-1 fraction in these styles' levels)
+  lcc: {label: Cloud cover, quantity: cloud, unit: dimensionless}
+  mcc: {label: Medium cloud cover, quantity: cloud, unit: dimensionless}
+  hcc: {label: High cloud cover, quantity: cloud, unit: dimensionless}
+  cbh: {label: Cloud base height, quantity: cloud, unit: m}
+  ceil: {label: Ceiling, quantity: cloud, unit: m}
+  hcct: {label: Convective cloud top height, quantity: cloud, unit: m}
+
+  # Convection
+  cape: {label: CAPE, quantity: convection, unit: J/kg}
+  cin: {label: CIN, quantity: convection, unit: J/kg}
+
+  # Ocean
+  sst: {label: Sea surface temperature, quantity: ocean}
+  swh: {label: Significant wave height, quantity: ocean, unit: m}
+  shww: {label: Wind-wave height, quantity: ocean, unit: m}
+  shts: {label: Total swell height, quantity: ocean, unit: m}
+  sh10: {label: Height of waves over 10 s, quantity: ocean, unit: m}
+  awh: {label: Altimeter wave height, quantity: ocean, unit: m}
+  maxswh: {label: Maximum significant wave height, quantity: ocean, unit: m}
+  mwp: {label: Mean wave period, quantity: ocean, unit: s}
+  mpww: {label: Wind-wave period, quantity: ocean, unit: s}
+  mpts: {label: Swell period, quantity: ocean, unit: s}
+
+  # Air quality
+  aod550: {label: Aerosol optical depth, quantity: air_quality, unit: dimensionless}
+  duaod550: {label: Dust aerosol optical depth, quantity: air_quality, unit: dimensionless}
+  suaod550: {label: Sulphate aerosol optical depth, quantity: air_quality, unit: dimensionless}
+  pm2p5: {label: PM2.5, quantity: air_quality, unit: "µg/m³"}
+  pm10: {label: PM10, quantity: air_quality, unit: "µg/m³"}
+
+  # Anomaly and probability
+  ta: {label: Temperature anomaly, quantity: anomaly, unit: delta_degC}
+  za: {label: Geopotential height anomaly, quantity: anomaly}
+  2ti: {label: Extreme Forecast Index, quantity: anomaly, unit: dimensionless}
+  capesi: {label: Extreme Forecast Index, quantity: anomaly, unit: dimensionless}
+  sfi: {label: Extreme Forecast Index, quantity: anomaly, unit: dimensionless}
+  maxswhi: {label: Extreme Forecast Index, quantity: anomaly, unit: dimensionless}
+  tpi: {label: Extreme Forecast Index, quantity: anomaly, unit: dimensionless}
+  10fgi: {label: Extreme Forecast Index, quantity: anomaly, unit: dimensionless}
+  2tag2: {label: Probability, quantity: probability, unit: "%"}
+  2tp: {label: Probability, quantity: probability, unit: "%"}
+
+  # Other
+  vis: {label: Visibility, quantity: other, unit: m}
+  blh: {label: Boundary layer height, quantity: other, unit: m}
+  h: {label: Orography, quantity: other}
+  cvh: {label: Vegetation cover, quantity: other, unit: dimensionless}
+  cl: {label: Lake cover, quantity: other, unit: dimensionless}
+
+# Per rule file: what differs from its parameter. Spreads are differences of the field.
+rules:
+  cds_huss.json: {label: Specific humidity, quantity: humidity}  # matched by long_name only
+  t850_spread.json: {label: Temperature spread, quantity: other, unit: delta_degC}
+  cds_t500_spread.json: {label: Temperature spread, quantity: other, unit: delta_degC}
+  cds_skint_spread.json: {label: Skin temperature spread, quantity: other, unit: delta_degC}
+  cds_sst_spread.json: {label: Sea surface temperature spread, quantity: other, unit: delta_degC}
+  msl_spread.json: {label: Mean sea level pressure spread, quantity: other}
+  cds_sp_spread.json: {label: Surface pressure spread, quantity: other}
+  z300_spread.json: {label: Geopotential height spread, quantity: other}
+  z500_spread.json: {label: Geopotential height spread, quantity: other}
+  850ws_spread.json: {label: Wind speed spread, quantity: other}
+  cds_10m_fg_interval_spread.json: {label: Wind gust spread, quantity: other}
+  cds_tp_interval_spread.json: {label: Precipitation spread, quantity: other}
+  cds_wave_swh_spread.json: {label: Significant wave height spread, quantity: other}
+  cds_wave_mwp_spread.json: {label: Mean wave period spread, quantity: other}
+
+# The rule files that name a template first, where several list one style; the rest follow in
+# file order. Without it a precipitation style would be named for snowfall (sf_interval.json
+# sorts before tp_interval.json), and a wave height style for the altimeter.
+prefer:
+  - tp_interval.json
+  - tp_rate.json
+  - 2t.json
+  - t850_spread.json
+  - cds_t500_spread.json
+  - wind_speed.json
+  - wave_swh.json
+  - wave_mwp.json
+  - lcc.json

@@ -8,7 +8,16 @@
  *
  *   legend = {gradient: [[position, [r, g, b, a]], ...],   // 0–1 along the bar
  *             ticks: [[position, value], ...],              // value served
+ *             labels: [tick index, ...],                    // which carry text
+ *             stepped: true | false,                        // equal-width bands
  *             under: 'clamp' | 'transparent', over: ...}
+ *
+ * `labels` is the server's pick (#812), and this never adds to it. Only here is
+ * the bar's width known, so a stepped legend's labels that would overlap on it
+ * thin further, every second, third ... of them with both ends kept, and again
+ * whenever the bar is resized; where even the two ends would overlap, the first
+ * stands alone. A continuous legend's labels are drawn as picked. A legend with
+ * no `labels` labels at most six ticks, as every legend did before #812.
  *
  * An end arrow is drawn only where the end is clamped: values beyond it take
  * the end colour. A transparent end has none, since those values are not drawn.
@@ -16,15 +25,19 @@
  *   GeoRivaLegend.render(container, legend);
  *
  * Layout is styled inline; text takes the container's colour and font. The
- * bar is a `.legend-bar` whose background each page draws in its own theme's
- * colours: its gradient, `var(--legend-gradient)`, over a checkerboard, so a
- * translucent or clear band reads as one.
+ * bar is a `.legend-bar`, its gradient `var(--legend-gradient)`, drawn over a
+ * checkerboard so a translucent or clear band reads as one: an admin page draws
+ * it with `css/legend.css` beside this script, in Wagtail's theme colours; the
+ * public item page with its own theme's (`georiva-map.css`).
  */
 (function (global) {
     'use strict';
 
     const BAR_HEIGHT = 8;
     const ARROW_WIDTH = 7;
+    /** Pixels of clear space between two neighbouring labels. */
+    const LABEL_GAP = 4;
+    /** At most this many labels on a legend that does not say which to label. */
     const MAX_LABELS = 6;
 
     function css(colour) {
@@ -59,17 +72,62 @@
         return String(Number(value.toFixed(magnitude < 10 ? 2 : 1)));
     }
 
-    /** Which ticks get a label: at most MAX_LABELS, evenly picked, both ends always. */
-    function labelled(count) {
-        const every = Math.max(1, Math.ceil((count - 1) / (MAX_LABELS - 1)));
-        const picked = new Set([0, count - 1]);
+    /** Every `every`-th of `count` indices and the last, in order. */
+    function everyNth(count, every) {
+        const picked = new Set([count - 1]);
         for (let i = 0; i < count; i += every) {
             picked.add(i);
         }
-        return picked;
+        return [...picked].sort((a, b) => a - b);
+    }
+
+    /** A legend without `labels`: at most six ticks, as before #812. */
+    function capped(count) {
+        return count ? everyNth(count, Math.max(1, Math.ceil((count - 1) / (MAX_LABELS - 1)))) : [];
+    }
+
+    /**
+     * Which of the labels to show, given each one's `[left, right]` in pixels:
+     * the densest every-nth under which no two overlap, both ends kept; the
+     * first alone when even the two ends overlap.
+     */
+    function fitting(extents) {
+        const count = extents.length;
+        for (let every = 1; every < count; every++) {
+            const picked = everyNth(count, every);
+            const clear = picked.every(
+                (index, at) => at === 0 || extents[picked[at - 1]][1] + LABEL_GAP <= extents[index][0]
+            );
+            if (clear) {
+                return picked;
+            }
+        }
+        return [0];
+    }
+
+    /** Shows the labels that fit `scale`'s width, hiding the rest. */
+    function fit(scale, labels) {
+        const width = scale.clientWidth;
+        if (!width || !labels.length) {
+            return;
+        }
+        const extents = labels.map(({element, position}) => {
+            const size = element.getBoundingClientRect().width;
+            const at = position * width;
+            const left = position <= 0 ? at : position >= 1 ? at - size : at - size / 2;
+            return [left, left + size];
+        });
+        const shown = new Set(fitting(extents));
+        labels.forEach(({element}, index) => {
+            element.style.visibility = shown.has(index) ? '' : 'hidden';
+        });
     }
 
     function render(container, legend) {
+        if (container.legendObserver) {
+            container.legendObserver.disconnect();
+            container.legendObserver = null;
+        }
         container.replaceChildren();
         if (!legend) {
             return;
@@ -106,7 +164,8 @@
         scale.style.fontSize = '0.625rem';
         scale.style.fontVariantNumeric = 'tabular-nums';
 
-        const withLabel = labelled(ticks.length);
+        const withLabel = new Set(legend.labels || capped(ticks.length));
+        const labels = [];
         ticks.forEach(([position, value], index) => {
             const left = `${position * 100}%`;
             const mark = document.createElement('span');
@@ -131,8 +190,18 @@
             text.style.transform =
                 position <= 0 ? 'none' : position >= 1 ? 'translateX(-100%)' : 'translateX(-50%)';
             scale.appendChild(text);
+            labels.push({element: text, position});
         });
         container.appendChild(scale);
+
+        if (!legend.stepped) {
+            return;
+        }
+        fit(scale, labels);
+        if (typeof ResizeObserver !== 'undefined') {
+            container.legendObserver = new ResizeObserver(() => fit(scale, labels));
+            container.legendObserver.observe(scale);
+        }
     }
 
     global.GeoRivaLegend = {render};

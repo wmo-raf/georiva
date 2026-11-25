@@ -20,6 +20,9 @@
                     {# The bands are data: their colours are the template's. #}
                     <span class="vs-template-swatch" style="background: {{ template.gradient }};"></span>
                     <span class="vs-template-levels">{{ template.levels_label }} · {{ template.owner_label }}</span>
+                    {% if template.source_label %}
+                        <span class="vs-template-source">{{ template.source_label }}</span>
+                    {% endif %}
                     {% if template.reason %}
                         <span class="vs-template-reason">{{ template.reason }}</span>
                     {% endif %}

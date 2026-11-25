@@ -8,6 +8,7 @@ band. Ticks read in the served unit. The browser only draws what it is given,
 so these tests hold the layout at the render-payload seam.
 """
 
+import itertools
 import json
 from datetime import UTC, datetime
 
@@ -59,7 +60,7 @@ def unit(symbol):
     return found
 
 
-class LegendTests(TestCase):
+class LegendCase(TestCase):
     @classmethod
     def setUpTestData(cls):
         variable = make_org_tree(make_organisation("kenya"))["variable"]
@@ -91,6 +92,8 @@ class LegendTests(TestCase):
             self.assertAlmostEqual(position, expected_position, places=5)
             self.assertEqual(value, expected_value)
 
+
+class LegendTests(LegendCase):
     def test_a_stepped_legend_gives_each_band_an_equal_block(self):
         legend = self.legend(STEPPED)
 
@@ -141,6 +144,90 @@ class LegendTests(TestCase):
                 self.assertEqual((legend["under"], legend["over"]), (under, over))
 
 
+def stepped(levels):
+    """Stepped stops, one band between each pair of levels (in K), colours alternating."""
+    stops = []
+    for index, (low, high) in enumerate(itertools.pairwise(levels)):
+        colour = "#0000ff" if index % 2 else "#ff0000"
+        stops += [{"value": low, "color": colour}, {"value": high, "color": colour}]
+    return stops
+
+
+#: A precipitation-like style's eight levels (#812), offset onto the Kelvin range.
+RAIN_LEVELS = [233.15 + level / 5 for level in (0.5, 2, 4, 10, 25, 50, 100, 250)]
+
+
+class LegendLabelTests(LegendCase):
+    """Which ticks are labelled (#812): every class boundary of a stepped legend
+    up to 16 of them, thinned evenly beyond that with both ends kept; a
+    continuous legend at most six, as before."""
+
+    def levels(self, count):
+        return [233.15 + index for index in range(count)]
+
+    def test_a_stepped_legend_labels_every_boundary(self):
+        legend = self.legend(stepped(RAIN_LEVELS))
+
+        self.assertEqual(legend["labels"], list(range(8)))
+
+    def test_sixteen_boundaries_are_all_labelled(self):
+        legend = self.legend(stepped(self.levels(16)))
+
+        self.assertEqual(legend["labels"], list(range(16)))
+
+    def test_more_than_sixteen_boundaries_thin_evenly_keeping_both_ends(self):
+        # 31 boundaries: every other one, 0 through 30 — sixteen labels.
+        legend = self.legend(stepped(self.levels(31)))
+
+        self.assertEqual(legend["labels"], list(range(0, 31, 2)))
+
+    def test_a_thinned_legend_does_not_crowd_its_last_label(self):
+        # 32 boundaries at every third: 30 sits right beside 31, so it gives way.
+        legend = self.legend(stepped(self.levels(32)))
+
+        self.assertEqual(legend["labels"], [*range(0, 30, 3), 31])
+
+    def test_a_continuous_legend_still_labels_at_most_six_stops(self):
+        # Eleven stops, every other one labelled, as before #812.
+        stops = [{"value": 233.15 + index * 9, "color": f"#{index * 20:02x}0000"} for index in range(11)]
+
+        legend = self.legend(stops)
+
+        self.assertEqual(len(legend["ticks"]), 11)
+        self.assertEqual(legend["labels"], [0, 2, 4, 6, 8, 10])
+
+    def test_a_continuous_legend_picks_the_labels_it_picked_before_812(self):
+        # What legend.js's labelled() picked before #812: every ceil((n - 1) / 5)th
+        # stop and the last, however close the last two sit — worked by hand.
+        before = {
+            6: [0, 1, 2, 3, 4, 5],
+            7: [0, 2, 4, 6],
+            12: [0, 3, 6, 9, 11],
+            14: [0, 3, 6, 9, 12, 13],
+            22: [0, 5, 10, 15, 20, 21],
+        }
+        for count, labels in before.items():
+            with self.subTest(count=count):
+                VariableStyle.objects.filter(variable_id=self.variable_pk).delete()
+                stops = [{"value": 233.15 + index * 4, "color": f"#{index * 10:02x}0000"} for index in range(count)]
+
+                legend = self.legend(stops)
+
+                self.assertEqual(len(legend["ticks"]), count)
+                self.assertEqual(legend["labels"], labels)
+
+    def test_a_styleless_legend_labels_each_of_its_steps(self):
+        self.assertEqual(self.legend()["labels"], [0, 1, 2, 3, 4])
+
+    def test_only_a_stepped_legend_says_it_is_stepped(self):
+        # Only a stepped legend's labels may thin further on a narrow bar.
+        self.assertIs(self.legend(stepped(RAIN_LEVELS))["stepped"], True)
+        VariableStyle.objects.filter(variable_id=self.variable_pk).delete()
+        self.assertIs(self.legend(CONTINUOUS)["stepped"], False)
+        VariableStyle.objects.filter(variable_id=self.variable_pk).delete()
+        self.assertIs(self.legend()["stepped"], False)
+
+
 class EveryLegendReadsTheContractsLegendTests(TestCase):
     """The item page reads EDR's ``x-georiva``, the admin item preview its data
     attributes: both carry the contract's legend as it is."""
@@ -177,6 +264,8 @@ class EveryLegendReadsTheContractsLegendTests(TestCase):
     EXPECTED = {
         "gradient": [[0.0, BLUE], [0.5, BLUE], [0.5, RED], [1.0, RED]],
         "ticks": [[0.0, 0.5], [0.5, 1.0], [1.0, 200.0]],
+        "labels": [0, 1, 2],
+        "stepped": True,
         "under": "transparent",
         "over": "clamp",
     }
