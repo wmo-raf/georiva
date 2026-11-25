@@ -109,15 +109,18 @@ def require_steps_when_stepped(form, cleaned):
 
 
 class VariableStyleForm(forms.Form):
-    """The style's own fields; the stops travel beside it as row inputs."""
+    """The style's own fields; the stops travel beside it as row inputs.
+
+    Which fields a save reads depends on the style's origin (#806): a ramp
+    style's ramp, mode, steps and reverse; a custom style's stop rows; a
+    template style's name and out-of-range settings only. The rest of the form
+    is optional so each editor posts only what it shows."""
 
     name = forms.CharField(max_length=255)
     ramp = forms.ModelChoiceField(queryset=ColorRamp.objects.none(), required=False)
-    mode = forms.ChoiceField(choices=VariableStyle.Mode.choices)
+    mode = forms.ChoiceField(choices=VariableStyle.Mode.choices, required=False)
     steps = forms.IntegerField(required=False, min_value=2)
-    # Runs the ramp's colours the other way over the same values. Not stored:
-    # the stops are the style, and whether they read as the ramp reversed is
-    # worked out from them (``VariableStyle.is_ramp_reversed``, #801).
+    # A ramp style's: runs its ramp's colours the other way over the same values.
     reverse = forms.BooleanField(required=False)
     # What values beyond the stops are drawn as (#788); a post without them
     # keeps today's behaviour, clamping.
@@ -184,6 +187,29 @@ def _parse_stops(post):
             raise ValidationError({"stops": _("Not a number: %(value)s") % {"value": row["value"]}}) from None
         entries.append({"value": value, "color": row["color"]})
     return entries
+
+
+def _save_by_origin(style, data, post):
+    """Set ``style``'s stops as its origin says (#806), from a valid style form.
+
+    A ramp style's stops are regenerated from its ramp, mode, steps and reverse
+    — never the posted rows, which only carry the preview. A template style's
+    are left as they are. A custom style's are its posted rows, and there must
+    be some: "from scratch" starts with an empty table but never stores one.
+    Raises :class:`ValidationError` for the form to show.
+    """
+    if style.origin == VariableStyle.Origin.RAMP:
+        style.ramp = data["ramp"]
+        style.mode = data["mode"] or VariableStyle.Mode.CONTINUOUS
+        style.steps = data["steps"]
+        style.reverse = data["reverse"]
+        if style.ramp is None:
+            raise ValidationError({"ramp": _("Pick a ramp.")})
+        style.apply_ramp()
+    elif style.origin == VariableStyle.Origin.CUSTOM:
+        style.stops = style.variable.stored_stops(_parse_stops(post))
+        if not style.stops:
+            raise ValidationError({"stops": _("Add at least one stop.")})
 
 
 def _int_or_none(raw):
@@ -554,14 +580,10 @@ def variable_styling(request, collection_pk, variable_pk):
             "scale_type": variable.scale_type,
         },
     )
-    # Whether the saved stops are still what the style's ramp produces (#801):
-    # while they are, ramp changes regenerate them live; once tuned, only a
-    # confirmed "Regenerate from ramp" replaces them.
-    hand_tuned = selected.is_hand_tuned if selected else True
     style_form = VariableStyleForm(
         ramp_queryset=ramp_queryset,
         initial={
-            "reverse": bool(selected and selected.is_ramp_reversed),
+            "reverse": bool(selected and selected.reverse),
             "name": selected.name if selected else "",
             "ramp": selected.ramp_id if selected else None,
             "mode": selected.mode if selected else VariableStyle.Mode.CONTINUOUS,
@@ -593,29 +615,21 @@ def variable_styling(request, collection_pk, variable_pk):
             if style_form.is_valid():
                 data = style_form.cleaned_data
                 if creating:
+                    # A new style saved here starts from scratch (#800): custom,
+                    # unless a ramp is posted with it, which makes it a ramp style.
                     style = VariableStyle(
                         variable=variable,
                         slug=style_application.unique_style_slug(variable, data["name"]),
                         is_default=variable.new_style_is_default,
+                        origin=VariableStyle.Origin.RAMP if data["ramp"] else VariableStyle.Origin.CUSTOM,
                     )
                 else:
                     style = selected
                 style.name = data["name"]
-                style.ramp = data["ramp"]
-                style.mode = data["mode"]
-                style.steps = data["steps"]
                 style.under = data["under"]
                 style.over = data["over"]
                 try:
-                    stops = variable.stored_stops(_parse_stops(request.POST))
-                    if creating and not stops and style.ramp:
-                        style.apply_ramp(reverse=data["reverse"])
-                    else:
-                        style.stops = stops
-                    if not style.stops:
-                        # A style with no stops draws nothing: "from scratch"
-                        # starts with an empty table, but never stores one (#800).
-                        raise ValidationError({"stops": _("Add at least one stop, or pick a ramp.")})
+                    _save_by_origin(style, data, request.POST)
                     style.full_clean()
                 except ValidationError as error:
                     _add_model_errors(style_form, error)
@@ -676,6 +690,15 @@ def variable_styling(request, collection_pk, variable_pk):
             messages.success(request, _('Started a style from the "%(ramp)s" ramp.') % {"ramp": style.name})
             return redirect(style_url(style))
 
+        elif action == "customise-stops":
+            if selected is None:
+                messages.error(request, _("No such style."))
+                return redirect(form_url)
+            if selected.origin != VariableStyle.Origin.CUSTOM:
+                selected.customise()
+                messages.success(request, _("The stops are yours to edit now. Nothing else changed."))
+            return redirect(style_url(selected))
+
         elif action == "promote":
             if selected is None:
                 messages.error(request, _("No such style."))
@@ -713,14 +736,6 @@ def variable_styling(request, collection_pk, variable_pk):
         None,
     )
 
-    # A failed save re-renders the operator's own rows, which nothing says are
-    # as generated, so they count as tuned: the safe side. No stops at all is
-    # nothing to protect.
-    if style_form.is_bound:
-        stops_tuned = bool(stop_rows)
-    else:
-        stops_tuned = bool(stop_rows) and hand_tuned
-
     context = {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
@@ -747,16 +762,11 @@ def variable_styling(request, collection_pk, variable_pk):
         "range_open": bool(range_form.errors) or _range_needs_attention(variable, selected),
         "style_form": style_form,
         "stop_rows": stop_rows,
-        "stops_tuned": stops_tuned,
-        # "From scratch" has no ramp to generate from: the stops are the style,
-        # so the disclosure holding them starts open.
-        "advanced_open": stops_tuned or bool(style_form.errors) or scratch,
+        # Which editor the style gets (#806): only its own path's controls. A
+        # new style here is one started from scratch.
+        "origin": selected.origin if selected else VariableStyle.Origin.CUSTOM,
         "ramp_groups": ramp_groups,
         "selected_ramp": selected_ramp,
-        # A style with no ramp behind it (template-applied, or scratch) keeps the
-        # ramp, rendering and classes behind "Restyle from a color ramp" (#798):
-        # they do not describe it.
-        "rampless": selected_ramp is None,
         "ramp_catalog_url": reverse("colorramp:index"),
         "form_url": form_url,
         "stops_url": reverse("variable_style_stops", args=[collection.pk, variable.pk]),
@@ -787,9 +797,8 @@ def variable_styling(request, collection_pk, variable_pk):
 def variable_style_stops(request, collection_pk, variable_pk):
     """A ramp's stops over the variable's range, generated and *not* saved.
 
-    What the style editor reads when the ramp, mode, steps or reverse change
-    while the stops are still as generated, and when an operator confirms
-    "Regenerate from ramp" over tuned ones (#801). Applying used to be a POST
+    What a ramp style's editor reads whenever its ramp, mode, steps or reverse
+    change (#806), to show the stops a save will store. Applying used to be a POST
     that regenerated the snapshot in the database behind a confirm round-trip,
     so the only way to see a ramp on real data was to destroy the tuning it
     replaced. Here the stops come back as JSON, fill the form unsaved, and the

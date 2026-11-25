@@ -201,6 +201,16 @@ def reversed_colors(stops: list) -> list:
     return [{**stop, "color": color} for stop, color in zip(stops, colors, strict=True)]
 
 
+def ramp_stops_over(
+    ramp, value_min: float, value_max: float, *, mode="continuous", steps=None, scale_type="linear", reverse=False
+) -> list:
+    """``ramp`` laid over ``value_min``–``value_max`` (:func:`generate_stops`),
+    its colours run the other way when ``reverse``. Pure: it reads the ramp's
+    stops and type only, so a migration can call it with a historical ramp."""
+    stops = generate_stops(ramp, value_min, value_max, mode=mode, steps=steps, scale_type=scale_type)
+    return reversed_colors(stops) if reverse else stops
+
+
 def served_ramp_stops(ramp, variable, mode: str = "continuous", steps: int = None, reverse: bool = False) -> list:
     """``ramp`` applied over ``variable``'s range in its served unit (ADR 0046 §3).
 
@@ -210,12 +220,22 @@ def served_ramp_stops(ramp, variable, mode: str = "continuous", steps: int = Non
     colors the other way over the same values.
     """
     low, high = variable.served_range
-    stops = generate_stops(ramp, low, high, mode=mode, steps=steps, scale_type=variable.scale_type)
-    return reversed_colors(stops) if reverse else stops
+    return ramp_stops_over(ramp, low, high, mode=mode, steps=steps, scale_type=variable.scale_type, reverse=reverse)
+
+
+def band_stops(levels: list, colors: list, convert) -> list:
+    """A Style template's bands as stepped stops: each band two stops, at its
+    lower and upper level (``convert``-ed) in the band's colour. Pure, so a
+    migration can call it."""
+    stops = []
+    for low, high, color in zip(levels[:-1], levels[1:], colors, strict=True):
+        stops.append({"value": convert(low), "color": css_hex(color)})
+        stops.append({"value": convert(high), "color": css_hex(color)})
+    return stops
 
 
 def _same_stops(a: list, b: list) -> bool:
-    """Whether two served-unit snapshots are the same stops: values equal to
+    """Whether two snapshots in one unit are the same stops: values equal to
     well within what any form displays (a unit round trip may move the last
     float digit), colors equal ignoring case."""
     if len(a) != len(b):
@@ -226,6 +246,23 @@ def _same_stops(a: list, b: list) -> bool:
         if not math.isclose(x["value"], y["value"], rel_tol=1e-9, abs_tol=1e-9):
             return False
     return True
+
+
+def recorded_origin(stops: list, *, template_stops=None, ramp_stops=None) -> tuple:
+    """``(origin, reverse)`` for a style made before styles recorded how they
+    were made (#806): ``template`` when ``stops`` are ``template_stops``,
+    ``ramp`` when they are ``ramp_stops`` forwards (``reverse`` False) or
+    reversed (True), ``custom`` otherwise. All three in the same unit; ``None``
+    for a link the style does not have. What the backfill migration decides by.
+    """
+    if template_stops is not None and stops and _same_stops(stops, template_stops):
+        return "template", False
+    if ramp_stops is not None and stops:
+        if _same_stops(stops, ramp_stops):
+            return "ramp", False
+        if _same_stops(stops, reversed_colors(ramp_stops)):
+            return "ramp", True
+    return "custom", False
 
 
 class ColorRamp(ClusterableModel):
@@ -623,8 +660,13 @@ class VariableStyle(TimeStampedModel):
     over one variable's range into absolute value→color stops — and then owned
     by the operator, who may fine-tune any stop, including pinning physical
     thresholds like 0 °C. The snapshot never live-links back to the ramp or the
-    range: editing either leaves the stops untouched until the operator
-    explicitly re-applies, which regenerates and discards tuning.
+    range: editing either leaves the stops untouched until the style is saved.
+
+    Each style records its :class:`Origin` (#806): a ``ramp`` style's stops are
+    regenerated from its ramp on every save, a ``template`` style's are its
+    template's bands and no save changes them, and a ``custom`` style's — the
+    only ones that can be fine-tuned — are what the operator saved. A ramp or
+    template style becomes custom only through "Customise stops".
 
     A variable may carry several named styles — an official public palette
     beside an analyst's — with exactly one default, enforced by a partial
@@ -637,6 +679,19 @@ class VariableStyle(TimeStampedModel):
     class Mode(models.TextChoices):
         CONTINUOUS = "continuous", "Continuous gradient"
         STEPPED = "stepped", "Stepped classes"
+
+    class Origin(models.TextChoices):
+        """How a style was made, and so what drives its stops (#806).
+
+        A ``template`` style's stops are its template's bands, never changed by
+        a save; a ``ramp`` style's are always its ramp, mode, steps and reverse
+        over the Variable's range, regenerated on every save; a ``custom``
+        style's are whatever the operator saved. Set when the style is made,
+        and changed only by :meth:`customise` (or starting over)."""
+
+        TEMPLATE = "template", "From a template"
+        RAMP = "ramp", "From a ramp"
+        CUSTOM = "custom", "Custom"
 
     variable = models.ForeignKey(
         "georivacore.Variable",
@@ -676,10 +731,23 @@ class VariableStyle(TimeStampedModel):
             "only; the stops below are a snapshot and never follow the template."
         ),
     )
+    origin = models.CharField(
+        max_length=16,
+        choices=Origin.choices,
+        default=Origin.CUSTOM,
+        help_text=(
+            "How this style was made: from a template, from a ramp, or custom. "
+            "A custom style keeps any ramp or template link as history only."
+        ),
+    )
     mode = models.CharField(
         max_length=20,
         choices=Mode.choices,
         default=Mode.CONTINUOUS,
+    )
+    reverse = models.BooleanField(
+        default=False,
+        help_text="A ramp style: whether its ramp's colours run the other way over the range.",
     )
     steps = models.PositiveSmallIntegerField(
         null=True,
@@ -773,52 +841,25 @@ class VariableStyle(TimeStampedModel):
 
     # -------- snapshot generation --------
 
-    def apply_ramp(self, reverse: bool = False):
-        """Regenerate the stops snapshot from the ramp and the variable's
-        current range — laid out in the served unit, stored in the source
-        unit (ADR 0046 §3). Explicitly destructive: whatever fine-tuning the
-        snapshot held is discarded, which is why only a deliberate "re-apply"
-        gesture calls this."""
+    def apply_ramp(self):
+        """Regenerate the stops snapshot from the ramp, mode, steps and
+        reverse over the variable's current range — laid out in the served
+        unit, stored in the source unit (ADR 0046 §3). What a ramp style's
+        stops always are (#806): every save of one runs this."""
         if self.ramp is None:
             raise ValueError("This style has no ramp to apply.")
         variable = self.variable
         self.stops = variable.stored_stops(
-            served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps, reverse=reverse)
+            served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps, reverse=self.reverse)
         )
 
-    def _generated_reversed(self):
-        """Whether the stops are what the style's ramp produces forwards
-        (``False``) or reversed (``True``), or ``None`` when they have been
-        tuned by hand (#801, ADR 0022 amendment).
-
-        Nothing records tuning: the saved ramp, mode and steps are regenerated
-        over the Variable's *current* range, forwards and reversed, and
-        compared to the stored stops. So a range change makes a ramp style read
-        as tuned — the safe side, since it only means a ramp change offers to
-        regenerate instead of doing it. A template style is always tuned: its
-        levels are deliberate classes, never a ramp's to redo.
-        """
-        if self.template_id is not None or self.ramp is None or not self.stops:
-            return None
-        variable = self.variable
-        stored = variable.served_stops(self.stops)
-        generated = served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps)
-        if _same_stops(stored, generated):
-            return False
-        if _same_stops(stored, reversed_colors(generated)):
-            return True
-        return None
-
-    @property
-    def is_hand_tuned(self) -> bool:
-        """Whether a ramp change must ask before replacing these stops."""
-        return self._generated_reversed() is None
-
-    @property
-    def is_ramp_reversed(self) -> bool:
-        """Whether the stops are the style's ramp generated reversed — what the
-        editor's "Reverse" box opens ticked for. Hand-tuned stops never are."""
-        return self._generated_reversed() is True
+    def customise(self):
+        """Make this a custom style with the stops it has now (#806). The ramp
+        or template link stays, as history only: nothing it says drives the
+        stops again."""
+        self.origin = self.Origin.CUSTOM
+        self.reverse = False
+        self.save(update_fields=["origin", "reverse", "modified"])
 
     # -------- runtime conversion helpers --------
 

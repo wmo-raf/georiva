@@ -217,18 +217,17 @@ class RampStartTests(ChooserPageTestCase):
 
         self.assertFalse(self.variable.styles.exists())
 
-    def test_a_ramp_start_counts_as_generated_so_ramp_changes_regenerate_it(self):
+    def test_a_ramp_start_opens_the_ramp_editor(self):
         for mode, steps in (("continuous", None), ("stepped", 4)):
             with self.subTest(mode=mode):
                 self.variable.styles.all().delete()
                 self.start(ramp=self.org_ramp.pk, mode=mode, **({"steps": steps} if steps else {}))
                 style = self.variable.styles.get()
 
-                self.assertFalse(style.is_hand_tuned)
+                self.assertEqual(style.origin, VariableStyle.Origin.RAMP)
                 response = self.client.get(self.form_url, {"style": style.slug})
-                self.assertFalse(response.context["stops_tuned"])
-                self.assertFalse(response.context["advanced_open"])
-                self.assertContains(response, 'data-stops-tuned="false"')
+                self.assertEqual(response.context["origin"], VariableStyle.Origin.RAMP)
+                self.assertContains(response, 'data-origin="ramp"')
 
     def test_the_ramp_start_shows_the_current_range_with_a_link_to_change_it(self):
         chooser = self.chooser(self.client.get(self.form_url))
@@ -246,16 +245,13 @@ class ScratchStartTests(ChooserPageTestCase):
         self.assertEqual(response.context["stop_rows"], [])
         self.assertFalse(self.variable.styles.exists())
 
-    def test_scratch_opens_the_advanced_disclosure_and_its_json_panel(self):
+    def test_scratch_opens_the_custom_editor_with_its_json_panel(self):
         response = self.client.get(self.form_url, {"style": "__new__", "start": "scratch"})
         html = response.content.decode()
 
-        self.assertTrue(response.context["advanced_open"])
-        tag = re.search(r'<details[^>]*id="vs-advanced"[^>]*>', html).group(0)
-        self.assertIn(" open", tag)
-        start = html.index(tag)
-        self.assertIn('id="vs-json-toggle"', html[start : html.index("</details>", start)])
-        self.assertIn("advanced?.querySelector('#vs-json-toggle')?.click()", html)
+        self.assertEqual(response.context["origin"], VariableStyle.Origin.CUSTOM)
+        self.assertIn('id="vs-json-toggle"', html)
+        self.assertIn("getElementById('vs-json-toggle')?.click()", html)
 
     def test_start_from_scratch_is_guarded_like_the_tabs(self):
         chooser = self.chooser(self.client.get(self.form_url))
@@ -272,7 +268,7 @@ class ScratchStartTests(ChooserPageTestCase):
     def test_the_chooser_does_not_open_the_json_panel(self):
         html = self.client.get(self.form_url).content.decode()
 
-        self.assertNotIn("advanced?.querySelector('#vs-json-toggle')?.click()", html)
+        self.assertNotIn("getElementById('vs-json-toggle')?.click()", html)
 
     def test_saving_with_no_stops_stores_nothing(self):
         response = self.client.post(
@@ -331,7 +327,7 @@ class StartFromRampTests(ChooserPageTestCase):
         self.assertFalse(second.is_default)
         self.assertNotEqual(first.slug, second.slug)
         self.assertEqual(len(second.stops), 6)
-        self.assertFalse(second.is_hand_tuned)
+        self.assertEqual(second.origin, VariableStyle.Origin.RAMP)
 
 
 class NewStyleIsDefaultTests(ChooserPageTestCase):

@@ -1,87 +1,21 @@
-"""The style editor's basic and advanced views, and live ramp regeneration (#801).
+"""The style editor's generator endpoint and page script (#801, #806).
 
-Three seams:
+Two seams:
 
-* the hand-tuning check on ``VariableStyle`` — no field records it: the style's
-  saved ramp, mode and steps are regenerated over the Variable's current range
-  and compared to the stored stops (ADR 0022 amendment);
-* the generator endpoint — the stops a ramp change fills the form with,
-  reversed when asked;
-* the rendered page — basic controls in view, the stops behind "Advanced:
-  fine-tune stops", open by itself for a hand-tuned or template style.
+* the generator endpoint — the stops a ramp style's editor fills itself with
+  whenever its ramp, mode, classes or reverse change, reversed when asked;
+* the rendered page — its one disclosure (the shared range) reads as one, and
+  the page script reaches the unsaved guard only through a fallback.
 
-Live regeneration itself is JavaScript and is verified by hand, like the map;
-what is tested here is the state the page opens in and what it is told.
+What each origin's editor shows is in ``test_style_origins``. Live
+regeneration itself is JavaScript and is verified by hand, like the map.
 """
 
 import re
 
-from georiva.core.models import StyleTemplate, VariableStyle
+from georiva.core.models import VariableStyle
 from georiva.core.models.visualization import served_ramp_stops
 from georiva.core.tests.test_styling_surface import StylingSurfaceTestCase
-
-
-class HandTuningCheckTests(StylingSurfaceTestCase):
-    """Stops are "as generated" only while they are exactly what the style's own
-    ramp, mode and steps produce over the Variable's current range."""
-
-    def style(self, **fields):
-        fields.setdefault("ramp", self.org_ramp)
-        style = VariableStyle(variable=self.variable, name="Official", slug="official", is_default=True, **fields)
-        if "stops" not in fields:
-            style.apply_ramp()
-        style.save()
-        return style
-
-    def test_stops_the_ramp_generated_are_not_hand_tuned(self):
-        style = self.style()
-
-        self.assertFalse(style.is_hand_tuned)
-        self.assertFalse(style.is_ramp_reversed)
-
-    def test_a_stepped_style_as_generated_is_not_hand_tuned(self):
-        style = self.style(mode=VariableStyle.Mode.STEPPED, steps=5)
-
-        self.assertFalse(style.is_hand_tuned)
-
-    def test_a_reversed_ramp_still_reads_as_generated_and_says_so(self):
-        # make_org_tree's variable spans 0–50; the org ramp runs black→white.
-        style = self.style(stops=[{"value": 0.0, "color": "#ffffff"}, {"value": 50.0, "color": "#000000"}])
-
-        self.assertFalse(style.is_hand_tuned)
-        self.assertTrue(style.is_ramp_reversed)
-
-    def test_a_hand_edited_stop_is_hand_tuned(self):
-        style = self.style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 42.0, "color": "#ffffff"}])
-
-        self.assertTrue(style.is_hand_tuned)
-        self.assertFalse(style.is_ramp_reversed)
-
-    def test_a_hand_edited_colour_is_hand_tuned(self):
-        style = self.style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#fffffe"}])
-
-        self.assertTrue(style.is_hand_tuned)
-
-    def test_a_range_change_makes_a_ramp_style_read_as_tuned(self):
-        style = self.style()
-        self.variable.value_max = 60
-        self.variable.save(update_fields=["value_max"])
-        style.refresh_from_db()
-
-        self.assertTrue(style.is_hand_tuned)
-
-    def test_a_style_with_no_ramp_is_hand_tuned(self):
-        style = self.style(ramp=None, stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}])
-
-        self.assertTrue(style.is_hand_tuned)
-
-    def test_a_template_style_is_always_hand_tuned(self):
-        # Even with stops a ramp would have produced, a template's levels are
-        # deliberate classes, never a ramp's to regenerate.
-        template = StyleTemplate.objects.filter(organisation__isnull=True).first()
-        style = self.style(template=template)
-
-        self.assertTrue(style.is_hand_tuned)
 
 
 class ReversedGenerationTests(StylingSurfaceTestCase):
@@ -115,167 +49,22 @@ class ReversedGenerationTests(StylingSurfaceTestCase):
         self.assertEqual([s["color"] for s in stops], [s["color"] for s in reversed(forward)])
 
 
-BASIC_CONTROLS = ('name="name"', 'name="ramp"', 'name="reverse"', 'name="mode"', 'name="steps"', 'id="vs-preview"')
-ADVANCED_CONTROLS = (
-    'id="vs-stops-table"',
-    'id="vs-classes"',
-    'name="under"',
-    'name="over"',
-    'id="vs-add-stop"',
-    'id="vs-json-toggle"',
-)
-
-
-class EditorViewsTests(StylingSurfaceTestCase):
-    def advanced(self, response):
-        html = response.content.decode()
-        match = re.search(r'<details[^>]*id="vs-advanced"[^>]*>', html)
-        self.assertIsNotNone(match, "no advanced disclosure on the page")
-        return match.group(0), html
-
-    def make_style(self, **fields):
-        style = VariableStyle(
-            variable=self.variable, name="Official", slug="official", is_default=True, ramp=self.org_ramp, **fields
-        )
-        if "stops" not in fields:
-            style.apply_ramp()
-        style.save()
-        return style
-
-    def test_basic_controls_sit_before_the_disclosure_and_the_stops_inside_it(self):
-        self.make_style()
-        tag, html = self.advanced(self.client.get(self.form_url))
-        start = html.index(tag)
-        end = html.index("</details>", start)
-        advanced = html[start:end]
-
-        before = html[:start]
-        for control in BASIC_CONTROLS:
-            self.assertIn(control, before)
-        self.assertIn("Advanced: fine-tune stops", advanced)
-        for control in ADVANCED_CONTROLS:
-            self.assertIn(control, advanced)
-
-    def test_the_disclosure_is_closed_for_stops_as_generated(self):
-        self.make_style()
-        tag, _ = self.advanced(self.client.get(self.form_url))
-
-        self.assertNotIn(" open", tag)
-
-    def test_the_disclosure_opens_for_hand_tuned_stops(self):
-        self.make_style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 42.0, "color": "#ffffff"}])
-        tag, _ = self.advanced(self.client.get(self.form_url))
-
-        self.assertIn(" open", tag)
-
-    def test_the_disclosure_opens_for_a_template_style(self):
-        self.make_style(template=StyleTemplate.objects.filter(organisation__isnull=True).first())
-        tag, _ = self.advanced(self.client.get(self.form_url))
-
-        self.assertIn(" open", tag)
-
-    def test_reverse_is_ticked_for_a_reversed_ramp(self):
-        self.make_style(stops=[{"value": 0.0, "color": "#ffffff"}, {"value": 50.0, "color": "#000000"}])
-        html = self.client.get(self.form_url).content.decode()
-
-        self.assertRegex(html, r'<input[^>]*name="reverse"[^>]*checked')
-
-    def test_the_page_tells_its_script_whether_the_stops_are_tuned(self):
-        self.make_style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 42.0, "color": "#ffffff"}])
-        response = self.client.get(self.form_url)
-
-        self.assertContains(response, 'data-stops-tuned="true"')
-
-    def test_no_apply_ramp_button_remains(self):
-        self.make_style()
-        response = self.client.get(self.form_url)
-
-        self.assertNotContains(response, "Apply ramp")
-        self.assertNotContains(response, "vs-apply-ramp")
-        self.assertContains(response, "Regenerate from ramp (replaces your stops)")
-
-    def test_reverse_is_one_control_the_basic_checkbox(self):
-        self.make_style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 42.0, "color": "#ffffff"}])
-        response = self.client.get(self.form_url)
-
-        self.assertEqual(len(re.findall(r'<input[^>]*name="reverse"', response.content.decode())), 1)
-        self.assertNotContains(response, "vs-reverse-stops")
-        self.assertNotContains(response, "Reverse colors")
-
-
-RAMPLESS_STOPS = [{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}]
+STOPS = [{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}]
 
 
 class DisclosureMarkerTests(StylingSurfaceTestCase):
-    """Every disclosure on the page reads as one (#798): its summary carries the
-    same toggle marker, turned when open, the way Wagtail's collapsible panels do."""
+    """The shared range is a disclosure (#798): its summary carries the toggle
+    marker, turned when open, the way Wagtail's collapsible panels do."""
 
-    def summary(self, html, details_id):
-        match = re.search(rf'<details[^>]*id="{details_id}"[^>]*>\s*(<summary[^>]*>.*?</summary>)', html, re.S)
-        self.assertIsNotNone(match, f"no summary on #{details_id}")
-        return match.group(1)
-
-    def test_the_advanced_range_and_restyle_summaries_carry_the_disclosure_marker(self):
+    def test_the_range_summary_carries_the_disclosure_marker(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", is_default=True, stops=RAMPLESS_STOPS
+            variable=self.variable, name="Official", slug="official", is_default=True, stops=STOPS
         )
         html = self.client.get(self.form_url).content.decode()
 
-        for details_id in ("vs-advanced", "vs-range", "vs-restyle"):
-            with self.subTest(details=details_id):
-                summary = self.summary(html, details_id)
-                self.assertRegex(summary, r'<summary[^>]*class="[^"]*\bvs-disclosure\b')
-                self.assertIn("vs-disclosure-icon", summary)
-
-
-class RamplessStyleTests(StylingSurfaceTestCase):
-    """A style with no ramp behind it — applied from a template, or started from
-    scratch — shows what describes it (#798): its lineage, the preview and
-    Reverse. The ramp, rendering and classes wait behind "Restyle from a color
-    ramp", closed, and a ramp picked there still replaces the stops only through
-    the confirmed regenerate."""
-
-    def restyle(self, html):
-        match = re.search(r'<details[^>]*id="vs-restyle"[^>]*>.*?</details>', html, re.S)
-        self.assertIsNotNone(match, "no restyle disclosure on the page")
-        return match.group(0)
-
-    def test_a_template_style_keeps_ramp_rendering_and_classes_behind_restyle(self):
-        template = StyleTemplate.objects.filter(organisation__isnull=True).first()
-        VariableStyle.objects.create(
-            variable=self.variable,
-            name="Official",
-            slug="official",
-            is_default=True,
-            template=template,
-            stops=RAMPLESS_STOPS,
-        )
-        html = self.client.get(self.form_url).content.decode()
-        restyle = self.restyle(html)
-        outside = html.replace(restyle, "")
-
-        self.assertNotRegex(restyle, r"<details[^>]*\bopen\b")
-        self.assertIn("Restyle from a color ramp", restyle)
-        for control in ('name="ramp"', 'name="mode"', 'name="steps"', 'id="vs-regenerate"'):
-            self.assertIn(control, restyle)
-        self.assertIn("Regenerate from ramp (replaces your stops)", restyle)
-        for control in ('name="reverse"', 'id="vs-preview"', "vs-template-lineage"):
-            self.assertIn(control, outside)
-        self.assertNotIn("Choose a ramp", outside)
-
-    def test_scratch_keeps_the_ramp_behind_restyle(self):
-        html = self.client.get(self.form_url, {"style": "__new__", "start": "scratch"}).content.decode()
-
-        self.assertIn('name="ramp"', self.restyle(html))
-
-    def test_a_ramp_style_has_no_restyle_disclosure(self):
-        style = VariableStyle(variable=self.variable, name="Official", slug="official", ramp=self.org_ramp)
-        style.apply_ramp()
-        style.save()
-        html = self.client.get(self.form_url).content.decode()
-
-        self.assertNotIn('id="vs-restyle"', html)
-        self.assertIn('name="ramp"', html)
+        summary = re.search(r'<details[^>]*id="vs-range"[^>]*>\s*(<summary[^>]*>.*?</summary>)', html, re.S).group(1)
+        self.assertRegex(summary, r'<summary[^>]*class="[^"]*\bvs-disclosure\b')
+        self.assertIn("vs-disclosure-icon", summary)
 
 
 class GuardFallbackTests(StylingSurfaceTestCase):
@@ -284,7 +73,7 @@ class GuardFallbackTests(StylingSurfaceTestCase):
 
     def test_the_page_script_never_calls_the_guard_unguarded(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", is_default=True, stops=RAMPLESS_STOPS
+            variable=self.variable, name="Official", slug="official", is_default=True, stops=STOPS
         )
         html = self.client.get(self.form_url).content.decode()
         page_script = html[html.index("getElementById('vs-style-form')") :]

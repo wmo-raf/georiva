@@ -1,0 +1,17 @@
+{% load i18n %}
+{% comment %}
+    "Customise stops" on a ramp or template style (#806). The button submits
+    #vs-customise-form, which sits outside the style form and asks first.
+{% endcomment %}
+<div class="vs-customise">
+    <p class="help-text">
+        {% if origin == "ramp" %}
+            {% trans "These stops are what the ramp produces, so a save regenerates them. To pin a value or a colour, edit them by hand." %}
+        {% else %}
+            {% trans "These stops are the template's bands, and a save never changes them. To change a band, edit them by hand." %}
+        {% endif %}
+    </p>
+    <button type="submit" form="vs-customise-form" class="button button-small button-secondary" id="vs-customise">
+        {% trans "Customise stops" %}
+    </button>
+</div>

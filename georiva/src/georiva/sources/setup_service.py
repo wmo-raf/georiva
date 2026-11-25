@@ -488,6 +488,7 @@ class SourceSetupService:
             slug=slugify(ramp.name) or "default",
             is_default=True,
             ramp=ramp,
+            origin=VariableStyle.Origin.RAMP,
         )
         # Laid over the served range, stored converted (ADR 0046 §3).
         style.apply_ramp()

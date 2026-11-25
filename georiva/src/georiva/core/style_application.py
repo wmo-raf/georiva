@@ -24,7 +24,7 @@ from django.utils.text import slugify
 
 from georiva.core.machine_plane.colour_table import CODES, encode, encoding_curve
 from georiva.core.models import Variable, VariableStyle
-from georiva.core.models.visualization import css_hex
+from georiva.core.models.visualization import band_stops
 from georiva.core.unit_utils import Conversion, ConversionRefused
 from georiva.utils.slugs import free_slug
 
@@ -69,12 +69,7 @@ def conversion(template, variable) -> Conversion:
 def template_stops(template, variable) -> list:
     """The template's bands as stepped stops in ``variable``'s source unit:
     each band two stops, at its lower and upper level, in the band's colour."""
-    convert = conversion(template, variable).forward
-    stops = []
-    for low, high, color in zip(template.levels[:-1], template.levels[1:], template.colors, strict=True):
-        stops.append({"value": convert(low), "color": css_hex(color)})
-        stops.append({"value": convert(high), "color": css_hex(color)})
-    return stops
+    return band_stops(template.levels, template.colors, conversion(template, variable).forward)
 
 
 def current_encoding(variable) -> Encoding:
@@ -165,6 +160,7 @@ def start_from_ramp(ramp, variable, *, mode=VariableStyle.Mode.CONTINUOUS, steps
         style = _new_style(
             variable,
             ramp.name,
+            origin=VariableStyle.Origin.RAMP,
             ramp=ramp,
             mode=mode,
             steps=steps if mode == VariableStyle.Mode.STEPPED else None,
@@ -197,6 +193,7 @@ def apply_template(template, variable, *, name=None) -> VariableStyle:
             under=template.under,
             over=template.over,
             template=template,
+            origin=VariableStyle.Origin.TEMPLATE,
         )
         style.full_clean()
         style.save()

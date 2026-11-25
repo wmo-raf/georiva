@@ -1,0 +1,27 @@
+{% load i18n %}
+{% comment %}
+    The editor of a style applied from a Style template (#806): its name and
+    the template it came from. The stops are the template's bands and no save
+    changes them; "Customise stops" is the way to edit them.
+
+    .vs-template-source is where the template picker goes (#807); it is a
+    read-only line until then.
+{% endcomment %}
+<div class="vs-field-row">
+    <div class="vs-field">
+        <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
+        {{ style_form.name }}
+    </div>
+</div>
+<div class="vs-template-source" id="vs-template-source">
+    {% if selected.template %}
+        <span class="vs-template-source-swatch" style="background: {{ selected.template.css_gradient }};"></span>
+        <p>
+            {% blocktrans with template=selected.template.name %}From the Style template “{{ template }}”.{% endblocktrans %}
+            <span class="help-text">{{ selected.template.levels_label }}</span>
+        </p>
+    {% else %}
+        <p>{% trans "From a Style template that no longer exists." %}</p>
+    {% endif %}
+</div>
+{% include "core/_style_editor_customise.html" %}

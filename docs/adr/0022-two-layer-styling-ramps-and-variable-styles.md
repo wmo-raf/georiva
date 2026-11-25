@@ -6,9 +6,11 @@
 > database write. Both are amendments to how the surface behaves, not to the
 > two-layer model, which is untouched. See the amendments under **Decision**.
 
-> **Amended by #801 — ramp changes regenerate stops live, never over tuned ones.**
-> While a style's stops are still what its ramp produces, changing the ramp, mode, steps or reverse regenerates them
-> in the form at once; tuned stops are only replaced by an explicit, confirmed "Regenerate from ramp". See §3.
+> **Amended by #806 — every style records its origin: template, ramp or custom.**
+> How a style was made is stored, and decides what drives its stops and which controls the editor shows. A ramp
+> style's stops are always its ramp's; a template style's are its template's; only a custom style's are tuned by
+> hand. "Customise stops" is the one way from the first two to the third. This replaces the #801 note about live
+> regeneration until stops are hand-tuned. See §3.
 
 > **Amended by [ADR-0046](0046-values-are-stored-as-produced-and-converted-when-read.md) — stops are in the source unit.**
 > A stop's "absolute physical value", and `value_min`/`value_max`, are stored in the Variable's source unit and
@@ -98,22 +100,33 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    This removes the surface's last no-JS path. The page now carries a WebGL map;
    assuming JavaScript there is not a new assumption.
 
-   **Amended (#801): ramp changes regenerate stops live while they are still
-   what the ramp produced.** The "Apply ramp" button is gone. Changing a style's
-   ramp, mode, class count or reverse refills the stops through the same
-   read-only endpoint and repaints the map at once — but only while the stops
-   are *as generated*. Nothing records that: `VariableStyle.is_hand_tuned`
-   regenerates the saved ramp, mode and steps over the Variable's current range,
-   forwards and reversed, and compares to the stored stops. Anything else is
-   *tuned*: a style applied from a template always is, and so is a ramp style
-   after a range change, which errs on the safe side. Tuned stops — saved that
-   way, or edited in the page, which makes them tuned for the rest of that
-   session — are never replaced by a ramp change; only an explicit, confirmed
-   "Regenerate from ramp (replaces your stops)" replaces them. Reverse is the
-   one exception, and the one reverse control: on tuned stops it reverses their
-   colours in place, since reversing the snapshot keeps every tuned value. The rule above,
-   that nothing silently overwrites tuning, holds unchanged. Nothing is written
-   until Save.
+   **Amended (#806): every style records its origin.** #801 guessed whether a
+   style's stops were "as generated" by regenerating its ramp over the current
+   range and comparing, and let ramp changes regenerate live only while they
+   were. That guess is gone. `VariableStyle.origin` records how the style was
+   made, and is set once: applying a template gives `template`, starting from a
+   ramp gives `ramp`, starting from scratch gives `custom`.
+
+   - A **ramp** style's stops are always what its ramp, mode, steps and reverse
+     (now stored) produce over the Variable's range. Its editor shows those
+     controls and no stops table; any change refills the stops through the
+     read-only endpoint and repaints the map, and a save regenerates them on
+     the server — posted stops are never taken.
+   - A **template** style's stops are its template's bands. No save changes
+     them; its editor shows the name, the template it came from and the
+     out-of-range settings.
+   - A **custom** style's stops are what the operator saves: the stops or
+     classes table, JSON, and Reverse, which reverses colours in place. This is
+     the only place stops are tuned by hand, so pinning 0 °C means a custom
+     style.
+
+   "Customise stops" turns a ramp or template style into a custom one, after a
+   confirmation, keeping its stops; the ramp or template link stays as history
+   and never drives anything again. "Regenerate from ramp" and "Restyle from a
+   color ramp" are gone with the guess. The rule above holds more strictly than
+   before: tuned stops can only exist on a custom style, and nothing but its own
+   save rewrites them. A data migration recorded the origin of every existing
+   style by the #801 comparison, once: a hand-tuned ramp style became custom.
 
 4. **`Variable` keeps `value_min`/`value_max`/`scale_type`.** They are the
    encoding contract (`imageUnscale`, the ADR 0021 render-config token), not

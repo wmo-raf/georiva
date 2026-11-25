@@ -888,12 +888,19 @@ _Avoid_: style preset, palette template
 The applied, per-variable result: a named row (one-to-many from `Variable`, exactly one `is_default`) holding the
 ramp it came from, step count/mode, and the materialized absolute value→color **stops snapshot**. Applying a ramp
 over the variable's range generates stops; the operator fine-tunes them, including pinning physical thresholds.
-See ADR 0022.
+Each records its **style origin**. See ADR 0022.
 _Avoid_: ColorPalette (retired model), style preset
+
+**Style origin** (`VariableStyle.origin`):
+How a Variable style was made, and so what drives its stops: `template` (its template's bands; no save changes
+them), `ramp` (always its ramp, mode, steps and reverse over the range; every save regenerates them) or `custom`
+(the operator's own stops — the only ones fine-tuned by hand). Set when the style is made; "Customise stops" turns a
+template or ramp style into a custom one, keeping its stops and its link as history only. See ADR 0022 (#806).
+_Avoid_: hand-tuned flag, style type
 
 **Stops snapshot**:
 The concrete value→color entries a style holds. **Snapshot semantics**: a later range edit never silently rewrites
-stops — the styling surface offers "re-apply ramp", which regenerates and discards fine-tuning with a warning.
+stops — a ramp style is laid over the new range when it is next saved, and a template or custom style keeps its stops.
 Not live-linked. See ADR 0022.
 _Avoid_: dynamic stops, linked stops
 
