@@ -41,22 +41,19 @@ How a style is flattened
   mapping, or an entry and an earthkit unit that disagree, drops the style.
 """
 
-import argparse
-import io
-import json
 import sys
-import tarfile
-import tempfile
-import urllib.request
 from pathlib import Path
 
 import yaml
 from matplotlib import colormaps
 from matplotlib.colors import to_hex, to_rgba
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import style_sources  # noqa: E402 - scripts/ is not a package
+from style_sources import Skip  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "catalogue.yml"
-OUTPUT_DIR = HERE.parents[1] / "src" / "georiva" / "core" / "style_catalogue"
 
 COPYRIGHT = "Copyright 2022- European Centre for Medium-Range Weather Forecasts (ECMWF)"
 MODIFIED = (
@@ -65,22 +62,18 @@ MODIFIED = (
 )
 
 
-class Dropped(Exception):
-    """A curated style that cannot be converted faithfully; ``str()`` is why."""
-
-
 def parse_levels(levels):
     if levels is None:
-        raise Dropped("no levels: earthkit levels it from the data at render time")
+        raise Skip("no levels: earthkit levels it from the data at render time")
     if isinstance(levels, str):
         text = levels.strip()
         if not (text.startswith("range(") and text.endswith(")")):
-            raise Dropped(f"levels {levels!r} are neither a list nor range(...)")
+            raise Skip(f"levels {levels!r} are neither a list nor range(...)")
         args = [int(part) for part in text[len("range(") : -1].split(",")]
         return [float(v) for v in range(*args)]
     if isinstance(levels, list) and all(isinstance(v, (int, float)) for v in levels):
         return [float(v) for v in levels]
-    raise Dropped(f"levels {levels!r} are not a list of numbers")
+    raise Skip(f"levels {levels!r} are not a list of numbers")
 
 
 def hex_colour(colour):
@@ -94,25 +87,25 @@ def hex_colour(colour):
 def flatten_colours(colours, bands, extend):
     if isinstance(colours, str):
         if colours not in colormaps:
-            raise Dropped(f"colours {colours!r} are one colour, not a colormap or one colour per band")
+            raise Skip(f"colours {colours!r} are one colour, not a colormap or one colour per band")
         cmap = colormaps[colours]
         below = 1 if extend in ("min", "both") else 0
         above = 1 if extend in ("max", "both") else 0
         bins = bands + below + above
         return [hex_colour(cmap(k / (bins - 1))) for k in range(below, below + bands)]
     if not isinstance(colours, list):
-        raise Dropped(f"colours {colours!r} are neither a list nor a colormap name")
+        raise Skip(f"colours {colours!r} are neither a list nor a colormap name")
     if len(colours) != bands:
-        raise Dropped(f"{len(colours)} colours over {bands} bands, not one per band")
+        raise Skip(f"{len(colours)} colours over {bands} bands, not one per band")
     return [hex_colour(c) for c in colours]
 
 
 def convert(entry, style, unit_strings, units):
     if style.get("type") != "Style":
-        raise Dropped(f"a {style.get('type')} style, not a shaded one")
+        raise Skip(f"a {style.get('type')} style, not a shaded one")
     levels = parse_levels(style.get("levels"))
-    if any(b <= a for a, b in zip(levels, levels[1:], strict=False)) or len(levels) < 3:
-        raise Dropped("levels are not strictly ascending boundaries of at least two bands")
+    if not style_sources.strictly_ascending(levels) or len(levels) < 3:
+        raise Skip("levels are not strictly ascending boundaries of at least two bands")
     extend = style.get("extend")
     colours = flatten_colours(style.get("colors"), len(levels) - 1, extend)
 
@@ -120,15 +113,15 @@ def convert(entry, style, unit_strings, units):
     mapped = None
     if earthkit_unit is not None:
         if earthkit_unit not in unit_strings:
-            raise Dropped(f"earthkit unit {earthkit_unit!r} has no GeoRiva unit")
+            raise Skip(f"earthkit unit {earthkit_unit!r} has no GeoRiva unit")
         mapped = unit_strings[earthkit_unit]
     unit = entry.get("unit", mapped)
     if unit is None:
-        raise Dropped("earthkit declares no unit and the curated entry names none")
+        raise Skip("earthkit declares no unit and the curated entry names none")
     if mapped is not None and unit != mapped:
-        raise Dropped(f"the entry says {unit!r} but earthkit says {earthkit_unit!r} ({mapped!r})")
+        raise Skip(f"the entry says {unit!r} but earthkit says {earthkit_unit!r} ({mapped!r})")
     if unit not in units:
-        raise Dropped(f"unit {unit!r} is not among the catalogue's units")
+        raise Skip(f"unit {unit!r} is not among the catalogue's units")
 
     return {
         "slug": entry["slug"],
@@ -145,17 +138,6 @@ def convert(entry, style, unit_strings, units):
     }
 
 
-def fetch(source, into):
-    """Download and unpack the pinned commit of earthkit-plots; return its root."""
-    url = f"https://codeload.github.com/ecmwf/earthkit-plots/tar.gz/{source['commit']}"
-    with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - a fixed https URL
-        data = response.read()
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-        archive.extractall(into, filter="data")
-    (root,) = Path(into).iterdir()
-    return root
-
-
 def generate(source_root, config):
     styles_dir = Path(source_root) / config["source"]["styles_path"]
     units = {u["symbol"]: u for u in config["units"]}
@@ -169,51 +151,40 @@ def generate(source_root, config):
             doc = yaml.safe_load((styles_dir / f"{entry['file']}.yml").read_text())
             style = doc["styles"].get(entry["style"])
             if style is None:
-                raise Dropped("no such style in the file")
+                raise Skip("no such style in the file")
             templates.append(convert(entry, style, config["unit_strings"], units))
-        except Dropped as reason:
+        except Skip as reason:
             dropped.append({"source_style": where, "slug": entry["slug"], "reason": str(reason)})
     used = {t["unit"] for t in templates}
-    source = config["source"]
-    catalogue = {
-        "source": {
-            "name": source["name"],
-            "repository": source["repository"],
-            "tag": source["tag"],
-            "commit": source["commit"],
-            "license": "Apache-2.0",
-            "copyright": COPYRIGHT,
-            "modified": MODIFIED,
-        },
-        "generator": "georiva/scripts/earthkit_styles/generate.py",
-        "units": [units[s] for s in units if s in used],
-        "templates": templates,
-    }
+    catalogue = style_sources.catalogue(
+        config["source"],
+        tag=config["source"]["tag"],
+        copyright_line=COPYRIGHT,
+        modified=MODIFIED,
+        generator="georiva/scripts/earthkit_styles/generate.py",
+        units=[units[s] for s in units if s in used],
+        templates=templates,
+    )
     return catalogue, dropped
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--source", type=Path, help="an earthkit-plots checkout at the pinned tag (default: fetch it)")
-    parser.add_argument("--output", type=Path, help="where to write the catalogue JSON")
-    args = parser.parse_args()
-
-    config = yaml.safe_load(CONFIG.read_text())
-    output = args.output or OUTPUT_DIR / f"{config['source']['name']}-{config['source']['tag']}.json"
-    if args.source:
-        catalogue, dropped = generate(args.source, config)
-    else:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalogue, dropped = generate(fetch(config["source"], tmp), config)
-
-    output.write_text(json.dumps(catalogue, indent=1, ensure_ascii=False) + "\n")
+def report(catalogue, dropped, output):
     print(f"Wrote {len(catalogue['templates'])} templates to {output}")
     for template in catalogue["templates"]:
         print(f"  {template['quantity']:<13} {template['slug']:<40} <- {template['source_style']}")
     print(f"Dropped {len(dropped)}:")
     for drop in dropped:
         print(f"  {drop['source_style']} ({drop['slug']}): {drop['reason']}")
-    return 0
+
+
+def main():
+    return style_sources.run(
+        __doc__,
+        CONFIG,
+        generate=generate,
+        output_name=lambda source: f"{source['name']}-{source['tag']}.json",
+        report=report,
+    )
 
 
 if __name__ == "__main__":

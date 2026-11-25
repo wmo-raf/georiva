@@ -61,23 +61,25 @@ name Magics does not know and draws red instead); one drawn exactly as an
 earlier style is.
 """
 
-import argparse
 import colorsys
-import io
 import json
 import math
 import re
 import sys
-import tarfile
-import tempfile
-import urllib.request
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
+from typing import NamedTuple
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import style_sources  # noqa: E402 - scripts/ is not a package
+from style_sources import Skip  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "catalogue.yml"
 CORRECTIONS = HERE / "corrections.yml"
-OUTPUT_DIR = HERE.parents[1] / "src" / "georiva" / "core" / "style_catalogue"
 
 COPYRIGHT = "Copyright 1996- European Centre for Medium-Range Weather Forecasts (ECMWF)"
 MODIFIED = (
@@ -89,15 +91,33 @@ MODIFIED = (
 UNUSED, UNIT, UNTRANSLATABLE, DUPLICATE = "unused", "unit", "untranslatable", "duplicate"
 
 
-class Skip(Exception):
-    """A style (or one rule's use of it) that cannot be taken; ``str()`` is why."""
+@dataclass(frozen=True)
+class Rule:
+    """One rule of a Magics rule file: the styles it offers for the fields it matches."""
+
+    #: The rule file's name, e.g. ``tp_interval.json``.
+    file: str
+    #: The styles it lists, by name.
+    styles: list
+    #: The GRIB ``shortName``s it matches, in order.
+    short_names: list
+    #: The unit Magics converts the field to first, if it names one.
+    prefered_units: str | None = None
+
+
+class RuleUse(NamedTuple):
+    """What a rule makes of a style it lists: the unit, and the name and group of the field."""
+
+    unit: str
+    label: str
+    quantity: str
 
 
 @dataclass
 class MagicsSource:
     #: Style name -> its flat ``mcont`` parameters (``styles.json``).
     styles: dict
-    #: The rules, in file order: dicts of ``file``, ``styles``, ``short_names``, ``prefered_units``.
+    #: The rules (:class:`Rule`), in file order.
     rules: list
     #: Colour name -> ``(r, g, b, a)`` in 0–1, or ``None`` for a clear one (``none``).
     colours: dict = field(default_factory=dict)
@@ -128,12 +148,12 @@ def read_magics(root, styles_path="share/magics/styles/ecmwf", colours_path="src
                     if name not in short_names:
                         short_names.append(name)
             rules.append(
-                {
-                    "file": path.name,
-                    "styles": _listed(rule.get("styles")),
-                    "short_names": short_names,
-                    "prefered_units": rule.get("prefered_units"),
-                }
+                Rule(
+                    file=path.name,
+                    styles=_listed(rule.get("styles")),
+                    short_names=short_names,
+                    prefered_units=rule.get("prefered_units"),
+                )
             )
     return MagicsSource(styles=styles, rules=rules, colours=read_colour_names((root / colours_path).read_text()))
 
@@ -285,7 +305,7 @@ def translate(style, names):
     levels = _levels(style)
     if len(levels) < 3:
         raise Skip(f"{len(levels)} levels: a template needs at least two bands")
-    if any(b <= a for a, b in zip(levels, levels[1:], strict=False)):
+    if not style_sources.strictly_ascending(levels):
         raise Skip("levels are not strictly ascending")
     colours = _colours(style, len(levels) - 1, names)
     return {
@@ -300,31 +320,35 @@ def translate(style, names):
 
 
 def _rule_use(rule, config):
-    """``(unit symbol, label, quantity)`` for a rule, or :class:`Skip`."""
-    override = (config.get("rules") or {}).get(rule["file"], {})
+    """What ``rule`` makes of a style it lists, as a :class:`RuleUse`, or :class:`Skip`."""
+    override = (config.get("rules") or {}).get(rule.file, {})
     parameters = config.get("parameters") or {}
-    parameter = next((parameters[n] for n in rule["short_names"] if n in parameters), None)
+    parameter = next((parameters[n] for n in rule.short_names if n in parameters), None)
     if parameter is None and "label" not in override:
-        known = ", ".join(rule["short_names"]) or "no shortName"
-        raise Skip(f"{rule['file']}: no parameter GeoRiva knows ({known})")
+        known = ", ".join(rule.short_names) or "no shortName"
+        raise Skip(f"{rule.file}: no parameter GeoRiva knows ({known})")
     merged = {**(parameter or {}), **override}
     if "unit" in override:
         unit = override["unit"]
-    elif rule.get("prefered_units"):
-        unit = (config.get("unit_strings") or {}).get(rule["prefered_units"])
+    elif rule.prefered_units:
+        unit = (config.get("unit_strings") or {}).get(rule.prefered_units)
         if unit is None:
-            raise Skip(f"{rule['file']}: Magics unit {rule['prefered_units']!r} has no GeoRiva unit")
+            raise Skip(f"{rule.file}: Magics unit {rule.prefered_units!r} has no GeoRiva unit")
     else:
         unit = merged.get("unit")
         if unit is None:
-            raise Skip(f"{rule['file']}: names no unit, and {merged['label']} has none in catalogue.yml")
+            raise Skip(f"{rule.file}: names no unit, and {merged['label']} has none in catalogue.yml")
     if unit not in {u["symbol"] for u in config["units"]}:
-        raise Skip(f"{rule['file']}: unit {unit!r} is not among the catalogue's units")
-    return unit, merged["label"], merged["quantity"]
+        raise Skip(f"{rule.file}: unit {unit!r} is not among the catalogue's units")
+    return RuleUse(unit=unit, label=merged["label"], quantity=merged["quantity"])
 
 
 def _span(value):
-    return f"{value:g}".replace("-", "−")
+    """A level as a name shows it: plainly, never with an exponent (0.00005, not 5e-05)."""
+    text = format(Decimal(repr(float(value))), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text.replace("-", "−")
 
 
 def _name(label, levels, unit, bands):
@@ -341,6 +365,15 @@ def _colour_words(style):
     return match.group(1).strip().rstrip(".").lower() if match else ""
 
 
+@dataclass
+class _Named:
+    """A template on its way out, beside the words its style's description gives
+    its colours in, which tell it apart from another of the same name."""
+
+    template: dict
+    colour_words: str
+
+
 def convert(source, config, corrections):
     """Templates from ``source``'s shaded styles, and the styles skipped.
 
@@ -354,11 +387,11 @@ def convert(source, config, corrections):
     # The rule that names a template: the first in `prefer`, then file order.
     prefer = {file: i for i, file in enumerate(config.get("prefer") or [])}
     uses = {}
-    for rule in sorted(source.rules, key=lambda r: prefer.get(r["file"], len(prefer))):
-        for name in rule["styles"]:
+    for rule in sorted(source.rules, key=lambda r: prefer.get(r.file, len(prefer))):
+        for name in rule.styles:
             uses.setdefault(name, []).append(rule)
 
-    templates, skipped, drawn_already = [], [], {}
+    named, skipped, drawn_already = [], [], {}
     for name in sorted(n for n in source.styles if n.startswith("sh_")):
         style = source.styles[name]
         if name not in uses:
@@ -367,11 +400,11 @@ def convert(source, config, corrections):
         by_unit, unit_reasons = {}, []
         for rule in uses[name]:
             try:
-                unit, label, quantity = _rule_use(rule, config)
+                use = _rule_use(rule, config)
             except Skip as reason:
                 unit_reasons.append(str(reason))
                 continue
-            by_unit.setdefault(unit, (label, quantity))
+            by_unit.setdefault(use.unit, use)
         if not by_unit:
             skipped.append({"source_name": name, "kind": UNIT, "reason": "; ".join(unit_reasons)})
             continue
@@ -381,43 +414,40 @@ def convert(source, config, corrections):
             skipped.append({"source_name": name, "kind": UNTRANSLATABLE, "reason": str(reason)})
             continue
         correction = corrections.get(name, {})
-        for unit, (label, quantity) in by_unit.items():
+        for unit, use in by_unit.items():
             same = drawn_already.get((unit, json.dumps(drawn)))
             if same:
                 skipped.append({"source_name": name, "kind": DUPLICATE, "reason": f"in {unit}, drawn as {same} is"})
                 continue
             drawn_already[(unit, json.dumps(drawn))] = name
             shown = units[unit].get("shown", unit)
-            templates.append(
-                {
-                    "slug": _slug(name, units[unit]["slug"]),
-                    "name": correction.get("name") or _name(label, drawn["levels"], shown, len(drawn["colors"])),
-                    "quantity": correction.get("quantity", quantity),
-                    **drawn,
-                    "unit": unit,
-                    "scale_type": correction.get("scale_type") or scale_type(drawn["levels"]),
-                    "source_name": name,
-                    "_colour_words": _colour_words(style),
-                }
-            )
-    _distinguish(templates)
-    return templates, skipped
+            template = {
+                "slug": _slug(name, units[unit]["slug"]),
+                "name": correction.get("name") or _name(use.label, drawn["levels"], shown, len(drawn["colors"])),
+                "quantity": correction.get("quantity", use.quantity),
+                **drawn,
+                "unit": unit,
+                "scale_type": correction.get("scale_type") or scale_type(drawn["levels"]),
+                "source_name": name,
+            }
+            named.append(_Named(template, _colour_words(style)))
+    _distinguish(named)
+    return [one.template for one in named], skipped
 
 
-def _distinguish(templates):
+def _distinguish(named):
     """Two templates of one name are told apart by their colours, as the style's
     description words them, and failing that by the Magics style name."""
     by_name = {}
-    for template in templates:
-        by_name.setdefault(template["name"], []).append(template)
+    for one in named:
+        by_name.setdefault(one.template["name"], []).append(one)
     for same in by_name.values():
         if len(same) > 1:
-            words = [t["_colour_words"] for t in same]
+            words = [one.colour_words for one in same]
             distinct = all(words) and len(set(words)) == len(words)
-            for template in same:
-                template["name"] += f", {template['_colour_words']}" if distinct else f" ({template['source_name']})"
-    for template in templates:
-        del template["_colour_words"]
+            for one in same:
+                suffix = f", {one.colour_words}" if distinct else f" ({one.template['source_name']})"
+                one.template["name"] += suffix
 
 
 def build(source, config, corrections):
@@ -425,60 +455,33 @@ def build(source, config, corrections):
     templates, skipped = convert(source, config, corrections)
     used = {t["unit"] for t in templates}
     pin = config["source"]
-    catalogue = {
-        "source": {
-            "name": pin["name"],
-            "repository": pin["repository"],
-            "tag": pin["commit"][:8],
-            "commit": pin["commit"],
-            "license": "Apache-2.0",
-            "copyright": COPYRIGHT,
-            "modified": MODIFIED,
-        },
-        "generator": "georiva/scripts/magics_styles/generate.py",
-        "units": [
+    catalogue = style_sources.catalogue(
+        pin,
+        tag=pin["commit"][:8],
+        copyright_line=COPYRIGHT,
+        modified=MODIFIED,
+        generator="georiva/scripts/magics_styles/generate.py",
+        units=[
             {k: v for k, v in unit.items() if k not in ("slug", "shown")}
             for unit in config["units"]
             if unit["symbol"] in used
         ],
-        "templates": templates,
-    }
+        templates=templates,
+    )
     return catalogue, skipped
 
 
-def fetch(pin, into):
-    """Download and unpack the pinned commit of Magics; return its root."""
-    url = f"https://codeload.github.com/ecmwf/magics/tar.gz/{pin['commit']}"
-    with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310 - a fixed https URL
-        data = response.read()
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-        archive.extractall(into, filter="data")
-    (root,) = Path(into).iterdir()
-    return root
-
-
-def main():
-    import yaml
-
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--source", type=Path, help="a Magics checkout at the pinned commit (default: fetch it)")
-    parser.add_argument("--output", type=Path, help="where to write the catalogue JSON")
-    args = parser.parse_args()
-
-    config = yaml.safe_load(CONFIG.read_text())
-    corrections = yaml.safe_load(CORRECTIONS.read_text()) or {}
+def generate(root, config):
+    """The catalogue from a Magics checkout at ``root``, and the skips."""
     pin = config["source"]
-    output = args.output or OUTPUT_DIR / f"{pin['name']}-{pin['commit'][:8]}.json"
-    if args.source:
-        source = read_magics(args.source, pin["styles_path"], pin["colours_path"])
-    else:
-        with tempfile.TemporaryDirectory() as tmp:
-            source = read_magics(fetch(pin, tmp), pin["styles_path"], pin["colours_path"])
-    catalogue, skipped = build(source, config, corrections)
-
-    output.write_text(json.dumps(catalogue, indent=1, ensure_ascii=False) + "\n")
+    source = read_magics(root, pin["styles_path"], pin["colours_path"])
     shaded = sum(1 for n in source.styles if n.startswith("sh_"))
     print(f"Read {len(source.styles)} styles, {shaded} shaded, from {len(source.rules)} rules")
+    corrections = yaml.safe_load(CORRECTIONS.read_text()) or {}
+    return build(source, config, corrections)
+
+
+def report(catalogue, skipped, output):
     print(f"Wrote {len(catalogue['templates'])} templates to {output}")
     for template in catalogue["templates"]:
         print(f"  {template['quantity']:<13} {template['name']:<60} <- {template['source_name']}")
@@ -489,7 +492,16 @@ def main():
         if kind != UNUSED:
             for skip in these:
                 print(f"    {skip['source_name']}: {skip['reason']}")
-    return 0
+
+
+def main():
+    return style_sources.run(
+        __doc__,
+        CONFIG,
+        generate=generate,
+        output_name=lambda source: f"{source['name']}-{source['commit'][:8]}.json",
+        report=report,
+    )
 
 
 if __name__ == "__main__":

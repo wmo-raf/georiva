@@ -8,6 +8,7 @@ Reading Magics itself needs the network and is not tested here; the vendored
 catalogue it wrote is (``test_style_catalogue``).
 """
 
+import functools
 import importlib.util
 from pathlib import Path
 from unittest import SkipTest
@@ -17,6 +18,7 @@ from django.test import SimpleTestCase
 GENERATOR = Path(__file__).resolve().parents[4] / "scripts" / "magics_styles" / "generate.py"
 
 
+@functools.cache
 def _generator():
     if not GENERATOR.exists():
         raise SkipTest(f"the generator is not in this image ({GENERATOR})")
@@ -70,7 +72,7 @@ CONFIG = {
 
 
 def _rule(file, styles, short_names, prefered_units=None):
-    return {"file": file, "styles": styles, "short_names": short_names, "prefered_units": prefered_units}
+    return _generator().Rule(file=file, styles=styles, short_names=short_names, prefered_units=prefered_units)
 
 
 class TranslationTests(SimpleTestCase):
@@ -129,6 +131,14 @@ class TranslationTests(SimpleTestCase):
         self.assertEqual(template["colors"], ["#0000ff", "#00ffff", "#ff8000"])
         self.assertEqual(template["scale_type"], "linear")
         self.assertEqual(template["name"], "2 m temperature, −4 to 8 °C, 3 bands")
+
+    def test_a_name_writes_its_levels_without_an_exponent(self):
+        style = {
+            **SH_BLURED_F05T300LST,
+            "contour_level_list": "0.00005/0.5/1234567",
+            "contour_shade_min_level": "0.00005",
+        }
+        self.assertEqual(self._one(style)["name"], "Precipitation, 0.00005 to 1234567 mm, 2 bands")
 
     def test_levels_below_the_shading_minimum_are_dropped(self):
         style = {**SH_BLURED_F05T300LST, "contour_shade_min_level": 4}

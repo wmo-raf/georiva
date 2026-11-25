@@ -309,7 +309,7 @@
   },
   {
    "slug": "magics-sh-all-f05t100-mm",
-   "name": "Freezing rain, 5e−05 to 1 mm, 9 bands (sh_all_f05t100)",
+   "name": "Freezing rain, 0.00005 to 1 mm, 9 bands (sh_all_f05t100)",
    "quantity": "precipitation",
    "levels": [
     5e-05,
@@ -4469,7 +4469,7 @@
   },
   {
    "slug": "magics-sh-red-f001t10-mm",
-   "name": "Freezing rain, 5e−05 to 1 mm, 9 bands (sh_red_f001t10)",
+   "name": "Freezing rain, 0.00005 to 1 mm, 9 bands (sh_red_f001t10)",
    "quantity": "precipitation",
    "levels": [
     5e-05,
