@@ -6,6 +6,10 @@
 > database write. Both are amendments to how the surface behaves, not to the
 > two-layer model, which is untouched. See the amendments under **Decision**.
 
+> **Amended by #801 — ramp changes regenerate stops live, never over tuned ones.**
+> While a style's stops are still what its ramp produces, changing the ramp, mode, steps or reverse regenerates them
+> in the form at once; tuned stops are only replaced by an explicit, confirmed "Regenerate from ramp". See §3.
+
 > **Amended by [ADR-0046](0046-values-are-stored-as-produced-and-converted-when-read.md) — stops are in the source unit.**
 > A stop's "absolute physical value", and `value_min`/`value_max`, are stored in the Variable's source unit and
 > shown in its served unit; the styling surface converts at its boundary, and a ramp is applied in the served unit.
@@ -93,6 +97,21 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
 
    This removes the surface's last no-JS path. The page now carries a WebGL map;
    assuming JavaScript there is not a new assumption.
+
+   **Amended (#801): ramp changes regenerate stops live while they are still
+   what the ramp produced.** The "Apply ramp" button is gone. Changing a style's
+   ramp, mode, class count or reverse refills the stops through the same
+   read-only endpoint and repaints the map at once — but only while the stops
+   are *as generated*. Nothing records that: `VariableStyle.as_generated()`
+   regenerates the saved ramp, mode and steps over the Variable's current range,
+   forwards and reversed, and compares to the stored stops. Anything else is
+   *tuned*: a style applied from a template always is, and so is a ramp style
+   after a range change, which errs on the safe side. Tuned stops — saved that
+   way, or edited in the page, which makes them tuned for the rest of that
+   session — are never replaced by a ramp change; only an explicit, confirmed
+   "Regenerate from ramp (replaces your stops)" replaces them. The rule above,
+   that nothing silently overwrites tuning, holds unchanged. Nothing is written
+   until Save.
 
 4. **`Variable` keeps `value_min`/`value_max`/`scale_type`.** They are the
    encoding contract (`imageUnscale`, the ADR 0021 render-config token), not

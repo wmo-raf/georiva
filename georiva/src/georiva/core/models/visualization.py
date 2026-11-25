@@ -1,3 +1,6 @@
+import math
+from typing import NamedTuple
+
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models, transaction
@@ -191,15 +194,45 @@ def generate_stops(
     ]
 
 
-def served_ramp_stops(ramp, variable, mode: str = "continuous", steps: int = None) -> list:
+def reversed_colors(stops: list) -> list:
+    """``stops`` with their colors in reverse order against fixed values — what
+    reversing a ramp means once it is laid over a range. A stepped snapshot
+    stays clean class pairs: a doubled list reversed is still doubled."""
+    colors = [stop["color"] for stop in reversed(stops)]
+    return [{**stop, "color": color} for stop, color in zip(stops, colors, strict=True)]
+
+
+def served_ramp_stops(ramp, variable, mode: str = "continuous", steps: int = None, reverse: bool = False) -> list:
     """``ramp`` applied over ``variable``'s range in its served unit (ADR 0046 §3).
 
     ``scale_type`` spaces stops as the operator sees them, so the ramp is laid
     over the served range; the stops come back in the served unit, for a form.
-    Store them with ``variable.stored_stops(...)``.
+    Store them with ``variable.stored_stops(...)``. ``reverse`` runs the ramp's
+    colors the other way over the same values.
     """
     low, high = variable.served_range
-    return generate_stops(ramp, low, high, mode=mode, steps=steps, scale_type=variable.scale_type)
+    stops = generate_stops(ramp, low, high, mode=mode, steps=steps, scale_type=variable.scale_type)
+    return reversed_colors(stops) if reverse else stops
+
+
+def _same_stops(a: list, b: list) -> bool:
+    """Whether two served-unit snapshots are the same stops: values equal to
+    well within what any form displays (a unit round trip may move the last
+    float digit), colors equal ignoring case."""
+    if len(a) != len(b):
+        return False
+    for x, y in zip(a, b, strict=True):
+        if x["color"].lower() != y["color"].lower():
+            return False
+        if not math.isclose(x["value"], y["value"], rel_tol=1e-9, abs_tol=1e-9):
+            return False
+    return True
+
+
+class AsGenerated(NamedTuple):
+    """How a style's stops are still exactly what its ramp produces."""
+
+    reverse: bool
 
 
 class ColorRamp(ClusterableModel):
@@ -747,7 +780,7 @@ class VariableStyle(TimeStampedModel):
 
     # -------- snapshot generation --------
 
-    def apply_ramp(self):
+    def apply_ramp(self, reverse: bool = False):
         """Regenerate the stops snapshot from the ramp and the variable's
         current range — laid out in the served unit, stored in the source
         unit (ADR 0046 §3). Explicitly destructive: whatever fine-tuning the
@@ -756,7 +789,36 @@ class VariableStyle(TimeStampedModel):
         if self.ramp is None:
             raise ValueError("This style has no ramp to apply.")
         variable = self.variable
-        self.stops = variable.stored_stops(served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps))
+        self.stops = variable.stored_stops(
+            served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps, reverse=reverse)
+        )
+
+    def as_generated(self):
+        """How the stops are still what the style's ramp produces, or ``None``
+        when they have been tuned by hand (#801, ADR 0022 amendment).
+
+        Nothing records tuning: the saved ramp, mode and steps are regenerated
+        over the Variable's *current* range, forwards and reversed, and
+        compared to the stored stops. So a range change makes a ramp style read
+        as tuned — the safe side, since it only means a ramp change offers to
+        regenerate instead of doing it. A template style is always tuned: its
+        levels are deliberate classes, never a ramp's to redo.
+        """
+        if self.template_id is not None or self.ramp is None or not self.stops:
+            return None
+        variable = self.variable
+        stored = variable.served_stops(self.stops)
+        generated = served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps)
+        if _same_stops(stored, generated):
+            return AsGenerated(reverse=False)
+        if _same_stops(stored, reversed_colors(generated)):
+            return AsGenerated(reverse=True)
+        return None
+
+    @property
+    def is_hand_tuned(self) -> bool:
+        """Whether a ramp change must ask before replacing these stops."""
+        return self.as_generated() is None
 
     # -------- runtime conversion helpers --------
 
