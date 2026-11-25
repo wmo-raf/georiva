@@ -753,6 +753,10 @@ def variable_styling(request, collection_pk, variable_pk):
         "advanced_open": stops_tuned or bool(style_form.errors) or scratch,
         "ramp_groups": ramp_groups,
         "selected_ramp": selected_ramp,
+        # A style with no ramp behind it (template-applied, or scratch) keeps the
+        # ramp, rendering and classes behind "Restyle from a color ramp" (#798):
+        # they do not describe it.
+        "rampless": selected_ramp is None,
         "ramp_catalog_url": reverse("colorramp:index"),
         "form_url": form_url,
         "stops_url": reverse("variable_style_stops", args=[collection.pk, variable.pk]),

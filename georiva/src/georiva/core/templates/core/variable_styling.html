@@ -403,11 +403,52 @@
 
         /* The shared range and curve, below the editor (#799). */
         .vs-range-summary {
-            display: flex;
             flex-wrap: wrap;
             gap: 0.25rem 0.75rem;
-            align-items: baseline;
+        }
+
+        /*
+         * Every disclosure's summary (#798): Wagtail's collapsible-panel toggle —
+         * a ringed chevron, pointing right while closed and down while open —
+         * in place of the browser's marker, which display: flex drops anyway.
+         */
+        .vs-disclosure {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
             cursor: pointer;
+            list-style: none;
+        }
+
+        .vs-disclosure::-webkit-details-marker {
+            display: none;
+        }
+
+        .vs-disclosure-toggle {
+            display: inline-grid;
+            place-content: center;
+            flex-shrink: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            border: 1px solid var(--w-color-border-interactive-more-contrast);
+            border-radius: 100%;
+            color: var(--w-color-icon-primary);
+        }
+
+        .vs-disclosure:hover .vs-disclosure-toggle {
+            border-color: var(--w-color-border-interactive-more-contrast-hover);
+            color: var(--w-color-icon-primary-hover);
+        }
+
+        .vs-disclosure-icon {
+            width: 1rem;
+            height: 1rem;
+            transform: rotate(-90deg);
+            transition: transform 0.15s ease;
+        }
+
+        details[open] > .vs-disclosure .vs-disclosure-icon {
+            transform: none;
         }
 
         .vs-range-summary h2 {
@@ -479,8 +520,12 @@
             padding-top: 1rem;
         }
 
-        .vs-advanced > summary {
-            cursor: pointer;
+        .vs-restyle {
+            margin-top: 1rem;
+        }
+
+        .vs-restyle[open] > summary {
+            margin-bottom: 0.75rem;
         }
 
         .vs-unsaved {
@@ -924,7 +969,7 @@
                 {% endif %}
 
                 <form method="post" action="{{ form_url }}" id="vs-style-form"
-                      data-stops-tuned="{{ stops_tuned|yesno:'true,false' }}"
+                      data-stops-tuned="{% if stops_tuned or rampless %}true{% else %}false{% endif %}"
                       data-unsaved-note="vs-unsaved"
                       data-unsaved-message="{% trans 'This style has unsaved changes.' %}">
                     {% csrf_token %}
@@ -933,11 +978,15 @@
 
                     {% include "core/_styling_form_errors.html" with form=style_form %}
 
-                    <div class="vs-field-row">
-                        <div class="vs-field">
-                            <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
-                            {{ style_form.name }}
-                        </div>
+                    {% comment %}
+                        The basic controls, as fragments: a style with a ramp lays
+                        them out in two rows; one without (template-applied, or
+                        scratch) shows Reverse beside its name and keeps the ramp,
+                        rendering and classes behind "Restyle from a color ramp"
+                        (#798), where a picked ramp replaces the stops only through
+                        the confirmed regenerate.
+                    {% endcomment %}
+                    {% fragment as ramp_field %}
                         {% comment %}
                             The ramp picker (#383). A native <option> cannot
                             render a gradient — Chrome and Safari ignore
@@ -1010,9 +1059,8 @@
                             <a class="vs-ramp-manage" href="{{ ramp_catalog_url }}"
                                target="_blank" rel="noopener">{% trans "Manage color ramps" %}</a>
                         </div>
-                    </div>
-
-                    <div class="vs-field-row">
+                    {% endfragment %}
+                    {% fragment as mode_fields %}
                         <div class="vs-field">
                             <label for="{{ style_form.mode.id_for_label }}">{% trans "Rendering" %}</label>
                             {{ style_form.mode }}
@@ -1021,6 +1069,8 @@
                             <label for="{{ style_form.steps.id_for_label }}">{% trans "Classes" %}</label>
                             {{ style_form.steps }}
                         </div>
+                    {% endfragment %}
+                    {% fragment as reverse_field %}
                         {% comment %}
                             The one reverse control (#801). On stops as the
                             ramp generated them it regenerates them reversed;
@@ -1037,8 +1087,8 @@
                                 {% trans "Reverse" %}
                             </label>
                         </div>
-                    </div>
-
+                    {% endfragment %}
+                    {% fragment as regenerate_row %}
                     {% comment %}
                         Ramp changes regenerate the stops live while they are
                         still what the ramp produced (#801). Once they are tuned
@@ -1055,6 +1105,46 @@
                             {% trans "Regenerate from ramp (replaces your stops)" %}
                         </button>
                     </div>
+                    {% endfragment %}
+
+                    {% if rampless %}
+                        <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
+                            {{ style_form.name }}
+                        </div>
+                            {{ reverse_field }}
+                        </div>
+                        <details class="vs-restyle" id="vs-restyle">
+                            <summary class="vs-disclosure w-label-2">
+                                <span class="vs-disclosure-toggle" aria-hidden="true">{% icon name="arrow-down" classname="vs-disclosure-icon" %}</span>
+                                {% trans "Restyle from a color ramp" %}
+                            </summary>
+                            <p class="help-text">
+                                {% trans "This style has no ramp behind it. Picking one here changes nothing until you choose “Regenerate from ramp”, which replaces the stops." %}
+                            </p>
+                            <div class="vs-field-row">
+                                {{ ramp_field }}
+                            </div>
+                            <div class="vs-field-row">
+                                {{ mode_fields }}
+                            </div>
+                            {{ regenerate_row }}
+                        </details>
+                    {% else %}
+                        <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
+                            {{ style_form.name }}
+                        </div>
+                            {{ ramp_field }}
+                        </div>
+                        <div class="vs-field-row">
+                            {{ mode_fields }}
+                            {{ reverse_field }}
+                        </div>
+                        {{ regenerate_row }}
+                    {% endif %}
                     <ul class="vs-errors" id="vs-apply-error" hidden
                         data-unreachable="{% trans 'Could not reach the server.' %}"></ul>
 
@@ -1072,7 +1162,10 @@
                         they left it. A closed <details> still posts its inputs.
                     {% endcomment %}
                     <details class="vs-advanced" id="vs-advanced"{% if advanced_open %} open{% endif %}>
-                        <summary class="w-label-2">{% trans "Advanced: fine-tune stops" %}</summary>
+                        <summary class="vs-disclosure w-label-2">
+                            <span class="vs-disclosure-toggle" aria-hidden="true">{% icon name="arrow-down" classname="vs-disclosure-icon" %}</span>
+                            {% trans "Advanced: fine-tune stops" %}
+                        </summary>
 
                     {# What values beyond the stops are drawn as (#788): the end colour, or nothing. #}
                     <div class="vs-field-row">
@@ -1224,7 +1317,8 @@
                 warning.
             {% endcomment %}
             <details class="vs-panel vs-range-panel" id="vs-range"{% if range_open %} open{% endif %}>
-                <summary class="vs-range-summary">
+                <summary class="vs-disclosure vs-range-summary">
+                    <span class="vs-disclosure-toggle" aria-hidden="true">{% icon name="arrow-down" classname="vs-disclosure-icon" %}</span>
                     <h2 class="w-label-1">{% trans "Range and curve" %}</h2>
                     <span class="vs-range-scope">{% trans "shared by every style of this variable" %}</span>
                     <span class="vs-range-current">
@@ -1362,6 +1456,17 @@
             data-confirm-suffix="{% trans 'Discard them and continue?' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            /**
+             The unsaved guard's markers, called through a no-op when
+             unsaved_guard.js did not load (#798): regenerating and fitting the
+             range must keep working without it.
+             **/
+            function markDirty(marker) {
+                if (typeof window[marker] === 'function') {
+                    window[marker]();
+                }
+            }
+
             const form = document.getElementById('vs-style-form');
             const rampInput = document.getElementById('vs-ramp-input');
             const rampToggleBar = document.getElementById('vs-ramp-toggle-bar');
@@ -1412,7 +1517,7 @@
                 // Shown only, never hidden here: the guard (#802) may have
                 // marked the form dirty from an edit this script does not track.
                 if (styleDirty) {
-                    window.markStyleDirty();
+                    markDirty('markStyleDirty');
                 }
             }
 
@@ -1588,12 +1693,12 @@
                     }
                     rangeMinInput.value = fitted[0];
                     rangeMaxInput.value = fitted[1];
-                    window.markRangeDirty();
+                    markDirty('markRangeDirty');
                     updateRangeHint(readStops());
                 });
                 [rangeMinInput, rangeMaxInput].forEach(function (input) {
                     input.addEventListener('input', function () {
-                        window.markRangeDirty();
+                        markDirty('markRangeDirty');
                         updateRangeHint(readStops());
                     });
                 });

@@ -201,3 +201,92 @@ class EditorViewsTests(StylingSurfaceTestCase):
         self.assertEqual(len(re.findall(r'<input[^>]*name="reverse"', response.content.decode())), 1)
         self.assertNotContains(response, "vs-reverse-stops")
         self.assertNotContains(response, "Reverse colors")
+
+
+RAMPLESS_STOPS = [{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}]
+
+
+class DisclosureMarkerTests(StylingSurfaceTestCase):
+    """Every disclosure on the page reads as one (#798): its summary carries the
+    same toggle marker, turned when open, the way Wagtail's collapsible panels do."""
+
+    def summary(self, html, details_id):
+        match = re.search(rf'<details[^>]*id="{details_id}"[^>]*>\s*(<summary[^>]*>.*?</summary>)', html, re.S)
+        self.assertIsNotNone(match, f"no summary on #{details_id}")
+        return match.group(1)
+
+    def test_the_advanced_range_and_restyle_summaries_carry_the_disclosure_marker(self):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official", is_default=True, stops=RAMPLESS_STOPS
+        )
+        html = self.client.get(self.form_url).content.decode()
+
+        for details_id in ("vs-advanced", "vs-range", "vs-restyle"):
+            with self.subTest(details=details_id):
+                summary = self.summary(html, details_id)
+                self.assertRegex(summary, r'<summary[^>]*class="[^"]*\bvs-disclosure\b')
+                self.assertIn("vs-disclosure-icon", summary)
+
+
+class RamplessStyleTests(StylingSurfaceTestCase):
+    """A style with no ramp behind it — applied from a template, or started from
+    scratch — shows what describes it (#798): its lineage, the preview and
+    Reverse. The ramp, rendering and classes wait behind "Restyle from a color
+    ramp", closed, and a ramp picked there still replaces the stops only through
+    the confirmed regenerate."""
+
+    def restyle(self, html):
+        match = re.search(r'<details[^>]*id="vs-restyle"[^>]*>.*?</details>', html, re.S)
+        self.assertIsNotNone(match, "no restyle disclosure on the page")
+        return match.group(0)
+
+    def test_a_template_style_keeps_ramp_rendering_and_classes_behind_restyle(self):
+        template = StyleTemplate.objects.filter(organisation__isnull=True).first()
+        VariableStyle.objects.create(
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
+            template=template,
+            stops=RAMPLESS_STOPS,
+        )
+        html = self.client.get(self.form_url).content.decode()
+        restyle = self.restyle(html)
+        outside = html.replace(restyle, "")
+
+        self.assertNotRegex(restyle, r"<details[^>]*\bopen\b")
+        self.assertIn("Restyle from a color ramp", restyle)
+        for control in ('name="ramp"', 'name="mode"', 'name="steps"', 'id="vs-regenerate"'):
+            self.assertIn(control, restyle)
+        self.assertIn("Regenerate from ramp (replaces your stops)", restyle)
+        for control in ('name="reverse"', 'id="vs-preview"', "vs-template-lineage"):
+            self.assertIn(control, outside)
+        self.assertNotIn("Choose a ramp", outside)
+
+    def test_scratch_keeps_the_ramp_behind_restyle(self):
+        html = self.client.get(self.form_url, {"style": "__new__", "start": "scratch"}).content.decode()
+
+        self.assertIn('name="ramp"', self.restyle(html))
+
+    def test_a_ramp_style_has_no_restyle_disclosure(self):
+        style = VariableStyle(variable=self.variable, name="Official", slug="official", ramp=self.org_ramp)
+        style.apply_ramp()
+        style.save()
+        html = self.client.get(self.form_url).content.decode()
+
+        self.assertNotIn('id="vs-restyle"', html)
+        self.assertIn('name="ramp"', html)
+
+
+class GuardFallbackTests(StylingSurfaceTestCase):
+    """Live regeneration never depends on unsaved_guard.js loading (#798): the
+    page script reaches the guard's functions only through a fallback."""
+
+    def test_the_page_script_never_calls_the_guard_unguarded(self):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official", is_default=True, stops=RAMPLESS_STOPS
+        )
+        html = self.client.get(self.form_url).content.decode()
+        page_script = html[html.index("getElementById('vs-style-form')") :]
+
+        self.assertNotRegex(page_script, r"window\.mark(Style|Range)Dirty\(\)")
