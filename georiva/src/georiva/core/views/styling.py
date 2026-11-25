@@ -30,6 +30,7 @@ from wagtail.admin import messages
 from georiva.core import style_application
 from georiva.core.machine_plane import titiler_encoded_preview_url
 from georiva.core.machine_plane.colour_table import colour_table
+from georiva.core.machine_plane.legend import legend
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Collection, ColorRamp, Item, OutOfRange, StyleTemplate, Variable, VariableStyle
 from georiva.core.models.visualization import _swatch_html, served_ramp_stops
@@ -363,7 +364,6 @@ def _preview_context(variable):
             "encoding": contract.encoding,
             "unit": variable.units or "",
             "stepUrl": reverse("variable_preview_step", args=[variable.collection_id, variable.pk]),
-            "coloursUrl": reverse("variable_style_colours", args=[variable.collection_id, variable.pk]),
         },
     }
 
@@ -418,7 +418,9 @@ def variable_style_colours(request, collection_pk, variable_pk):
     colours a texture code by code from a style's colour table, and that table
     is built in one place on the server for every renderer, so the preview asks
     for it here rather than working colours out itself: what it shows is what
-    Titiler will serve once the stops are saved.
+    Titiler will serve once the stops are saved. Beside it, the legend those
+    stops would get (#812), which the page's preview bar draws with the same
+    `legend.js` as every other legend.
 
     ``stops`` is JSON, ``[{"value", "color"}, ...]`` in the served unit, as the
     form shows them (ADR 0046 §3); ``under`` and ``over`` are the style's
@@ -447,7 +449,7 @@ def variable_style_colours(request, collection_pk, variable_pk):
         style.clean()
     except ValidationError:
         return refused
-    return JsonResponse({"colourTable": colour_table(variable, style)})
+    return JsonResponse({"colourTable": colour_table(variable, style), "legend": legend(variable, style)})
 
 
 def collection_styling(request, collection_pk):
@@ -862,6 +864,8 @@ def variable_styling(request, collection_pk, variable_pk):
         "ramp_catalog_url": reverse("colorramp:index"),
         "form_url": form_url,
         "stops_url": reverse("variable_style_stops", args=[collection.pk, variable.pk]),
+        # The preview bar's legend comes from here too, data or none (#812).
+        "colours_url": reverse("variable_style_colours", args=[collection.pk, variable.pk]),
         "new_style_url": style_url(),
         "grayscale_gradient": GRAYSCALE_GRADIENT,
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,

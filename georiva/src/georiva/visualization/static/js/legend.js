@@ -8,7 +8,13 @@
  *
  *   legend = {gradient: [[position, [r, g, b, a]], ...],   // 0–1 along the bar
  *             ticks: [[position, value], ...],              // value served
+ *             labels: [tick index, ...],                    // which carry text
  *             under: 'clamp' | 'transparent', over: ...}
+ *
+ * `labels` is the server's pick (#812): every class boundary of a stepped
+ * legend up to 16, fewer on a continuous one. Only here is the bar's width
+ * known, so where those labels would overlap they thin further, at an even
+ * stride with both ends kept, and again whenever the bar is resized.
  *
  * An end arrow is drawn only where the end is clamped: values beyond it take
  * the end colour. A transparent end has none, since those values are not drawn.
@@ -25,7 +31,8 @@
 
     const BAR_HEIGHT = 8;
     const ARROW_WIDTH = 7;
-    const MAX_LABELS = 6;
+    /** Pixels of clear space between two neighbouring labels. */
+    const LABEL_GAP = 4;
 
     function css(colour) {
         const alpha = colour.length > 3 ? colour[3] / 255 : 1;
@@ -59,17 +66,65 @@
         return String(Number(value.toFixed(magnitude < 10 ? 2 : 1)));
     }
 
-    /** Which ticks get a label: at most MAX_LABELS, evenly picked, both ends always. */
-    function labelled(count) {
-        const every = Math.max(1, Math.ceil((count - 1) / (MAX_LABELS - 1)));
-        const picked = new Set([0, count - 1]);
+    /**
+     * Every `every`-th of `count` labels, both ends always; one closer than half
+     * a stride to the last gives way to it. Mirrors `_labelled` in legend.py.
+     */
+    function stride(count, every) {
+        const picked = [];
         for (let i = 0; i < count; i += every) {
-            picked.add(i);
+            picked.push(i);
+        }
+        if (picked[picked.length - 1] !== count - 1) {
+            if ((count - 1 - picked[picked.length - 1]) * 2 < every) {
+                picked.pop();
+            }
+            picked.push(count - 1);
         }
         return picked;
     }
 
+    /**
+     * Which of the labels to show, given each one's `[left, right]` in pixels:
+     * the densest even stride under which no two overlap, both ends always.
+     */
+    function fitting(extents) {
+        const count = extents.length;
+        for (let every = 1; every < count - 1; every++) {
+            const picked = stride(count, every);
+            const clear = picked.every(
+                (index, at) => at === 0 || extents[picked[at - 1]][1] + LABEL_GAP <= extents[index][0]
+            );
+            if (clear) {
+                return picked;
+            }
+        }
+        return count > 1 ? [0, count - 1] : [0];
+    }
+
+    /** Shows the labels that fit `scale`'s width, hiding the rest. */
+    function fit(scale, labels) {
+        const width = scale.clientWidth;
+        if (!width || !labels.length) {
+            return;
+        }
+        const extents = labels.map(({element, position}) => {
+            const size = element.getBoundingClientRect().width;
+            const at = position * width;
+            const left = position <= 0 ? at : position >= 1 ? at - size : at - size / 2;
+            return [left, left + size];
+        });
+        const shown = new Set(fitting(extents));
+        labels.forEach(({element}, index) => {
+            element.style.visibility = shown.has(index) ? '' : 'hidden';
+        });
+    }
+
     function render(container, legend) {
+        if (container.legendObserver) {
+            container.legendObserver.disconnect();
+            container.legendObserver = null;
+        }
         container.replaceChildren();
         if (!legend) {
             return;
@@ -106,7 +161,8 @@
         scale.style.fontSize = '0.625rem';
         scale.style.fontVariantNumeric = 'tabular-nums';
 
-        const withLabel = labelled(ticks.length);
+        const withLabel = new Set(legend.labels || ticks.map((_tick, index) => index));
+        const labels = [];
         ticks.forEach(([position, value], index) => {
             const left = `${position * 100}%`;
             const mark = document.createElement('span');
@@ -131,8 +187,15 @@
             text.style.transform =
                 position <= 0 ? 'none' : position >= 1 ? 'translateX(-100%)' : 'translateX(-50%)';
             scale.appendChild(text);
+            labels.push({element: text, position});
         });
         container.appendChild(scale);
+
+        fit(scale, labels);
+        if (typeof ResizeObserver !== 'undefined') {
+            container.legendObserver = new ResizeObserver(() => fit(scale, labels));
+            container.legendObserver.observe(scale);
+        }
     }
 
     global.GeoRivaLegend = {render};
