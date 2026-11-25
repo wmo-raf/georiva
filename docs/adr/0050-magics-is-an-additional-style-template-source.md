@@ -36,8 +36,11 @@ commit, translated as Magics draws them.**
 5. **Translated as Magics draws, read from its source.** Levels exactly as listed (an `interval` style: the levels
    `IntervalSelectionType` computes), clipped by `contour_shade_min_level` / `max_level`. n levels take the first
    n − 1 colours of the list, repeating the last if it is short (`ColourTableDefinitionCompute`, policy `lastone`).
-   Colour names are Magics' own table, parsed from `Colour.cc`. Below the lowest level is transparent; above the top,
-   the last colour drawn. So `sh_blured_f05t300lst` is 7 bands from 0.5 to 250 mm: its list's eighth colour,
+   Colour names are Magics' own table, parsed from `Colour.cc`. Below the lowest level and above the top one is
+   transparent: Magics fills a polygon only between two levels (`PolyShadingMethod::index` is −1 outside them, and
+   `PolyShadingMethod::operator()` leaves such a polygon unfilled). The issue asked for the last colour above the top;
+   the source says otherwise, and the translation follows the source. So `sh_blured_f05t300lst` is 7 bands from 0.5
+   to 250 mm, nothing drawn beyond them: its list's eighth colour,
    charcoal, is never drawn by Magics, and is not here.
 6. **Named and grouped as the earthkit-plots templates are.** "Precipitation, 0.5 to 250 mm, 7 bands", grouped by the
    rule's parameter into the same `Quantity` groups. `source_name` is the Magics style name, shown in the picker as a

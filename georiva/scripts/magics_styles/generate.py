@@ -46,8 +46,10 @@ How a style is translated — as Magics draws it
   policy ``lastone``). A colour is a Magics name, ``rgb()``/``rgba()`` (0–1, or
   0–255), ``hsl()``/``hsla()`` or ``#rrggbb``, written ``#rrggbb`` (or
   ``#rrggbbaa`` when not opaque); ``none`` is a clear band.
-* **Out of range**: below the lowest level is transparent; above the top level
-  is the last colour drawn.
+* **Out of range**: transparent at both ends. Magics fills a polygon only
+  between two levels (``PolyShadingMethod::index`` is -1 outside them, and
+  ``operator()`` leaves such a polygon unfilled), so nothing is drawn below the
+  lowest level or above the top one.
 * **Curve**, from the level spacing: even gives linear, roughly multiplying
   gives log, otherwise widening gives sqrt. ``corrections.yml`` overrides the
   curve or the group of any style.
@@ -290,7 +292,7 @@ def translate(style, names):
         "levels": [int(v) if float(v).is_integer() else v for v in levels],
         "colors": colours,
         "under": "transparent",
-        "over": "clamp",
+        "over": "transparent",
     }
 
 

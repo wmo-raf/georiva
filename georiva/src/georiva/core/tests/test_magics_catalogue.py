@@ -103,8 +103,8 @@ class TranslationTests(SimpleTestCase):
         self.assertEqual(
             template["colors"], ["#00ffff", "#0080ff", "#0000ff", "#da00ff", "#ff00ff", "#ff8000", "#ff0000"]
         )
-        # Below 0.5 mm nothing is drawn; above 250 mm, the last colour drawn.
-        self.assertEqual((template["under"], template["over"]), ("transparent", "clamp"))
+        # Nothing is drawn below 0.5 mm or above 250 mm: PolyShadingMethod fills no polygon outside the levels.
+        self.assertEqual((template["under"], template["over"]), ("transparent", "transparent"))
         self.assertEqual(template["unit"], "mm")
         self.assertEqual(template["quantity"], "precipitation")
         self.assertEqual(template["source_name"], "sh_blured_f05t300lst")

@@ -127,7 +127,7 @@ class ShippedMagicsCatalogueTests(TestCase):
         self.assertEqual(template.quantity, "precipitation")
         self.assertEqual(template.levels, [0.5, 2, 4, 10, 25, 50, 100, 250])
         self.assertEqual(len(template.colors), 7)
-        self.assertEqual((template.under, template.over), ("transparent", "clamp"))
+        self.assertEqual((template.under, template.over), ("transparent", "transparent"))
         self.assertEqual(template.unit.symbol, "mm")
 
     def test_every_magics_templates_unit_resolves_in_the_unit_registry(self):

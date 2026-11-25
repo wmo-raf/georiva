@@ -130,7 +130,7 @@
     "#ff0000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_BuYlRd_aod"
@@ -173,7 +173,7 @@
     "#ff0000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_BuYlRd_aod_lowthreshold"
@@ -228,7 +228,7 @@
     "#7f2704"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_Oranges_aod"
@@ -263,7 +263,7 @@
     "#800000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_all_aod"
@@ -302,7 +302,7 @@
     "#b200b2"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "sqrt",
    "source_name": "sh_all_f03t70_beauf"
@@ -335,7 +335,7 @@
     "#c90404"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_all_f05t100"
@@ -386,7 +386,7 @@
     "#80002c"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_all_f05t300lst"
@@ -417,7 +417,7 @@
     "#08589e"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "cm",
    "scale_type": "linear",
    "source_name": "sh_all_f0t04lst"
@@ -454,7 +454,7 @@
     "#333333"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "s",
    "scale_type": "linear",
    "source_name": "sh_all_f0t18i1_5"
@@ -491,7 +491,7 @@
     "#333333"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_all_f0t20lst"
@@ -554,7 +554,7 @@
     "#590099"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "linear",
    "source_name": "sh_all_f2t50i2"
@@ -583,7 +583,7 @@
     "#b200b2"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "linear",
    "source_name": "sh_all_f30t100i10"
@@ -616,7 +616,7 @@
     "#b200b2"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "sqrt",
    "source_name": "sh_all_f5t70lst"
@@ -705,7 +705,7 @@
     "#ffbfbf"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM32t42i2"
@@ -772,7 +772,7 @@
     "#ff00ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM48t56i4"
@@ -891,7 +891,7 @@
     "#ff00ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM48t56i4_ct_wh"
@@ -1014,7 +1014,7 @@
     "#4c4c4c"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM50t58i2"
@@ -1079,7 +1079,7 @@
     "#ffbfff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM52t48i4"
@@ -1144,7 +1144,7 @@
     "#ffd9ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM52t48i4_light"
@@ -1221,7 +1221,7 @@
     "#ff00ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM64t52i4"
@@ -1308,7 +1308,7 @@
     "#ff3a7d"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM72t72i4"
@@ -1371,7 +1371,7 @@
     "#9e190d"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM80t16i4"
@@ -1454,7 +1454,7 @@
     "#7d00b3"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM80t56i4_v2"
@@ -1513,7 +1513,7 @@
     "#ce2010"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_all_fM96tM8i4"
@@ -1546,7 +1546,7 @@
     "#ce30ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "µg/m³",
    "scale_type": "sqrt",
    "source_name": "sh_all_pm10_defra_daqi"
@@ -1579,7 +1579,7 @@
     "#ce30ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "µg/m³",
    "scale_type": "sqrt",
    "source_name": "sh_all_pm2p5_defra_daqi"
@@ -1616,7 +1616,7 @@
     "#2c0246"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "µg/m³",
    "scale_type": "sqrt",
    "source_name": "sh_all_pmx_ncl_precip_11lev"
@@ -1653,7 +1653,7 @@
     "#f00082"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "µg/m³",
    "scale_type": "sqrt",
    "source_name": "sh_all_pmx_regional"
@@ -1688,7 +1688,7 @@
     "#ff334b"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "delta_degC",
    "scale_type": "linear",
    "source_name": "sh_anomaly_rb_m20t20"
@@ -1719,7 +1719,7 @@
     "#6b1313"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "J/kg",
    "scale_type": "sqrt",
    "source_name": "sh_black_f0t900"
@@ -1746,7 +1746,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "delta_degC",
    "scale_type": "log",
    "source_name": "sh_blu_f008t25"
@@ -1773,7 +1773,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "sqrt",
    "source_name": "sh_blu_f02t30"
@@ -1800,7 +1800,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "hPa",
    "scale_type": "sqrt",
    "source_name": "sh_blu_f02t50"
@@ -1827,7 +1827,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "gpdam",
    "scale_type": "sqrt",
    "source_name": "sh_blu_f02t50"
@@ -1852,7 +1852,7 @@
     "#f500ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "gpdam",
    "scale_type": "sqrt",
    "source_name": "sh_blu_f03t75"
@@ -1885,7 +1885,7 @@
     "#000066"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_blu_f0t20_douglas"
@@ -1922,7 +1922,7 @@
     "#000066"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_blu_f0t20lst"
@@ -1959,7 +1959,7 @@
     "#336699"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_blu_f0t20lst_light"
@@ -2002,7 +2002,7 @@
     "#ffffff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_blu_fM14tM16"
@@ -2043,7 +2043,7 @@
     "#ffffff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_blu_fM24tM16"
@@ -2096,7 +2096,7 @@
     "#ffffff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_blu_fM36tM16"
@@ -2129,7 +2129,7 @@
     "#99ffff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "Pa/s",
    "scale_type": "linear",
    "source_name": "sh_blu_fM5tM005lst"
@@ -2174,7 +2174,7 @@
     "#016c59"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_blue_f0t1"
@@ -2219,7 +2219,7 @@
     "#016c59"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "s",
    "scale_type": "sqrt",
    "source_name": "sh_blue_f0t5"
@@ -2244,7 +2244,7 @@
     "#016c59"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "delta_degC",
    "scale_type": "linear",
    "source_name": "sh_blue_f0t5_i1"
@@ -2293,7 +2293,7 @@
     "#dbf6fe"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_blue_fM68t0_i4"
@@ -2468,7 +2468,7 @@
     "#67001f"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "diverging",
    "source_name": "sh_blue_red_100"
@@ -2611,7 +2611,7 @@
     "#67001f"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "diverging",
    "source_name": "sh_blue_red_64"
@@ -2646,7 +2646,7 @@
     "#084081"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_blugrn_f05t20"
@@ -2673,7 +2673,7 @@
     "#084081"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "cm",
    "scale_type": "linear",
    "source_name": "sh_blugrn_f0t1lst"
@@ -2704,7 +2704,7 @@
     "#a3bdbd"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_blugry_f0t1lst"
@@ -2733,7 +2733,7 @@
     "#ff0000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "log",
    "source_name": "sh_blured_f05t300lst"
@@ -2778,7 +2778,7 @@
     "#7d00b3"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_blured_f0t300"
@@ -2813,7 +2813,7 @@
     "#67001f"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_blured_f0t40_i4"
@@ -2840,7 +2840,7 @@
     "#ff0000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "log",
    "source_name": "sh_blured_f1t100lst"
@@ -2867,7 +2867,7 @@
     "#800000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "log",
    "source_name": "sh_blured_f1t100lst_dark"
@@ -2912,7 +2912,7 @@
     "#ff0000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "linear",
    "source_name": "sh_blured_fM1t1lst"
@@ -2965,7 +2965,7 @@
     "#660000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "Pa/s",
    "scale_type": "linear",
    "source_name": "sh_blured_fM5t5lst"
@@ -3006,7 +3006,7 @@
     "#b2b2b2"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_cbh_f0t22000"
@@ -3039,7 +3039,7 @@
     "#333333"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_douglas_sea_scale"
@@ -3064,7 +3064,7 @@
     "#ff8000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "linear",
    "source_name": "sh_efi2t_fM1t1lst"
@@ -3089,7 +3089,7 @@
     "#ff0000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_efi_f05t1_nc"
@@ -3118,7 +3118,7 @@
     "#000000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_grey_f0t90000"
@@ -3155,7 +3155,7 @@
     "#005900"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "s",
    "scale_type": "linear",
    "source_name": "sh_grn_f0t18i1_5"
@@ -3190,7 +3190,7 @@
     "#427200"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "linear",
    "source_name": "sh_grn_f0t1lst"
@@ -3223,7 +3223,7 @@
     "#0033a3"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "sqrt",
    "source_name": "sh_grn_f10t100lst"
@@ -3244,7 +3244,7 @@
     "#99bfff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "sqrt",
    "source_name": "sh_grnblu_f65t100i15_light"
@@ -3275,7 +3275,7 @@
     "#a3bda3"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_grngry_f0t1lst"
@@ -3302,7 +3302,7 @@
     "#b29ee6"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "log",
    "source_name": "sh_grnvio_f1t100lst"
@@ -3333,7 +3333,7 @@
     "#8f8f8f"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_gry_f0t1lst"
@@ -3414,7 +3414,7 @@
     "#ffffff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_gry_fM72t56lst"
@@ -3453,7 +3453,7 @@
     "#ff0900"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_hcct_f0t22000"
@@ -3484,7 +3484,7 @@
     "#b8b8b8"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_lgtgry_f0t1lst"
@@ -3525,7 +3525,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "hPa",
    "scale_type": "sqrt",
    "source_name": "sh_magenta_f01t50"
@@ -3560,7 +3560,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "sqrt",
    "source_name": "sh_magenta_f05t10"
@@ -3595,7 +3595,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "delta_degC",
    "scale_type": "sqrt",
    "source_name": "sh_magenta_f1t20"
@@ -3630,7 +3630,7 @@
     "#fa82ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_magenta_f1t20"
@@ -3681,7 +3681,7 @@
     "#4c4c4c"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "J/kg",
    "scale_type": "sqrt",
    "source_name": "sh_mc_cape_f10t13000"
@@ -3718,7 +3718,7 @@
     "#78038c"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_mc_sf_f01t100"
@@ -3755,7 +3755,7 @@
     "#78038c"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_mc_swh_f0t20"
@@ -3810,7 +3810,7 @@
     "#c7030d"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_mc_t_fM80t60"
@@ -3863,7 +3863,7 @@
     "#9e0d05"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_mc_tp_f01t1000"
@@ -3910,7 +3910,7 @@
     "#78038c"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "sqrt",
    "source_name": "sh_mc_wind_f0t80"
@@ -3939,7 +3939,7 @@
     "#990300"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "sqrt",
    "source_name": "sh_mf_2t_tercile"
@@ -3980,7 +3980,7 @@
     "#e63030"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "sqrt",
    "source_name": "sh_mf_pdist"
@@ -4011,7 +4011,7 @@
     "#e63030"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "sqrt",
    "source_name": "sh_mf_pdist_2"
@@ -4040,7 +4040,7 @@
     "#990300"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "sqrt",
    "source_name": "sh_mf_pdist_decile"
@@ -4069,7 +4069,7 @@
     "#990300"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "sqrt",
    "source_name": "sh_mf_pdist_quintile"
@@ -4110,7 +4110,7 @@
     "#78007d"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_orog_metres"
@@ -4153,7 +4153,7 @@
     "#9524f8"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "kg/m²/h",
    "scale_type": "log",
    "source_name": "sh_prate_radarlike"
@@ -4188,7 +4188,7 @@
     "#cab1e1"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "kg/m²/h",
    "scale_type": "log",
    "source_name": "sh_prate_radarlike_grided_f01"
@@ -4221,7 +4221,7 @@
     "#4d004b"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "linear",
    "source_name": "sh_purple_f01t1"
@@ -4258,7 +4258,7 @@
     "#665433"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "delta_degC",
    "scale_type": "sqrt",
    "source_name": "sh_range_f008to25"
@@ -4295,7 +4295,7 @@
     "#665433"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m/s",
    "scale_type": "sqrt",
    "source_name": "sh_range_f02t30"
@@ -4332,7 +4332,7 @@
     "#665433"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "hPa",
    "scale_type": "sqrt",
    "source_name": "sh_range_f02t50"
@@ -4369,7 +4369,7 @@
     "#665433"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "gpdam",
    "scale_type": "sqrt",
    "source_name": "sh_range_f02t50"
@@ -4462,7 +4462,7 @@
     "#ff1500"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "gpdam",
    "scale_type": "linear",
    "source_name": "sh_range_fm40t40"
@@ -4495,7 +4495,7 @@
     "#8f1812"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "mm",
    "scale_type": "sqrt",
    "source_name": "sh_red_f001t10"
@@ -4528,7 +4528,7 @@
     "#660000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "Pa/s",
    "scale_type": "sqrt",
    "source_name": "sh_red_f005t5lst"
@@ -4557,7 +4557,7 @@
     "#ff0000"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_red_f05t1i01"
@@ -4596,7 +4596,7 @@
     "#800026"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_red_f0t36_i4"
@@ -4625,7 +4625,7 @@
     "#8f3deb"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "J/kg",
    "scale_type": "sqrt",
    "source_name": "sh_red_f0t900"
@@ -4654,7 +4654,7 @@
     "#666666"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_red_f0t90000"
@@ -4685,7 +4685,7 @@
     "#bda3a3"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_redgry_f0t1lst"
@@ -4712,7 +4712,7 @@
     "#ff01ff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "linear",
    "source_name": "sh_rgb_f5t100"
@@ -4739,7 +4739,7 @@
     "#ff01ff40"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "linear",
    "source_name": "sh_rgb_transparent25_f5t100"
@@ -4766,7 +4766,7 @@
     "#ff01ff80"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "%",
    "scale_type": "linear",
    "source_name": "sh_rgb_transparent_f5t100"
@@ -4807,7 +4807,7 @@
     "#ff01c7"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "g/kg",
    "scale_type": "sqrt",
    "source_name": "sh_spechum_option1"
@@ -4848,7 +4848,7 @@
     "#290e38"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "g/kg",
    "scale_type": "sqrt",
    "source_name": "sh_spechum_option2"
@@ -4889,7 +4889,7 @@
     "#1f0d52"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "g/kg",
    "scale_type": "sqrt",
    "source_name": "sh_spechum_option3"
@@ -4942,7 +4942,7 @@
     "#ffd6d4"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_sst_fM2t36i2"
@@ -4977,7 +4977,7 @@
     "#ffffff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "°C",
    "scale_type": "linear",
    "source_name": "sh_sst_fM5t45"
@@ -5030,7 +5030,7 @@
     "#d95c00"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "Pa/s",
    "scale_type": "linear",
    "source_name": "sh_viobrn_fM5t5lst"
@@ -5071,7 +5071,7 @@
     "#bdcceb"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_vis_f0t100000"
@@ -5100,7 +5100,7 @@
     "#00fc4c"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "sqrt",
    "source_name": "sh_vis_f0t1500"
@@ -5131,7 +5131,7 @@
     "#ffffff"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "dimensionless",
    "scale_type": "sqrt",
    "source_name": "sh_whi_f0t1lst"
@@ -5186,7 +5186,7 @@
     "#081d58"
    ],
    "under": "transparent",
-   "over": "clamp",
+   "over": "transparent",
    "unit": "m",
    "scale_type": "linear",
    "source_name": "sh_ylwblu_f0t6000_i300"
