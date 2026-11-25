@@ -270,33 +270,106 @@
             background: none;
         }
 
-        .vs-style-list {
+        /* The styles as tabs above the editor (#799). */
+        .vs-style-tab-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
             list-style: none;
-            margin: 0;
+            margin: 0 0 1rem;
             padding: 0;
-        }
-
-        .vs-style-list li {
             border-bottom: 1px solid var(--w-color-border-furniture);
-            padding: 0.6rem 0;
         }
 
-        .vs-style-list li:last-child {
-            border-bottom: none;
+        .vs-style-tab {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.85rem;
+            margin-bottom: -1px;
+            border: 1px solid transparent;
+            border-radius: 5px 5px 0 0;
+            color: var(--w-color-text-label);
+            text-decoration: none;
         }
 
-        .vs-style-list .vs-style-swatch {
-            display: block;
-            height: 10px;
+        .vs-style-tab:hover {
+            background: color-mix(in srgb, var(--w-color-text-label) 6%, transparent);
+        }
+
+        .vs-style-tab[aria-current="page"] {
+            border-color: var(--w-color-border-furniture);
+            border-bottom-color: var(--w-color-surface-page);
+            background: var(--w-color-surface-page);
+            font-weight: 700;
+        }
+
+        .vs-style-tab--new {
+            color: var(--w-color-secondary);
+        }
+
+        .vs-style-tab-icon {
+            inline-size: 0.9rem;
+            block-size: 0.9rem;
+        }
+
+        .vs-style-tab-swatch {
+            flex: 0 0 auto;
+            inline-size: 2.5rem;
+            block-size: 12px;
             border-radius: 3px;
             border: 1px solid var(--w-color-border-furniture);
-            margin: 0.35rem 0;
+        }
+
+        .vs-style-tabs-empty {
+            margin-top: -0.5rem;
+        }
+
+        .vs-style-header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .vs-style-header h2 {
+            margin: 0;
         }
 
         .vs-style-actions {
             display: flex;
             gap: 0.5rem;
             align-items: center;
+        }
+
+        /* The shared range and curve, below the editor (#799). */
+        .vs-range-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem 0.75rem;
+            align-items: baseline;
+            cursor: pointer;
+        }
+
+        .vs-range-summary h2 {
+            display: inline;
+            margin: 0;
+        }
+
+        .vs-range-scope,
+        .vs-range-current {
+            color: var(--w-color-text-meta);
+            font-size: 0.9em;
+        }
+
+        .vs-range-current {
+            margin-inline-start: auto;
+        }
+
+        .vs-range-panel[open] .vs-range-summary {
+            margin-bottom: 1rem;
         }
 
         .vs-style-actions form {
@@ -481,9 +554,9 @@
              */
             top: 5.5rem;
             /*
-             * Wagtail's `.button` is `position: relative` at `z-index: auto`
-             * and the "New style" button comes later in the DOM, so without a
-             * layer of our own it paints over the pinned map.
+             * Wagtail's `.button` is `position: relative` at `z-index: auto`,
+             * so a button later in the DOM paints over the pinned map without
+             * a layer of our own.
              */
             z-index: 1;
         }
@@ -662,6 +735,39 @@
         <div>
 
             {% comment %}
+                The variable's styles as tabs (#799), so which one the editor
+                below holds is never in doubt. Each is a link: picking a style
+                is a page load, as it always was.
+            {% endcomment %}
+            <nav class="vs-style-tabs" aria-label="{% trans 'Styles' %}">
+                <ul class="vs-style-tab-list">
+                    {% for style in styles %}
+                        <li>
+                            <a href="{{ form_url }}?style={{ style.slug }}" class="vs-style-tab"{% if not creating and style.pk == selected.pk %} aria-current="page"{% endif %}>
+                                <span class="vs-style-tab-swatch"
+                                      style="background: {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
+                                <span class="vs-style-tab-name">{{ style.name }}</span>
+                                {% if style.is_default %}
+                                    <span class="w-status w-status--primary">{% trans "Default" %}</span>
+                                {% endif %}
+                            </a>
+                        </li>
+                    {% endfor %}
+                    <li>
+                        <a href="{{ new_style_url }}" class="vs-style-tab vs-style-tab--new"{% if creating %} aria-current="page"{% endif %}>
+                            {% icon name="plus" classname="vs-style-tab-icon" %}
+                            {% trans "New style" %}
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            {% if not styles %}
+                <p class="help-text vs-style-tabs-empty">
+                    {% trans "No styles yet — this variable renders as grayscale. Pick a ramp and save the first style." %}
+                </p>
+            {% endif %}
+
+            {% comment %}
                 What a default style's template proposes for the variable's
                 encoding (#791). The range and curve are shared by every style,
                 so nothing changes until the operator accepts here.
@@ -688,61 +794,47 @@
                 </section>
             {% endif %}
 
-            {% comment %}
-                The variable's encoding contract. Saving here never touches any
-                style's stops (ADR 0022): regeneration is only the explicit
-                re-apply gesture in the style editor below.
-            {% endcomment %}
-            <section class="vs-panel">
-                <h2 class="w-label-1">{% trans "Value range" %}</h2>
-                <form method="post" action="{{ form_url }}">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="save-range">
-                    {% if selected %}
-                        <input type="hidden" name="style_slug" value="{{ selected.slug }}">
-                    {% endif %}
-                    {% include "core/_styling_form_errors.html" with form=range_form %}
-                    <div class="vs-field-row">
-                        <div class="vs-field">
-                            <label for="{{ range_form.value_min.id_for_label }}">
-                                {% trans "Minimum" %}
-                                {% if variable.units %}({{ variable.units }}){% endif %}
-                            </label>
-                            {{ range_form.value_min }}
-                        </div>
-                        <div class="vs-field">
-                            <label for="{{ range_form.value_max.id_for_label }}">
-                                {% trans "Maximum" %}
-                                {% if variable.units %}({{ variable.units }}){% endif %}
-                            </label>
-                            {{ range_form.value_max }}
-                        </div>
-                        <div class="vs-field">
-                            <label for="{{ range_form.scale_type.id_for_label }}">{% trans "Scale type" %}</label>
-                            {{ range_form.scale_type }}
-                        </div>
-                        <button type="submit" class="button">{% trans "Save range" %}</button>
-                    </div>
-                    <p class="vs-unsaved" id="vs-range-unsaved" hidden>
-                        {% trans "Unsaved — the range is not saved until you press “Save range”." %}
-                    </p>
-                    <p class="help-text">
-                        {% trans "Changing the range never rewrites existing stops — use “Apply ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
-                    </p>
-                </form>
-            </section>
-
-            <section class="vs-panel">
-                <h2 class="w-label-1">
-                    {% if creating %}
-                        {% trans "New style" %}
-                    {% else %}
-                        {% blocktrans with name=selected.name %}Style: {{ name }}{% endblocktrans %}
-                        {% if selected.is_default %}
-                            <span class="w-status w-status--primary">{% trans "Default" %}</span>
+            <section class="vs-panel vs-style-editor" id="vs-style-editor">
+                {% comment %}
+                    The selected style's header: what is being edited, and the
+                    two actions that act on it as a whole. Their forms sit
+                    outside #vs-style-form, which a form cannot nest in.
+                {% endcomment %}
+                <header class="vs-style-header">
+                    <h2 class="w-label-1">
+                        {% if creating %}
+                            {% trans "New style" %}
+                        {% else %}
+                            {% blocktrans with name=selected.name %}Style: {{ name }}{% endblocktrans %}
+                            {% if selected.is_default %}
+                                <span class="w-status w-status--primary">{% trans "Default" %}</span>
+                            {% endif %}
                         {% endif %}
+                    </h2>
+                    {% if selected %}
+                        <div class="vs-style-actions">
+                            {% if not selected.is_default %}
+                                <form method="post" action="{{ form_url }}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="promote">
+                                    <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                                    <button type="submit" class="button button-small button-secondary">
+                                        {% trans "Make default" %}
+                                    </button>
+                                </form>
+                            {% endif %}
+                            <form method="post" action="{{ form_url }}"
+                                  data-confirm="{% trans 'Delete this style?' %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete-style">
+                                <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                                <button type="submit" class="button button-small no">
+                                    {% trans "Delete" %}
+                                </button>
+                            </form>
+                        </div>
                     {% endif %}
-                </h2>
+                </header>
                 {% if selected.template %}
                     <p class="vs-template-lineage">
                         {% blocktrans with template=selected.template.name %}Applied from the Style template “{{ template }}”. These stops are a snapshot: editing them never changes the template, nor the template them.{% endblocktrans %}
@@ -882,19 +974,6 @@
                     <p class="help-text">
                         {% trans "Absolute data values mapped to colors, in ascending order. Edit values or colors to fine-tune — for example to pin a threshold like 0 °C to an exact color." %}
                     </p>
-                    {# Counterpart of the clip warning in the preview: that one is stops beyond the range, this one is range beyond the stops. #}
-                    <div class="help-block help-warning vs-range-hint" id="vs-range-hint" hidden
-                         data-selected-slug="{{ selected.slug }}"
-                         data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
-                         data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
-                        {% icon name="warning" classname="default" %}
-                        <p>
-                            <span id="vs-range-hint-text"></span>
-                            <button type="button" class="button button-small button-secondary" id="vs-fit-range">
-                                {% trans "Fit range to stops" %}
-                            </button>
-                        </p>
-                    </div>
                     <table class="vs-stops-table" id="vs-stops-table">
                         <thead>
                         <tr>
@@ -1034,6 +1113,77 @@
             </section>
 
             {% comment %}
+                The variable's encoding contract, shared by every style (ADR
+                0049). Saving here never touches any style's stops (ADR 0022):
+                regeneration is only the explicit re-apply gesture in the style
+                editor above.
+
+                Collapsed unless something needs attention (#799): the view
+                opens it on a rejected range or when the selected style's
+                saved stops fall outside the range or fill less than half of
+                it; the page's script opens it when an edit raises either
+                warning.
+            {% endcomment %}
+            <details class="vs-panel vs-range-panel" id="vs-range"{% if range_open %} open{% endif %}>
+                <summary class="vs-range-summary">
+                    <h2 class="w-label-1">{% trans "Range and curve" %}</h2>
+                    <span class="vs-range-scope">{% trans "shared by every style of this variable" %}</span>
+                    <span class="vs-range-current">
+                        {{ variable.served_range.0 }} – {{ variable.served_range.1 }}{% if variable.units %} {{ variable.units }}{% endif %},
+                        {{ variable.get_scale_type_display|lower }}
+                    </span>
+                </summary>
+                <form method="post" action="{{ form_url }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="save-range">
+                    {% if selected %}
+                        <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                    {% endif %}
+                    {% include "core/_styling_form_errors.html" with form=range_form %}
+                    {# Counterpart of the clip warning in the preview: that one is stops beyond the range, this one is range beyond the stops. #}
+                    <div class="help-block help-warning vs-range-hint" id="vs-range-hint" hidden
+                         data-selected-slug="{{ selected.slug }}"
+                         data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
+                         data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
+                        {% icon name="warning" classname="default" %}
+                        <p>
+                            <span id="vs-range-hint-text"></span>
+                            <button type="button" class="button button-small button-secondary" id="vs-fit-range">
+                                {% trans "Fit range to stops" %}
+                            </button>
+                        </p>
+                    </div>
+                    <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ range_form.value_min.id_for_label }}">
+                                {% trans "Minimum" %}
+                                {% if variable.units %}({{ variable.units }}){% endif %}
+                            </label>
+                            {{ range_form.value_min }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ range_form.value_max.id_for_label }}">
+                                {% trans "Maximum" %}
+                                {% if variable.units %}({{ variable.units }}){% endif %}
+                            </label>
+                            {{ range_form.value_max }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ range_form.scale_type.id_for_label }}">{% trans "Scale type" %}</label>
+                            {{ range_form.scale_type }}
+                        </div>
+                        <button type="submit" class="button">{% trans "Save range for all styles" %}</button>
+                    </div>
+                    <p class="vs-unsaved" id="vs-range-unsaved" hidden>
+                        {% trans "Unsaved — the range is not saved until you press “Save range for all styles”." %}
+                    </p>
+                    <p class="help-text">
+                        {% trans "Changing the range never rewrites existing stops — use “Apply ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
+                    </p>
+                </form>
+            </details>
+
+            {% comment %}
                 The Style template picker (#791). Applying one writes a new
                 stepped style: the template's bands converted into this
                 variable's source unit, a snapshot it never follows again. Only
@@ -1142,56 +1292,6 @@
                         <a href="{{ preview.item_url }}" id="vs-step-link">{% trans "Open the full item preview" %}</a>
                     </div>
                 {% endif %}
-            </section>
-
-            <section class="vs-panel">
-                <h2 class="w-label-1">{% trans "Styles" %}</h2>
-                {% if styles %}
-                    <ul class="vs-style-list">
-                        {% for style in styles %}
-                            <li>
-                                <a href="{{ form_url }}?style={{ style.slug }}">{{ style.name }}</a>
-                                {% if style.is_default %}
-                                    <span class="w-status w-status--primary">{% trans "Default" %}</span>
-                                {% endif %}
-                                <span class="vs-style-swatch"
-                                      style="background:
-                                              {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
-                                <div class="vs-style-actions">
-                                    {% if not style.is_default %}
-                                        <form method="post" action="{{ form_url }}">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="action" value="promote">
-                                            <input type="hidden" name="style_slug" value="{{ style.slug }}">
-                                            <button type="submit" class="button button-small button-secondary">
-                                                {% trans "Make default" %}
-                                            </button>
-                                        </form>
-                                    {% endif %}
-                                    <form method="post" action="{{ form_url }}"
-                                          data-confirm="{% trans 'Delete this style?' %}">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="action" value="delete-style">
-                                        <input type="hidden" name="style_slug" value="{{ style.slug }}">
-                                        <button type="submit" class="button button-small no">
-                                            {% trans "Delete" %}
-                                        </button>
-                                    </form>
-                                </div>
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p class="help-text">
-                        {% trans "No styles yet — this variable renders as grayscale. Pick a ramp and save the first style." %}
-                    </p>
-                {% endif %}
-                <p>
-                    <a href="{{ new_style_url }}" class="button button-small bicolor button--icon">
-                        {% icon name="plus" wrapped=1 %}
-                        {% trans "New style" %}
-                    </a>
-                </p>
             </section>
         </aside>
     </div>
@@ -1361,7 +1461,7 @@
              edited range, so most of the encoded texture's resolution sits
              where no stop colors it. Reads the Range inputs, not the saved
              range, so it follows an unsaved edit. "Fit range to stops" only
-             fills those inputs — Save range is still the one thing that
+             fills those inputs — Save range for all styles is still the one thing that
              persists. The range is shared by every style (ADR 0023), so the
              hint names saved siblings whose stops the fitted range would clip.
              **/
@@ -1373,7 +1473,19 @@
             const rangeMaxInput = document.querySelector('input[name="value_max"]');
             const styleSpansEl = document.getElementById('vs-style-spans');
             const styleSpans = styleSpansEl ? JSON.parse(styleSpansEl.textContent) : [];
+            const rangeSection = document.getElementById('vs-range');
             let fitted = null;
+
+            /**
+             The shared range section opens by itself when either warning shows
+             (#799), and is never closed by the page: an operator who opened it
+             keeps it open.
+             **/
+            function openRangeSection() {
+                if (rangeSection) {
+                    rangeSection.open = true;
+                }
+            }
 
             function fill(template, values) {
                 return template.replace(/\{(\w+)\}/g, function (match, key) {
@@ -1414,6 +1526,7 @@
                 }
                 rangeHintText.textContent = text;
                 rangeHint.hidden = false;
+                openRangeSection();
             }
 
             if (rangeHint) {
@@ -1522,6 +1635,9 @@
                 clipWarning.hidden = !stops.some(function (stop) {
                     return stop.value < low || stop.value > high;
                 });
+                if (!clipWarning.hidden) {
+                    openRangeSection();
+                }
             }
 
             function paintMap(stops) {

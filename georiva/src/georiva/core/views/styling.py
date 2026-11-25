@@ -223,6 +223,24 @@ def _style_spans(variable, styles) -> list[dict]:
     return spans
 
 
+def _range_needs_attention(variable, style) -> bool:
+    """Whether the shared range section opens by itself (#799).
+
+    It does when the style on screen has stops outside the saved range — the
+    map draws them as flat clipped colour — or when the range is more than
+    twice as wide as the stops, the case "Fit range to stops" is for. The
+    page's JavaScript keeps the same two warnings live as stops are edited.
+    """
+    if style is None:
+        return False
+    low, high = style.min_max_from_stops()
+    if low is None:
+        return False
+    if low < variable.value_min or high > variable.value_max:
+        return True
+    return high > low and (high - low) * 2 < variable.value_max - variable.value_min
+
+
 def _preview_context(variable):
     """What the map preview draws, or why it draws nothing (#382).
 
@@ -668,6 +686,7 @@ def variable_styling(request, collection_pk, variable_pk):
         "selected": selected,
         "creating": creating,
         "range_form": range_form,
+        "range_open": bool(range_form.errors) or _range_needs_attention(variable, selected),
         "style_form": style_form,
         "stop_rows": stop_rows,
         "ramp_groups": ramp_groups,
