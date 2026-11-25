@@ -107,6 +107,10 @@ class VariableStyleForm(forms.Form):
     ramp = forms.ModelChoiceField(queryset=ColorRamp.objects.none(), required=False)
     mode = forms.ChoiceField(choices=VariableStyle.Mode.choices)
     steps = forms.IntegerField(required=False, min_value=2)
+    # Runs the ramp's colours the other way over the same values. Not stored:
+    # the stops are the style, and whether they read as the ramp reversed is
+    # worked out from them (``VariableStyle.as_generated``, #801).
+    reverse = forms.BooleanField(required=False)
     # What values beyond the stops are drawn as (#788); a post without them
     # keeps today's behaviour, clamping.
     under = forms.TypedChoiceField(choices=OutOfRange.choices, required=False, empty_value=OutOfRange.CLAMP)
@@ -515,9 +519,14 @@ def variable_styling(request, collection_pk, variable_pk):
             "scale_type": variable.scale_type,
         },
     )
+    # Whether the saved stops are still what the style's ramp produces (#801):
+    # while they are, ramp changes regenerate them live; once tuned, only a
+    # confirmed "Regenerate from ramp" replaces them.
+    as_generated = selected.as_generated() if selected else None
     style_form = VariableStyleForm(
         ramp_queryset=ramp_queryset,
         initial={
+            "reverse": bool(as_generated and as_generated.reverse),
             "name": selected.name if selected else "",
             "ramp": selected.ramp_id if selected else None,
             "mode": selected.mode if selected else VariableStyle.Mode.CONTINUOUS,
@@ -567,7 +576,7 @@ def variable_styling(request, collection_pk, variable_pk):
                 try:
                     stops = variable.stored_stops(_parse_stops(request.POST))
                     if creating and not stops and style.ramp:
-                        style.apply_ramp()
+                        style.apply_ramp(reverse=data["reverse"])
                     else:
                         style.stops = stops
                     style.full_clean()
@@ -663,6 +672,14 @@ def variable_styling(request, collection_pk, variable_pk):
         None,
     )
 
+    # A failed save re-renders the operator's own rows, which nothing says are
+    # as generated, so they count as tuned: the safe side. No stops at all is
+    # nothing to protect.
+    if style_form.is_bound:
+        stops_tuned = bool(stop_rows)
+    else:
+        stops_tuned = bool(stop_rows) and as_generated is None
+
     context = {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
@@ -689,6 +706,8 @@ def variable_styling(request, collection_pk, variable_pk):
         "range_open": bool(range_form.errors) or _range_needs_attention(variable, selected),
         "style_form": style_form,
         "stop_rows": stop_rows,
+        "stops_tuned": stops_tuned,
+        "advanced_open": stops_tuned or bool(style_form.errors),
         "ramp_groups": ramp_groups,
         "selected_ramp": selected_ramp,
         "ramp_catalog_url": reverse("colorramp:index"),
@@ -712,11 +731,13 @@ def variable_styling(request, collection_pk, variable_pk):
 def variable_style_stops(request, collection_pk, variable_pk):
     """A ramp's stops over the variable's range, generated and *not* saved.
 
-    What the styling form's "Apply ramp" reads. Applying used to be a POST that
-    regenerated the snapshot in the database behind a confirm round-trip, so the
-    only way to see a ramp on real data was to destroy the tuning it replaced.
-    Here the stops come back as JSON, fill the form unsaved, and the map
-    repaints — nothing is lost until Save, and a reload undoes it.
+    What the style editor reads when the ramp, mode, steps or reverse change
+    while the stops are still as generated, and when an operator confirms
+    "Regenerate from ramp" over tuned ones (#801). Applying used to be a POST
+    that regenerated the snapshot in the database behind a confirm round-trip,
+    so the only way to see a ramp on real data was to destroy the tuning it
+    replaced. Here the stops come back as JSON, fill the form unsaved, and the
+    map repaints — nothing is lost until Save, and a reload undoes it.
 
     It runs the same :func:`served_ramp_stops` the model's ``apply_ramp()`` does
     over the same saved range, so what the form fills in is exactly what a saved
@@ -751,8 +772,9 @@ def variable_style_stops(request, collection_pk, variable_pk):
         if steps < 2:
             return JsonResponse({"error": _("Stepped mode needs at least two classes.")}, status=400)
 
+    reverse_colors = request.GET.get("reverse") in ("1", "true", "on")
     return JsonResponse(
         {
-            "stops": served_ramp_stops(ramp, variable, mode=mode, steps=steps),
+            "stops": served_ramp_stops(ramp, variable, mode=mode, steps=steps, reverse=reverse_colors),
         }
     )

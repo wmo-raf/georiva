@@ -389,11 +389,41 @@
          * `display`, and .button sets one — so both toggled controls need this
          * spelled out.
          */
-        .vs-apply-ramp[hidden],
+        .vs-regenerate[hidden],
         #vs-add-stop[hidden],
         .vs-range-hint[hidden],
         .vs-unsaved[hidden] {
             display: none;
+        }
+
+        /* Reverse sits in the row beside mode and classes, its box before its word (#801). */
+        .vs-reverse-field .vs-reverse-label {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+            min-height: 2.5rem;
+        }
+
+        .vs-regenerate {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 0.75rem;
+        }
+
+        .vs-regenerate .help-text {
+            margin: 0;
+        }
+
+        .vs-advanced {
+            margin-top: 1.5rem;
+            border-top: 1px solid var(--w-color-border-furniture);
+            padding-top: 1rem;
+        }
+
+        .vs-advanced > summary {
+            cursor: pointer;
         }
 
         .vs-unsaved {
@@ -841,7 +871,8 @@
                     </p>
                 {% endif %}
 
-                <form method="post" action="{{ form_url }}" id="vs-style-form">
+                <form method="post" action="{{ form_url }}" id="vs-style-form"
+                      data-stops-tuned="{{ stops_tuned|yesno:'true,false' }}">
                     {% csrf_token %}
                     <input type="hidden" name="style_slug"
                            value="{% if creating %}{% else %}{{ selected.slug }}{% endif %}">
@@ -936,20 +967,48 @@
                             <label for="{{ style_form.steps.id_for_label }}">{% trans "Classes" %}</label>
                             {{ style_form.steps }}
                         </div>
-                        {% comment %}
-                            The same gesture as the one below the stops table.
-                            It is duplicated rather than moved because the two
-                            ends of the form are two different moments: here it
-                            sits beside the ramp and mode that feed it, which is
-                            where an operator who has just changed either one
-                            reaches for it, and the stops table is taller than a
-                            screen.
-                        {% endcomment %}
-                        <button type="button" class="button button-small button-secondary vs-apply-ramp"
-                                data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
-                            {% trans "Apply ramp" %}
+                        <div class="vs-field vs-reverse-field">
+                            <label class="vs-reverse-label">
+                                {{ style_form.reverse }}
+                                {% trans "Reverse" %}
+                            </label>
+                        </div>
+                    </div>
+
+                    {% comment %}
+                        Ramp changes regenerate the stops live while they are
+                        still what the ramp produced (#801). Once they are tuned
+                        — saved that way, or edited here — a ramp change leaves
+                        them alone and this explicit, confirmed regenerate is the
+                        only thing that replaces them (ADR 0022).
+                    {% endcomment %}
+                    <div class="vs-regenerate" id="vs-regenerate-row" hidden>
+                        <p class="help-text">
+                            {% trans "These stops are tuned by hand, so changing the ramp, rendering, classes or reverse leaves them as they are." %}
+                        </p>
+                        <button type="button" class="button button-small button-secondary" id="vs-regenerate"
+                                data-confirm="{% trans 'Replace your stops with stops generated from this ramp? Your tuning is lost when you save.' %}">
+                            {% trans "Regenerate from ramp (replaces your stops)" %}
                         </button>
                     </div>
+                    <ul class="vs-errors" id="vs-apply-error" hidden
+                        data-unreachable="{% trans 'Could not reach the server.' %}"></ul>
+
+                    <h3 class="w-label-2">{% trans "Preview" %}</h3>
+                    <div class="vs-preview" id="vs-preview"></div>
+                    <div class="vs-preview-labels">
+                        <span id="vs-preview-min"></span>
+                        <span id="vs-preview-max"></span>
+                    </div>
+
+                    {% comment %}
+                        The expert controls (#801): open by itself when the
+                        stops are tuned by hand or came from a template, so
+                        nothing an expert relies on is a click away from where
+                        they left it. A closed <details> still posts its inputs.
+                    {% endcomment %}
+                    <details class="vs-advanced" id="vs-advanced"{% if advanced_open %} open{% endif %}>
+                        <summary class="w-label-2">{% trans "Advanced: fine-tune stops" %}</summary>
 
                     {# What values beyond the stops are drawn as (#788): the end colour, or nothing. #}
                     <div class="vs-field-row">
@@ -961,13 +1020,6 @@
                             <label for="{{ style_form.over.id_for_label }}">{% trans "Above the last stop" %}</label>
                             {{ style_form.over }}
                         </div>
-                    </div>
-
-                    <h3 class="w-label-2">{% trans "Preview" %}</h3>
-                    <div class="vs-preview" id="vs-preview"></div>
-                    <div class="vs-preview-labels">
-                        <span id="vs-preview-min"></span>
-                        <span id="vs-preview-max"></span>
                     </div>
 
                     <h3 class="w-label-2">{% trans "Stops" %}</h3>
@@ -1083,31 +1135,18 @@
                                   data-copy-failed="{% trans 'Could not copy' %}"></span>
                         </div>
                     </div>
+                    </details>
 
                     <div class="vs-actions">
                         <button type="submit" name="action" value="save-style" class="button">
                             {% trans "Save style" %}
                         </button>
-                        {% comment %}
-                            Applying a ramp fills the table above from the
-                            server's own generator and repaints the map — it
-                            writes nothing. Whatever it replaces is unsaved
-                            work, recoverable by reloading, so the confirm is
-                            about the form and not about the database.
-                        {% endcomment %}
-                        <button type="button" class="button button-secondary vs-apply-ramp"
-                                data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
-                            {% trans "Apply ramp" %}
-                        </button>
                         <p class="vs-unsaved" id="vs-unsaved" hidden>
                             {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
                         </p>
                     </div>
-                    <ul class="vs-errors" id="vs-apply-error" hidden
-                        data-pick-ramp="{% trans 'Pick a ramp to apply.' %}"
-                        data-unreachable="{% trans 'Could not reach the server.' %}"></ul>
                     <p class="help-text">
-                        {% trans "“Apply ramp” regenerates the stops from the selected ramp over the variable's saved range and shows them on the map. Nothing is written until you save." %}
+                        {% trans "Changing the ramp regenerates the stops over the variable's saved range and shows them on the map, until the stops are tuned by hand. Nothing is written until you save." %}
                     </p>
                 </form>
             </section>
@@ -1178,7 +1217,7 @@
                         {% trans "Unsaved — the range is not saved until you press “Save range for all styles”." %}
                     </p>
                     <p class="help-text">
-                        {% trans "Changing the range never rewrites existing stops — use “Apply ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
+                        {% trans "Changing the range never rewrites existing stops — use “Regenerate from ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
                     </p>
                 </form>
             </details>
@@ -1330,64 +1369,64 @@
                 : null;
             const clipWarning = document.getElementById('vs-clip-warning');
             const mapStatus = document.getElementById('vs-map-status');
-            const applyButtons = [...document.querySelectorAll('.vs-apply-ramp')];
+            const reverseInput = form.querySelector('[name="reverse"]');
+            const regenerateRow = document.getElementById('vs-regenerate-row');
+            const regenerateButton = document.getElementById('vs-regenerate');
             const applyError = document.getElementById('vs-apply-error');
             const unsavedNote = document.getElementById('vs-unsaved');
 
             /**
              Two pieces of state the page keeps about itself.
 
-             `appliedSignature` is the ramp, mode and class count the stops in
-             the table were last generated from — the saved style's own on load,
-             the chosen ones after an apply. Apply shows only when pressing it
-             would actually change something: when those inputs have moved on,
-             when the stops have been edited away from what they produced, or
-             when there are no stops at all. Editing counts because otherwise
-             applying would hide itself the moment an operator hand-tuned a
-             stop, leaving no way back to the clean ramp.
+             `stopsTuned`: whether the stops in the table are no longer what the
+             ramp produced (#801). The server says so on load — it regenerates
+             the saved ramp, mode and steps over the current range and compares
+             (VariableStyle.as_generated) — and any edit to a stop here sets it
+             for the rest of the session. While it is false, a change to the
+             ramp, mode, classes or reverse regenerates the stops at once; once
+             it is true, nothing replaces them but the confirmed "Regenerate
+             from ramp" (ADR 0022).
 
-             `styleDirty` is the simpler one: anything on this form that the
-             database has not been told about. Applying a ramp writes nothing,
-             and the swatch in the Styles list keeps showing the saved style —
-             so without saying so, the page would show two different palettes
-             and claim both.
+             `styleDirty`: anything on this form that the database has not been
+             told about. Regenerating writes nothing, and the swatch in the
+             style tabs keeps showing the saved style — so without saying so,
+             the page would show two different palettes and claim both.
              **/
 
-            let appliedSignature = null;
-            let stopsEdited = false;
+            let stopsTuned = form.dataset.stopsTuned === 'true';
             let styleDirty = false;
 
-            function currentSignature() {
-                return JSON.stringify([
-                    rampInput.value,
-                    modeSelect.value,
-                    modeSelect.value === 'stepped' ? stepsInput.value : ''
-                ]);
-            }
-
             function refreshState() {
-                const changed = currentSignature() !== appliedSignature
-                    || stopsEdited
-                    || !body.querySelector('.vs-stop-row');
-                applyButtons.forEach(function (button) {
-                    button.hidden = !changed;
-                });
+                regenerateRow.hidden = !(stopsTuned && rampInput.value);
                 unsavedNote.hidden = !styleDirty;
             }
 
             function markStopsEdited() {
-                stopsEdited = true;
+                stopsTuned = true;
                 styleDirty = true;
                 refreshState();
+            }
+
+            /**
+             The ramp, mode, classes or reverse changed. Stops still as the
+             ramp produced them follow at once; tuned ones stay, and the
+             regenerate offer shows instead.
+             **/
+            function rampInputsChanged() {
+                styleDirty = true;
+                refreshState();
+                if (!stopsTuned && rampInput.value) {
+                    regenerate();
+                }
             }
             const stopsUrl = '{{ stops_url }}';
             let mapPreview = null;
 
             /**
-             Picking a ramp only picks it — "Apply ramp" is still the one thing
-             that fills the stops table. Each option carries its own gradient,
-             so the toggle repaints from the row that was clicked and the page
-             needs no lookup table beside the markup.
+             Picking a ramp regenerates the stops while they are as generated,
+             and only picks it once they are tuned. Each option carries its own
+             gradient, so the toggle repaints from the row that was clicked and
+             the page needs no lookup table beside the markup.
              **/
 
             function selectRamp(option) {
@@ -1405,8 +1444,7 @@
                 if (option.dataset.rampPk) {
                     option.setAttribute('aria-current', 'true');
                 }
-                styleDirty = true;
-                refreshState();
+                rampInputsChanged();
             }
 
             /**
@@ -1703,7 +1741,7 @@
              Save reads; the class table is another way to fill them. Which
              editor shows follows the shape of the stops, not the Rendering
              dropdown, and is re-decided only when stops arrive wholesale (load,
-             Apply ramp, Apply JSON) — never mid-edit, so typing a boundary
+             a regenerate from the ramp, Apply JSON) — never mid-edit, so typing a boundary
              cannot swap the table out from under the cursor.
              **/
 
@@ -1887,7 +1925,7 @@
             /**
              The same rows as JSON, for pasting a scale in or copying one out.
              The textarea is only another way to fill the table: Apply rewrites
-             the rows exactly as Apply ramp does, and Save still reads the rows.
+             the rows exactly as regenerating from the ramp does, and Save still reads the rows.
              Colors are held to what VariableStyle.clean() accepts, so a scale
              that applies here cannot be refused on save.
              **/
@@ -2096,19 +2134,22 @@
             });
 
             /**
-             Applying a ramp asks the server for the stops it would generate
+             Regenerating asks the server for the stops the ramp would produce
              and fills the form with them — the same generate_stops() the
              model's apply_ramp() runs, so there is one implementation of the
              sampling and it lives in Python. Nothing is written; the map
              repaints and Save is still the only thing that persists.
+
+             Live regeneration (#801) can fire several times while an operator
+             types a class count, so only the newest request fills the table,
+             and a live one that returns after a stop was edited fills nothing:
+             the edit made the stops tuned in the meantime.
              **/
 
-            async function applyRamp(trigger) {
+            let regenerateRequest = 0;
+
+            async function regenerate(explicit) {
                 if (!rampInput.value) {
-                    showApplyError(applyError.dataset.pickRamp);
-                    return;
-                }
-                if (readStops().length && !window.confirm(trigger.dataset.confirm)) {
                     return;
                 }
                 const params = new URLSearchParams({
@@ -2118,14 +2159,19 @@
                 if (modeSelect.value === 'stepped') {
                     params.set('steps', stepsInput.value);
                 }
-                applyButtons.forEach(function (button) {
-                    button.disabled = true;
-                });
+                if (reverseInput.checked) {
+                    params.set('reverse', '1');
+                }
+                const request = ++regenerateRequest;
+                regenerateButton.disabled = true;
                 try {
                     const response = await fetch(stopsUrl + '?' + params.toString(), {
                         headers: {'Accept': 'application/json'}
                     });
                     const payload = await response.json();
+                    if (request !== regenerateRequest || (!explicit && stopsTuned)) {
+                        return;
+                    }
                     if (!response.ok) {
                         showApplyError(payload.error || response.statusText);
                         return;
@@ -2137,20 +2183,19 @@
                     });
                     renderPreview();
                     chooseEditor();
-                    // The table is now exactly what these inputs produce, so
-                    // Apply has nothing left to do — but the database still
+                    // The table is now exactly what the ramp produces, so ramp
+                    // changes follow it live again — but the database still
                     // holds the old snapshot.
-                    appliedSignature = currentSignature();
-                    stopsEdited = false;
+                    stopsTuned = false;
                     styleDirty = true;
                     refreshState();
                 } catch (error) {
-                    console.error('Applying the ramp failed', error);
+                    console.error('Regenerating the stops failed', error);
                     showApplyError(applyError.dataset.unreachable);
                 } finally {
-                    applyButtons.forEach(function (button) {
-                        button.disabled = false;
-                    });
+                    if (request === regenerateRequest) {
+                        regenerateButton.disabled = false;
+                    }
                 }
             }
 
@@ -2161,17 +2206,14 @@
                     const item = document.createElement('li');
                     item.textContent = message;
                     applyError.appendChild(item);
-                    // There is one error list but two buttons, at opposite
-                    // ends of a form taller than the screen — so bring it to
-                    // whoever pressed one.
-                    applyError.scrollIntoView({block: 'nearest'});
                 }
             }
 
-            applyButtons.forEach(function (button) {
-                button.addEventListener('click', function () {
-                    applyRamp(button);
-                });
+            regenerateButton.addEventListener('click', function () {
+                if (readStops().length && !window.confirm(regenerateButton.dataset.confirm)) {
+                    return;
+                }
+                regenerate(true);
             });
 
             document.querySelectorAll('form[data-confirm]').forEach(function (confirmForm) {
@@ -2319,13 +2361,20 @@
             body.querySelectorAll('.vs-stop-row').forEach(wireRow);
             modeSelect.addEventListener('change', function () {
                 toggleSteps();
-                styleDirty = true;
-                refreshState();
+                rampInputsChanged();
             });
+            // A class count is typed a digit at a time; regenerate once it
+            // settles, and never for one the generator would refuse.
+            let stepsTimer = null;
             stepsInput.addEventListener('input', function () {
                 styleDirty = true;
                 refreshState();
+                clearTimeout(stepsTimer);
+                if (parseInt(stepsInput.value, 10) >= 2) {
+                    stepsTimer = setTimeout(rampInputsChanged, 300);
+                }
             });
+            reverseInput.addEventListener('change', rampInputsChanged);
             [underSelect, overSelect].forEach(function (select) {
                 select.addEventListener('change', function () {
                     styleDirty = true;
@@ -2342,9 +2391,6 @@
             initMap();
             renderPreview();
             chooseEditor();
-            // The stops on the page came from the saved style, so this is what
-            // they were generated from until something says otherwise.
-            appliedSignature = currentSignature();
             refreshState();
         });
     </script>
