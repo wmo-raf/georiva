@@ -73,7 +73,8 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
 2. **`VariableStyle`** (new model, one-to-many from `Variable`) is the
    applied result: name/slug, `is_default` (exactly one per variable,
    enforced by a partial unique constraint), a nullable `ramp` FK kept for
-   lineage/re-apply only, step count + mode (continuous/stepped), and the
+   lineage/re-apply only (superseded by the #806 amendment in §3: a ramp
+   style's stops are its ramp's on every save), step count + mode (continuous/stepped), and the
    materialized absolute value→color **stops snapshot**. Applying a ramp
    over the variable's range *generates* stops; the operator may then
    fine-tune any stop, including pinning physical thresholds.
@@ -82,7 +83,9 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    after fine-tuning never silently rewrites stops; the styling UI offers
    "re-apply ramp", which regenerates the snapshot and discards fine-tuning
    with a warning. (A live-linked or pinned-stop hybrid is deferred until an
-   operator actually loses tuning they care about.)
+   operator actually loses tuning they care about.) *Superseded by the #806
+   amendment below: there is no "re-apply ramp" gesture; a ramp style is
+   regenerated on every save, and tuned stops exist only on a custom style.*
 
    **Amended (#382): applying a ramp writes nothing.** The gesture was a POST
    that regenerated the snapshot in the database, guarded by a confirm
@@ -111,9 +114,13 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
      (now stored) produce over the Variable's range. Its editor shows those
      controls and no stops table; any change refills the stops through the
      read-only endpoint and repaints the map, and a save regenerates them on
-     the server — posted stops are never taken.
+     the server — posted stops are never taken. Saving the range never
+     touches stops, so a ramp style saved over an older range keeps its old
+     stops until its next save; its editor shows the stops that save will
+     store, marked unsaved, with a note that they are laid out over the old
+     range.
    - A **template** style's stops are its template's bands. No save changes
-     them; its editor shows the name, the template it came from and the
+     them, except a template picked in place (#807); its editor shows the name, the template it came from and the
      out-of-range settings.
    - A **custom** style's stops are what the operator saves: the stops or
      classes table, JSON, and Reverse, which reverses colours in place. This is

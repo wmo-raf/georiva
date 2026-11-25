@@ -95,6 +95,12 @@
         </label>
     </div>
 </div>
+{% if laid_over_old_range %}
+    {# The range changed since this style was saved (#806): the stops shown are the ones a save stores. #}
+    <p class="help-text vs-laid-over-old-range" id="vs-laid-over-old-range">
+        {% trans "Laid out over the old range — save to lay it over the current one." %}
+    </p>
+{% endif %}
 <ul class="vs-errors" id="vs-apply-error" hidden
     data-unreachable="{% trans 'Could not reach the server.' %}"></ul>
 {% if selected %}

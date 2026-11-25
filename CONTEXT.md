@@ -892,8 +892,8 @@ Each records its **style origin**. See ADR 0022.
 _Avoid_: ColorPalette (retired model), style preset
 
 **Style origin** (`VariableStyle.origin`):
-How a Variable style was made, and so what drives its stops: `template` (its template's bands; no save changes
-them), `ramp` (always its ramp, mode, steps and reverse over the range; every save regenerates them) or `custom`
+How a Variable style was made, and so what drives its stops: `template` (its template's bands; only a template picked
+in place in its editor changes them), `ramp` (always its ramp, mode, steps and reverse over the range; every save regenerates them) or `custom`
 (the operator's own stops — the only ones fine-tuned by hand). Set when the style is made; "Customise stops" turns a
 template or ramp style into a custom one, keeping its stops and its link as history only; "Start over" remakes the
 same style by any path (#807). See ADR 0022 (#806).

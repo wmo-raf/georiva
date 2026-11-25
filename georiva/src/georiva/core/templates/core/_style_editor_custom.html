@@ -14,7 +14,7 @@
 </div>
 {% if starting_over and scratch %}
     {# "Start over" from scratch (#807): this same style, remade by hand on save. #}
-    <input type="hidden" name="start_over" value="scratch">
+    <input type="hidden" name="start_over" value="{{ start_values.scratch }}">
     <p class="vs-template-lineage">
         {% trans "Starting this style over from scratch. Saving replaces its stops and drops its ramp or template; its name, tab and default status stay." %}
     </p>

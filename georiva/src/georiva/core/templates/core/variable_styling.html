@@ -1170,8 +1170,13 @@
                     own path's controls. What every path shares — "Outside the
                     stops", the preview and the save bar — follows it here.
                 {% endcomment %}
+                {% comment %}
+                    A start over from scratch asks before its save replaces the
+                    style (#807), as the chooser's template and ramp starts do.
+                {% endcomment %}
                 <form method="post" action="{{ form_url }}" id="vs-style-form"
-                      data-origin="{{ origin }}"
+                      data-origin="{{ origin }}"{% if starting_over and scratch %}
+                      data-confirm="{% trans 'Replace this style with these stops? Its ramp or template is dropped; its name, tab and default status stay.' %}"{% endif %}
                       data-unsaved-note="vs-unsaved"
                       data-unsaved-message="{% trans 'This style has unsaved changes.' %}">
                     {% csrf_token %}
@@ -1180,9 +1185,9 @@
 
                     {% include "core/_styling_form_errors.html" with form=style_form %}
 
-                    {% if origin == "ramp" %}
+                    {% if origin == Origin.RAMP %}
                         {% include "core/_style_editor_ramp.html" %}
-                    {% elif origin == "template" %}
+                    {% elif origin == Origin.TEMPLATE %}
                         {% include "core/_style_editor_template.html" %}
                     {% else %}
                         {% include "core/_style_editor_custom.html" %}
@@ -1195,7 +1200,7 @@
                         are regenerated from its ramp, a template style's are
                         left as they are.
                     {% endcomment %}
-                    {% if origin != "custom" %}
+                    {% if origin != Origin.CUSTOM %}
                         <table class="vs-stops-carrier" hidden>
                             <tbody id="vs-stops-body">
                             {% for stop in stop_rows %}
@@ -1234,7 +1239,8 @@
                         in the form.
                     {% endcomment %}
                     <div class="vs-save-bar" id="vs-save-bar">
-                        <p class="vs-unsaved" id="vs-unsaved" hidden>
+                        {# Shown from the start when the stops are not the saved ones (#806). #}
+                        <p class="vs-unsaved" id="vs-unsaved"{% if not laid_over_old_range %} hidden{% endif %}>
                             {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
                         </p>
                         <button type="submit" name="action" value="save-style" class="button">
@@ -1249,7 +1255,7 @@
                     style's unsaved edits are thrown away: the guard leaves the
                     question to this form's own confirm.
                 {% endcomment %}
-                {% if selected and origin != "custom" %}
+                {% if selected and origin != Origin.CUSTOM %}
                     <form method="post" action="{{ form_url }}" id="vs-customise-form"
                           data-confirm="{% trans 'Edit these stops by hand? The style keeps its saved stops and becomes custom: its ramp or template will never change them again. Unsaved changes are lost.' %}"
                           data-unsaved-discards="vs-style-form">
@@ -1397,6 +1403,7 @@
 
     {{ preview.config|json_script:"vs-preview-config" }}
     {{ style_spans|json_script:"vs-style-spans" }}
+    {{ origin_values|json_script:"vs-origin-values" }}
 {% endblock %}
 
 {% block extra_js %}
@@ -1432,6 +1439,7 @@
              control below that belongs to one editor is null on the others.
              **/
             const origin = form.dataset.origin;
+            const ORIGIN = JSON.parse(document.getElementById('vs-origin-values').textContent);
             const rampInput = document.getElementById('vs-ramp-input');
             const rampToggleBar = document.getElementById('vs-ramp-toggle-bar');
             const rampToggleName = document.getElementById('vs-ramp-toggle-name');
@@ -2418,7 +2426,7 @@
             }
 
             body.querySelectorAll('.vs-stop-row').forEach(wireRow);
-            if (origin === 'ramp') {
+            if (origin === ORIGIN.RAMP) {
                 modeSelect.addEventListener('change', function () {
                     toggleSteps();
                     rampInputsChanged();
@@ -2437,12 +2445,6 @@
                 reverseInput.addEventListener('change', rampInputsChanged);
             }
             /**
-             A template style's picker (#807): picking another template shows
-             its bands, and its out-of-range settings, at once. Each radio
-             carries them, so nothing is fetched; Save writes them. The guard
-             sees the change itself, as it does any input in this form.
-             **/
-            /**
              "Change template"'s closed line (#810) names the template the
              form will save: the picked one, copied from its row.
              **/
@@ -2456,7 +2458,13 @@
                 swatch.style.background = row.querySelector('.vs-template-swatch').style.background;
                 swatch.hidden = false;
             };
-            if (origin === 'template') {
+            /**
+             A template style's picker (#807): picking another template shows
+             its bands, and its out-of-range settings, at once. Each radio
+             carries them, so nothing is fetched; Save writes them. The guard
+             sees the change itself, as it does any input in this form.
+             **/
+            if (origin === ORIGIN.TEMPLATE) {
                 form.querySelectorAll('input[name="template"][data-stops]').forEach(function (radio) {
                     radio.addEventListener('change', function () {
                         if (!radio.checked) {

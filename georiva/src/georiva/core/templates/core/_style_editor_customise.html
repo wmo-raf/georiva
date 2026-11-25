@@ -5,7 +5,7 @@
 {% endcomment %}
 <div class="vs-customise">
     <p class="help-text">
-        {% if origin == "ramp" %}
+        {% if origin == Origin.RAMP %}
             {% trans "These stops are what the ramp produces, so a save regenerates them. To pin a value or a colour, edit them by hand." %}
         {% else %}
             {% trans "These stops are the template's bands, and a save never changes them. To change a band, edit them by hand." %}

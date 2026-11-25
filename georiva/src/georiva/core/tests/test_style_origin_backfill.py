@@ -1,14 +1,21 @@
 """Backfilling ``VariableStyle.origin`` for the styles that predate it (#806).
 
-One seam: the data migration's ``backfill_origins``, run against the live app
-registry. A style is ``template`` when its stops are what its template produces
-today, ``ramp`` when they are what its ramp produces over the Variable's current
-range (forward or reversed), and ``custom`` otherwise. No stops change.
+Two seams: the migration itself, run with the migration executor from 0029 to
+0030 over rows made with the historical models — what a deploy does, and what
+proves the generators it imports work on historical models; and its
+``backfill_origins``, run against the live app registry for the rule's many
+cases, which a migration round trip each would make slow.
+
+A style is ``template`` when its stops are what its template produces today,
+``ramp`` when they are what its ramp produces over the Variable's current range
+(forward or reversed), and ``custom`` otherwise. No stops change.
 """
 
 import importlib
 
 from django.apps import apps
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase
 
 from georiva.core.models import StyleTemplate, Variable, VariableStyle
@@ -112,3 +119,68 @@ class BackfillOriginTests(TestCase):
         self.assertEqual(
             self.backfilled(BANDS, ramp=self.ramp, template=self.template).origin, VariableStyle.Origin.TEMPLATE
         )
+
+
+BEFORE = [("georivacore", "0029_variablestyle_origin_reverse")]
+AFTER = [("georivacore", "0030_backfill_variablestyle_origin")]
+
+
+class BackfillMigrationTests(TestCase):
+    """The data migration, run forwards over rows the historical models made.
+
+    A plain TestCase: between 0029 and 0030 no migration runs DDL, so going
+    back and forth inside the test's transaction is safe, and its rollback
+    restores the migration records with everything else.
+    """
+
+    def migrate(self, targets):
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
+
+    def setUp(self):
+        self.old_apps = self.migrate(BEFORE)
+
+    def test_the_migration_records_each_styles_origin_from_its_stops(self):
+        org = make_organisation()
+        variable = make_org_tree(org)["variable"]
+        old = self.old_apps.get_model
+        ramp = old("georivacore", "ColorRamp").objects.create(name="House ramp", organisation_id=org.pk)
+        for i, hex_value in enumerate(("#000000", "#ffffff")):
+            old("georivacore", "ColorRampStop").objects.create(ramp=ramp, hex_value=hex_value, sort_order=i)
+        template = old("georivacore", "StyleTemplate").objects.create(
+            organisation_id=org.pk,
+            name="Bands",
+            slug="bands",
+            levels=[0, 10, 20],
+            colors=["#0000ff", "#ff0000"],
+            unit_id=variable.source_unit_id,
+        )
+        OldStyle = old("georivacore", "VariableStyle")
+        made = {
+            "template": OldStyle.objects.create(
+                variable_id=variable.pk, name="T", slug="t", stops=BANDS, template=template
+            ),
+            "forward": OldStyle.objects.create(variable_id=variable.pk, name="F", slug="f", stops=FORWARD, ramp=ramp),
+            "reversed": OldStyle.objects.create(variable_id=variable.pk, name="R", slug="r", stops=REVERSED, ramp=ramp),
+            "tuned": OldStyle.objects.create(
+                variable_id=variable.pk,
+                name="Tuned",
+                slug="tuned",
+                stops=[{"value": 0.0, "color": "#000000"}, {"value": 42.0, "color": "#ffffff"}],
+                ramp=ramp,
+                origin="ramp",
+            ),
+        }
+
+        self.migrate(AFTER)
+
+        recorded = {
+            key: tuple(VariableStyle.objects.filter(pk=style.pk).values_list("origin", "reverse", "stops").get())
+            for key, style in made.items()
+        }
+        self.assertEqual(recorded["template"], ("template", False, BANDS))
+        self.assertEqual(recorded["forward"], ("ramp", False, FORWARD))
+        self.assertEqual(recorded["reversed"], ("ramp", True, REVERSED))
+        self.assertEqual(recorded["tuned"][:2], ("custom", False))

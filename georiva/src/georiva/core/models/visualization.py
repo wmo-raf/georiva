@@ -664,8 +664,9 @@ class VariableStyle(TimeStampedModel):
 
     Each style records its :class:`Origin` (#806): a ``ramp`` style's stops are
     regenerated from its ramp on every save, a ``template`` style's are its
-    template's bands and no save changes them, and a ``custom`` style's — the
-    only ones that can be fine-tuned — are what the operator saved. A ramp or
+    template's bands until another is picked in place (#807), and a
+    ``custom`` style's — the only ones that can be fine-tuned — are what the
+    operator saved. A ramp or
     template style becomes custom only through "Customise stops".
 
     A variable may carry several named styles — an official public palette
@@ -717,8 +718,8 @@ class VariableStyle(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name="+",
         help_text=(
-            "The ramp this style was generated from — lineage and re-apply "
-            "only; the stops below are what actually renders."
+            "The ramp a ramp style's stops are generated from on every save; "
+            "for a custom style, history only. The stops below are what renders."
         ),
     )
     template = models.ForeignKey(
@@ -842,31 +843,45 @@ class VariableStyle(TimeStampedModel):
 
     # -------- snapshot generation --------
 
-    def apply_ramp(self):
-        """Regenerate the stops snapshot from the ramp, mode, steps and
-        reverse over the variable's current range — laid out in the served
-        unit, stored in the source unit (ADR 0046 §3). What a ramp style's
-        stops always are (#806): every save of one runs this."""
+    def ramp_stops(self) -> list:
+        """The stops the ramp, mode, steps and reverse give over the
+        variable's current range — laid out in the served unit, stored in the
+        source unit (ADR 0046 §3). Computed only; nothing is set."""
         if self.ramp is None:
             raise ValueError("This style has no ramp to apply.")
         variable = self.variable
-        self.stops = variable.stored_stops(
+        return variable.stored_stops(
             served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps, reverse=self.reverse)
         )
 
+    def apply_ramp(self):
+        """Regenerate the stops snapshot from the ramp (:meth:`ramp_stops`).
+        What a ramp style's stops always are (#806): every save of one runs
+        this."""
+        self.stops = self.ramp_stops()
+
+    def laid_over_old_range(self) -> bool:
+        """Whether this ramp style's saved stops are not what its ramp gives
+        over the current range — the range changed since it was saved, and
+        saving a range never touches stops (ADR 0022). Its next save lays the
+        ramp over the current range; the editor shows that before it happens."""
+        if self.origin != self.Origin.RAMP or self.ramp is None:
+            return False
+        return not _same_stops(self.stops or [], self.ramp_stops())
+
     def customise(self):
-        """Make this a custom style with the stops it has now (#806). The ramp
-        or template link stays, as history only: nothing it says drives the
-        stops again."""
+        """Make this a custom style with the stops it has now (#806), unsaved:
+        the caller saves. The ramp or template link stays, as history only:
+        nothing it says drives the stops again."""
         self.origin = self.Origin.CUSTOM
         self.reverse = False
-        self.save(update_fields=["origin", "reverse", "modified"])
 
     def start_over(self, origin, *, ramp=None, template=None):
-        """Remake this style by another path (#807): its origin and its ramp or
-        template link replaced, the other link and any reverse dropped. Its
-        name, slug and default status stay — starting over never makes a new
-        style. The caller sets the stops the new path gives, and saves."""
+        """Remake this style by another path (#807), unsaved: its origin and
+        its ramp or template link replaced, the other link and any reverse
+        dropped. Its name, slug and default status stay — starting over never
+        makes a new style. The caller sets the stops the new path gives, and
+        saves."""
         self.origin = origin
         self.ramp = ramp
         self.template = template

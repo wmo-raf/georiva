@@ -74,6 +74,23 @@ class OriginOnCreateTests(OriginTestCase):
     def test_starting_from_a_ramp_makes_a_ramp_style(self):
         self.assertEqual(self.ramp_style().origin, VariableStyle.Origin.RAMP)
 
+    def test_a_new_style_saved_with_a_ramp_posted_is_still_custom(self):
+        self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "",
+                "name": "Pasted",
+                "ramp": self.org_ramp.pk,
+                "mode": "continuous",
+                "stop_value": ["0", "42"],
+                "stop_color": ["#123456", "#654321"],
+            },
+        )
+
+        style = self.variable.styles.get()
+        self.assertEqual((style.origin, style.stops), (VariableStyle.Origin.CUSTOM, TUNED))
+
     def test_starting_from_scratch_makes_a_custom_style(self):
         self.client.post(
             self.form_url,
@@ -124,6 +141,40 @@ class RampEditorTests(OriginTestCase):
         self.variable.save(update_fields=["value_max"])
 
         self.assertRegex(self.editor(self.page(style)), r'<input[^>]*name="reverse"[^>]*checked')
+
+    def stop_values(self, editor):
+        return [float(v) for v in re.findall(r'name="stop_value" value="([^"]+)"', editor)]
+
+    def unsaved_note(self, editor):
+        return re.search(r'<p[^>]*id="vs-unsaved"[^>]*>', editor).group(0)
+
+    def test_a_ramp_style_laid_over_an_old_range_shows_the_stops_a_save_will_store(self):
+        style = self.ramp_style()
+        self.client.post(
+            self.form_url,
+            {
+                "action": "save-range",
+                "style_slug": style.slug,
+                "value_min": "0",
+                "value_max": "60",
+                "scale_type": "linear",
+            },
+        )
+        style.refresh_from_db()
+        self.assertEqual(style.stops, FORWARD, "saving the range rewrote the stops")
+
+        editor = self.editor(self.page(style))
+
+        self.assertEqual(self.stop_values(editor), [0.0, 60.0])
+        self.assertNotIn("hidden", self.unsaved_note(editor))
+        self.assertIn("Laid out over the old range", editor)
+
+    def test_a_ramp_style_laid_over_the_current_range_is_saved_as_shown(self):
+        editor = self.editor(self.page(self.ramp_style()))
+
+        self.assertEqual(self.stop_values(editor), [0.0, 50.0])
+        self.assertIn("hidden", self.unsaved_note(editor))
+        self.assertNotIn("Laid out over the old range", editor)
 
     def test_the_editor_tells_its_script_the_origin(self):
         editor = self.editor(self.page(self.ramp_style()))

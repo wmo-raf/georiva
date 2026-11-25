@@ -165,14 +165,14 @@
                 <form method="get" action="{{ form_url }}"
                       data-confirm="{% trans 'Start this style over from scratch? Saving the empty table you get replaces its stops, and drops its ramp or template.' %}">
                     <input type="hidden" name="style" value="{{ selected.slug }}">
-                    <input type="hidden" name="start" value="scratch">
+                    <input type="hidden" name="start" value="{{ start_values.scratch }}">
                     <button type="submit" class="button button-secondary">{% trans "Start from scratch" %}</button>
                 </form>
                 <p class="help-text">{% trans "Nothing changes until you save, and a style needs at least one stop." %}</p>
             {% else %}
                 {# Guarded like the style tabs: following it leaves unsaved range edits behind. #}
                 <p data-unsaved-guard>
-                    <a class="button button-secondary" href="{{ new_style_url }}&amp;start=scratch">{% trans "Start from scratch" %}</a>
+                    <a class="button button-secondary" href="{{ new_scratch_url }}">{% trans "Start from scratch" %}</a>
                 </p>
                 <p class="help-text">{% trans "Nothing is stored until you save, and a style needs at least one stop." %}</p>
             {% endif %}

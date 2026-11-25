@@ -151,6 +151,16 @@ class StartOverApplyTests(StartOverTestCase):
 
         self.on_every_origin(check)
 
+    def test_saving_a_scratch_start_over_asks_first(self):
+        editor = self.editor(self.page(self.template_style(), start="scratch"))
+
+        self.assertRegex(editor, r'<form[^>]*id="vs-style-form"[^>]*data-confirm=')
+
+    def test_saving_a_new_scratch_style_does_not_ask(self):
+        editor = self.editor(self.client.get(self.form_url, {"style": "__new__", "start": "scratch"}))
+
+        self.assertNotRegex(editor, r'<form[^>]*id="vs-style-form"[^>]*data-confirm=')
+
     def test_scratch_opens_this_styles_editor_empty_and_custom(self):
         style = self.template_style()
 
