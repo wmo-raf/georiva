@@ -210,10 +210,67 @@
             margin-block-end: 0.5rem;
         }
 
-        .vs-template-default {
+        /* The new-style chooser (#800): three starts, one open at a time. */
+        .vs-chooser-current {
+            color: var(--w-color-text-meta);
+        }
+
+        .vs-chooser-option {
+            border-block-start: 1px solid var(--w-color-border-furniture);
+            padding-block: 0.75rem;
+        }
+
+        .vs-chooser-option > summary {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.25rem 0.6rem;
+            cursor: pointer;
+        }
+
+        .vs-chooser-title {
+            font-weight: 700;
+        }
+
+        .vs-chooser-blurb {
+            flex-basis: 100%;
+            color: var(--w-color-text-meta);
+            font-size: 0.9em;
+        }
+
+        .vs-chooser-option > form,
+        .vs-chooser-option > p {
+            margin-block-start: 0.75rem;
+        }
+
+        .vs-chooser-mode {
+            border: 0;
+            padding: 0;
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .vs-template-encoding-choice {
             display: flex;
             align-items: center;
             gap: 0.4rem;
+        }
+
+        /* A template's range, curve and warnings show once it is picked; which
+           warnings follow the "Also use its range and curve" checkbox. */
+        .vs-template-encoding {
+            display: none;
+            margin: 0.25rem 0.5rem 0.5rem 2rem;
+            font-size: 0.9em;
+        }
+
+        li:has(> .vs-template input:checked) .vs-template-encoding {
+            display: block;
+        }
+
+        .vs-chooser:has([name="accept_encoding"]:checked) [data-when="keep"],
+        .vs-chooser:not(:has([name="accept_encoding"]:checked)) [data-when="accept"] {
+            display: none;
         }
 
         .vs-template-lineage {
@@ -763,38 +820,16 @@
             </nav>
             {% if not styles %}
                 <p class="help-text vs-style-tabs-empty">
-                    {% trans "No styles yet — this variable renders as grayscale. Pick a ramp and save the first style." %}
+                    {% trans "No styles yet — this variable renders as grayscale. Choose how its first style starts." %}
                 </p>
             {% endif %}
 
-            {% comment %}
-                What a default style's template proposes for the variable's
-                encoding (#791). The range and curve are shared by every style,
-                so nothing changes until the operator accepts here.
-            {% endcomment %}
-            {% if encoding_proposal %}
-                <section class="vs-panel vs-proposal" id="vs-encoding-proposal">
-                    <h2 class="w-label-1">{% trans "Use the template's range and curve?" %}</h2>
-                    <p>
-                        {% blocktrans with template=encoding_proposal.template.name min=encoding_proposal.value_min max=encoding_proposal.value_max unit=encoding_proposal.unit curve=encoding_proposal.scale_type_label %}“{{ template }}” is laid out for a range of {{ min }} to {{ max }} {{ unit }} and a {{ curve }} curve.{% endblocktrans %}
-                    </p>
-                    {% for warning in encoding_proposal.warnings %}
-                        <div class="help-block help-warning">{{ warning }}</div>
-                    {% endfor %}
-                    <form method="post" action="{{ form_url }}" class="vs-actions">
-                        {% csrf_token %}
-                        <input type="hidden" name="style_slug" value="{{ selected.slug }}">
-                        <button type="submit" name="action" value="accept-template-encoding" class="button">
-                            {% trans "Use this range and curve" %}
-                        </button>
-                        <a href="{{ form_url }}?style={{ selected.slug }}" class="button button-secondary">
-                            {% trans "Keep the current encoding" %}
-                        </a>
-                    </form>
-                </section>
+            {% if show_chooser %}
+                {% include "core/_styling_chooser.html" %}
             {% endif %}
 
-            <section class="vs-panel vs-style-editor" id="vs-style-editor">
+            {# Hidden, not left out, behind the chooser (#800): the page script and the map read its stop rows. #}
+            <section class="vs-panel vs-style-editor" id="vs-style-editor"{% if show_chooser %} hidden{% endif %}>
                 {% comment %}
                     The selected style's header: what is being edited, and the
                     two actions that act on it as a whole. Their forms sit
@@ -1182,58 +1217,6 @@
                     </p>
                 </form>
             </details>
-
-            {% comment %}
-                The Style template picker (#791). Applying one writes a new
-                stepped style: the template's bands converted into this
-                variable's source unit, a snapshot it never follows again. Only
-                templates whose unit converts are offered; "Show all" lists the
-                rest, disabled, with the reason each is not.
-            {% endcomment %}
-            <section class="vs-panel" id="vs-templates">
-                <h2 class="w-label-1">{% trans "Style templates" %}</h2>
-                <form method="post" action="{{ form_url }}">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="apply-template">
-                    {% if template_picker.offered %}
-                        <div class="vs-template-catalogue">
-                            {% for group in template_picker.offered %}
-                                {% include "core/_styling_template_group.html" with group=group %}
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <p class="help-text">
-                            {% blocktrans with unit=variable.source_unit.symbol %}No Style template is in a unit that converts into {{ unit }}.{% endblocktrans %}
-                        </p>
-                    {% endif %}
-                    {% if template_picker.excluded %}
-                        <details class="vs-template-excluded">
-                            <summary>
-                                {% blocktrans count counter=template_picker.excluded_count %}Show all templates ({{ counter }} more, not offered for this unit){% plural %}Show all templates ({{ counter }} more, not offered for this unit){% endblocktrans %}
-                            </summary>
-                            <div class="vs-template-catalogue">
-                                {% for group in template_picker.excluded %}
-                                    {% include "core/_styling_template_group.html" with group=group excluded=True %}
-                                {% endfor %}
-                            </div>
-                        </details>
-                    {% endif %}
-                    {% if template_picker.offered %}
-                        <div class="vs-field">
-                            <label class="vs-template-default">
-                                <input type="checkbox" name="make_default"{% if not styles %} checked disabled{% endif %}>
-                                {% trans "Make it the default style" %}
-                            </label>
-                            <p class="help-text">
-                                {% trans "A default style then proposes the template's range and curve. The variable's encoding changes only if you accept." %}
-                            </p>
-                        </div>
-                        <div class="vs-actions">
-                            <button type="submit" class="button">{% trans "Apply template" %}</button>
-                        </div>
-                    {% endif %}
-                </form>
-            </section>
         </div>
 
         <aside>
@@ -2346,6 +2329,22 @@
             // they were generated from until something says otherwise.
             appliedSignature = currentSignature();
             refreshState();
+        });
+    </script>
+    <script>
+        /** The new-style chooser (#800). **/
+        document.addEventListener('DOMContentLoaded', function () {
+            // "change" beside the ramp start's read-only range opens the
+            // shared range section and goes to it.
+            document.querySelectorAll('.vs-open-range').forEach(function (link) {
+                link.addEventListener('click', function () {
+                    document.getElementById('vs-range').open = true;
+                });
+            });
+            {% if scratch %}
+                // "From scratch" lands with the stops as JSON open, to paste into.
+                document.getElementById('vs-json-toggle')?.click();
+            {% endif %}
         });
     </script>
 {% endblock %}

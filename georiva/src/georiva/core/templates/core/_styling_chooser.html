@@ -1,0 +1,143 @@
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    How a new style starts (#800): a Style template, a color ramp, or scratch.
+    A variable with no styles and the "+ New style" tab open here instead of
+    the editor. The first style becomes the default whichever way it starts;
+    later ones are promoted from their tab's header, so nothing here asks.
+
+    The three starts are an exclusive accordion: opening one closes the others.
+{% endcomment %}
+<section class="vs-panel vs-chooser" id="vs-chooser">
+    <h2 class="w-label-1">{% trans "Start a new style" %}</h2>
+    <p class="vs-chooser-current">
+        {% trans "This variable's range and curve:" %}
+        <strong>{{ variable.served_range.0 }} – {{ variable.served_range.1 }}{% if variable.units %} {{ variable.units }}{% endif %}, {{ variable.get_scale_type_display|lower }}</strong>
+    </p>
+
+    {% comment %}
+        The Style template picker (#791). Applying one writes a new stepped
+        style: the template's bands converted into this variable's source unit,
+        a snapshot it never follows again. Only templates whose unit converts
+        are offered; "Show all" lists the rest, disabled, with the reason.
+        The chosen template's range, curve and warnings show beside it, before
+        anything is applied.
+    {% endcomment %}
+    <details class="vs-chooser-option" name="vs-start" open>
+        <summary>
+            <span class="vs-chooser-title">{% trans "From a template" %}</span>
+            <span class="w-status w-status--primary">{% trans "Recommended" %}</span>
+            <span class="vs-chooser-blurb">{% trans "An operational look, laid out for a quantity like rainfall or temperature." %}</span>
+        </summary>
+        <form method="post" action="{{ form_url }}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="apply-template">
+            {% if template_picker.offered %}
+                <div class="vs-template-catalogue">
+                    {% for group in template_picker.offered %}
+                        {% include "core/_styling_template_group.html" with group=group %}
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="help-text">
+                    {% blocktrans with unit=variable.source_unit.symbol %}No Style template is in a unit that converts into {{ unit }}.{% endblocktrans %}
+                </p>
+            {% endif %}
+            {% if template_picker.excluded %}
+                <details class="vs-template-excluded">
+                    <summary>
+                        {% blocktrans count counter=template_picker.excluded_count %}Show all templates ({{ counter }} more, not offered for this unit){% plural %}Show all templates ({{ counter }} more, not offered for this unit){% endblocktrans %}
+                    </summary>
+                    <div class="vs-template-catalogue">
+                        {% for group in template_picker.excluded %}
+                            {% include "core/_styling_template_group.html" with group=group excluded=True %}
+                        {% endfor %}
+                    </div>
+                </details>
+            {% endif %}
+            {% if template_picker.offered %}
+                {% if offer_template_encoding %}
+                    <div class="vs-field">
+                        <label class="vs-template-encoding-choice">
+                            <input type="checkbox" name="accept_encoding" checked>
+                            {% trans "Also use its range and curve (applies to every style of this variable)" %}
+                        </label>
+                    </div>
+                {% endif %}
+                <div class="vs-actions">
+                    <button type="submit" class="button">{% trans "Apply template" %}</button>
+                </div>
+            {% endif %}
+        </form>
+    </details>
+
+    {% comment %}
+        A ramp's stops generated over the variable's current range, saved as
+        the new style; the editor then opens on it. The range is shown, not
+        edited, here: "change" opens the shared range section below.
+    {% endcomment %}
+    <details class="vs-chooser-option" name="vs-start">
+        <summary>
+            <span class="vs-chooser-title">{% trans "From a color ramp" %}</span>
+            <span class="vs-chooser-blurb">{% trans "Colors spread over the variable's range, smooth or in classes." %}</span>
+        </summary>
+        <form method="post" action="{{ form_url }}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="start-from-ramp">
+            <div class="vs-template-catalogue">
+                {% for group in ramp_groups %}
+                    <fieldset class="vs-template-group">
+                        <legend class="w-label-3">{{ group.label }}</legend>
+                        <ul class="vs-template-list">
+                            {% for ramp in group.ramps %}
+                                <li>
+                                    <label class="vs-template">
+                                        <input type="radio" name="ramp" value="{{ ramp.pk }}" required>
+                                        <span class="vs-template-name">{{ ramp.name }}</span>
+                                        {# The ramp's colours are data. #}
+                                        <span class="vs-template-swatch" style="background: {{ ramp.gradient }};"></span>
+                                        <span class="vs-template-levels">{{ ramp.owner_label }}</span>
+                                    </label>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </fieldset>
+                {% empty %}
+                    <p class="help-text">
+                        {% trans "No color ramps yet." %}
+                        <a href="{{ ramp_catalog_url }}">{% trans "Add one" %}</a>
+                    </p>
+                {% endfor %}
+            </div>
+            <div class="vs-field-row">
+                <fieldset class="vs-field vs-chooser-mode">
+                    <legend>{% trans "Rendering" %}</legend>
+                    <label><input type="radio" name="mode" value="continuous" checked> {% trans "Smooth" %}</label>
+                    <label><input type="radio" name="mode" value="stepped"> {% trans "Stepped" %}</label>
+                </fieldset>
+                <div class="vs-field">
+                    <label for="vs-chooser-steps">{% trans "Classes, when stepped" %}</label>
+                    <input type="number" name="steps" id="vs-chooser-steps" min="2" value="{{ default_stepped_classes }}">
+                </div>
+            </div>
+            <p class="help-text">
+                {% blocktrans with min=variable.served_range.0 max=variable.served_range.1 unit=variable.units %}Spread over the current range, {{ min }} – {{ max }} {{ unit }}.{% endblocktrans %}
+                <a href="#vs-range" class="vs-open-range">{% trans "change" %}</a>
+            </p>
+            <div class="vs-actions">
+                <button type="submit" class="button">{% trans "Start from this ramp" %}</button>
+            </div>
+        </form>
+    </details>
+
+    <details class="vs-chooser-option" name="vs-start">
+        <summary>
+            <span class="vs-chooser-title">{% trans "From scratch" %}</span>
+            <span class="w-status">{% trans "Advanced" %}</span>
+            <span class="vs-chooser-blurb">{% trans "An empty stops table, to type or paste a palette you already have." %}</span>
+        </summary>
+        <p>
+            <a class="button button-secondary" href="{{ new_style_url }}&amp;start=scratch">{% trans "Start from scratch" %}</a>
+        </p>
+        <p class="help-text">{% trans "Nothing is stored until you save, and a style needs at least one stop." %}</p>
+    </details>
+</section>

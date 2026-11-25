@@ -145,11 +145,11 @@ def unique_style_slug(variable, name) -> str:
     return free_slug(slugify(name) or "style", set(variable.styles.values_list("slug", flat=True)))
 
 
-def apply_template(template, variable, *, make_default=False, name=None) -> VariableStyle:
+def apply_template(template, variable, *, name=None) -> VariableStyle:
     """A new stepped style on ``variable`` with ``template``'s look.
 
-    The style is the default when asked, or when it is the Variable's first —
-    the first style is what serves. The Variable's range and curve are left
+    The style is the default when it is the Variable's first — the first style
+    is what serves; a later one is promoted from its own tab (#800). The Variable's range and curve are left
     alone: :func:`proposed_encoding` is a proposal, set by
     :func:`accept_encoding` only. Raises :class:`ConversionRefused` when the
     template's unit does not convert into the Variable's source unit.
@@ -172,8 +172,6 @@ def apply_template(template, variable, *, make_default=False, name=None) -> Vari
         )
         style.full_clean()
         style.save()
-        if make_default and not first:
-            style.promote_to_default()
     return style
 
 

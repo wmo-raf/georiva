@@ -18,6 +18,32 @@
                         <span class="vs-template-reason">{{ template.reason }}</span>
                     {% endif %}
                 </label>
+                {% comment %}
+                    What choosing it does to the encoding (#800), shown once it
+                    is picked: its range and curve beside the variable's, and
+                    the warnings for whichever encoding would be in force —
+                    its own when "Also use its range and curve" is ticked, the
+                    current one otherwise. CSS picks which, from the inputs.
+                {% endcomment %}
+                {% if template.encoding %}
+                    <div class="vs-template-encoding">
+                        <p>
+                            {% if template.encoding.same %}
+                                {% trans "Laid out for this variable's current range and curve." %}
+                            {% else %}
+                                {% blocktrans with min=template.encoding.value_min max=template.encoding.value_max unit=variable.units curve=template.encoding.scale_type_label|lower %}Laid out for {{ min }} – {{ max }} {{ unit }}, {{ curve }}.{% endblocktrans %}
+                            {% endif %}
+                        </p>
+                        {% if offer_template_encoding %}
+                            {% for warning in template.encoding.warnings_accepted %}
+                                <div class="help-block help-warning" data-when="accept">{{ warning }}</div>
+                            {% endfor %}
+                        {% endif %}
+                        {% for warning in template.encoding.warnings_kept %}
+                            <div class="help-block help-warning"{% if offer_template_encoding %} data-when="keep"{% endif %}>{{ warning }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
             </li>
         {% endfor %}
     </ul>
