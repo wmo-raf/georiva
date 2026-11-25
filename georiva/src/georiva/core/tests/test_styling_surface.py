@@ -21,6 +21,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
+from georiva.core import style_application
 from georiva.core.machine_plane import titiler_encoded_preview_url
 from georiva.core.models import (
     Asset,
@@ -274,11 +275,12 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
     def test_the_ramp_still_saves_through_the_hidden_input(self):
         """The picker is presentation: the field is still a scoped
         ModelChoiceField named `ramp`, so nothing about saving moved."""
+        style = style_application.start_from_ramp(self.global_ramp, self.variable)
         response = self.client.post(
             self.form_url,
             {
                 "action": "save-style",
-                "style_slug": "",
+                "style_slug": style.slug,
                 "name": "Official",
                 "ramp": str(self.org_ramp.pk),
                 "mode": VariableStyle.Mode.CONTINUOUS,
@@ -351,9 +353,7 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         response = self.client.post(
             self.form_url,
             {
-                "action": "save-style",
-                "style_slug": "",
-                "name": "Official",
+                "action": "start-from-ramp",
                 "ramp": str(self.org_ramp.pk),
                 "mode": VariableStyle.Mode.CONTINUOUS,
                 "steps": "",
@@ -361,8 +361,8 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         )
         self.assertEqual(response.status_code, 302)
         style = VariableStyle.objects.get(variable=self.variable)
-        self.assertEqual(style.name, "Official")
-        self.assertEqual(style.slug, "official")
+        self.assertEqual(style.name, "House Rainfall")
+        self.assertEqual(style.slug, "house-rainfall")
         self.assertEqual(
             style.stops,
             [
@@ -375,9 +375,7 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.client.post(
             self.form_url,
             {
-                "action": "save-style",
-                "style_slug": "",
-                "name": "Official",
+                "action": "start-from-ramp",
                 "ramp": str(self.org_ramp.pk),
                 "mode": VariableStyle.Mode.CONTINUOUS,
                 "steps": "",
@@ -395,24 +393,20 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.client.post(
             self.form_url,
             {
-                "action": "save-style",
-                "style_slug": "",
-                "name": "Analyst",
+                "action": "start-from-ramp",
                 "ramp": str(self.org_ramp.pk),
                 "mode": VariableStyle.Mode.CONTINUOUS,
                 "steps": "",
             },
         )
-        analyst = VariableStyle.objects.get(variable=self.variable, slug="analyst")
+        analyst = VariableStyle.objects.get(variable=self.variable, slug="house-rainfall")
         self.assertFalse(analyst.is_default)
 
     def test_stepped_mode_produces_n_discrete_classes(self):
         response = self.client.post(
             self.form_url,
             {
-                "action": "save-style",
-                "style_slug": "",
-                "name": "Classed",
+                "action": "start-from-ramp",
                 "ramp": str(self.org_ramp.pk),
                 "mode": VariableStyle.Mode.STEPPED,
                 "steps": "7",

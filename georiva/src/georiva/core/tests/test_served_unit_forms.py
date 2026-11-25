@@ -135,9 +135,7 @@ class RampsAreAppliedInTheServedUnitTests(ServedUnitStylingTestCase):
         response = self.client.post(
             self.form_url,
             {
-                "action": "save-style",
-                "style_slug": "",
-                "name": "Official",
+                "action": "start-from-ramp",
                 "ramp": str(self.ramp.pk),
                 "mode": VariableStyle.Mode.CONTINUOUS,
                 "steps": "",
