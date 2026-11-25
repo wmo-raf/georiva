@@ -12,7 +12,13 @@
         {{ style_form.name }}
     </div>
 </div>
-{% if selected.template %}
+{% if starting_over and scratch %}
+    {# "Start over" from scratch (#807): this same style, remade by hand on save. #}
+    <input type="hidden" name="start_over" value="scratch">
+    <p class="vs-template-lineage">
+        {% trans "Starting this style over from scratch. Saving replaces its stops and drops its ramp or template; its name, tab and default status stay." %}
+    </p>
+{% elif selected.template %}
     <p class="vs-template-lineage">
         {% blocktrans with template=selected.template.name %}Customised from the template “{{ template }}”. Editing these stops never changes the template, nor the template them.{% endblocktrans %}
     </p>

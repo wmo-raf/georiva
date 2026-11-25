@@ -1,0 +1,8 @@
+{% comment %}
+    What makes a chooser start remake the selected style instead of adding
+    one (#807): the style, and that this is "Start over". Nothing on a new style.
+{% endcomment %}
+{% if starting_over %}
+    <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+    <input type="hidden" name="start_over" value="over">
+{% endif %}

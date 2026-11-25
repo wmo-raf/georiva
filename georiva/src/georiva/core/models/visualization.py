@@ -684,10 +684,11 @@ class VariableStyle(TimeStampedModel):
         """How a style was made, and so what drives its stops (#806).
 
         A ``template`` style's stops are its template's bands, never changed by
-        a save; a ``ramp`` style's are always its ramp, mode, steps and reverse
-        over the Variable's range, regenerated on every save; a ``custom``
+        a save unless another template was picked in its editor (#807); a
+        ``ramp`` style's are always its ramp, mode, steps and reverse over the
+        Variable's range, regenerated on every save; a ``custom``
         style's are whatever the operator saved. Set when the style is made,
-        and changed only by :meth:`customise` (or starting over)."""
+        and changed only by :meth:`customise` or :meth:`start_over`."""
 
         TEMPLATE = "template", "From a template"
         RAMP = "ramp", "From a ramp"
@@ -860,6 +861,16 @@ class VariableStyle(TimeStampedModel):
         self.origin = self.Origin.CUSTOM
         self.reverse = False
         self.save(update_fields=["origin", "reverse", "modified"])
+
+    def start_over(self, origin, *, ramp=None, template=None):
+        """Remake this style by another path (#807): its origin and its ramp or
+        template link replaced, the other link and any reverse dropped. Its
+        name, slug and default status stay — starting over never makes a new
+        style. The caller sets the stops the new path gives, and saves."""
+        self.origin = origin
+        self.ramp = ramp
+        self.template = template
+        self.reverse = False
 
     # -------- runtime conversion helpers --------
 

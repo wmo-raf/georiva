@@ -13,7 +13,8 @@
  Before unsaved work is lost the page asks:
  * leaving the page — the browser's own `beforeunload` prompt;
  * following a link inside a `[data-unsaved-guard]` (the style tabs,
-   "+ New style" and the chooser's "Start from scratch");
+   "+ New style", a style's "Start over" and the chooser's "Start from
+   scratch");
  * submitting any form while a *different* guarded form is dirty. Submitting
    a dirty form itself is its save, so it is not asked about; nor is a form
    whose `data-unsaved-discards` names the guarded form it throws away anyway

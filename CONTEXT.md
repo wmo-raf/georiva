@@ -895,7 +895,8 @@ _Avoid_: ColorPalette (retired model), style preset
 How a Variable style was made, and so what drives its stops: `template` (its template's bands; no save changes
 them), `ramp` (always its ramp, mode, steps and reverse over the range; every save regenerates them) or `custom`
 (the operator's own stops — the only ones fine-tuned by hand). Set when the style is made; "Customise stops" turns a
-template or ramp style into a custom one, keeping its stops and its link as history only. See ADR 0022 (#806).
+template or ramp style into a custom one, keeping its stops and its link as history only; "Start over" remakes the
+same style by any path (#807). See ADR 0022 (#806).
 _Avoid_: hand-tuned flag, style type
 
 **Stops snapshot**:

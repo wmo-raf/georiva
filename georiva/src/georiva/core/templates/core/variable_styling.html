@@ -260,8 +260,8 @@
             display: block;
         }
 
-        .vs-chooser:has([name="accept_encoding"]:checked) [data-when="keep"],
-        .vs-chooser:not(:has([name="accept_encoding"]:checked)) [data-when="accept"] {
+        .vs-template-picker:has([name="accept_encoding"]:checked) [data-when="keep"],
+        .vs-template-picker:not(:has([name="accept_encoding"]:checked)) [data-when="accept"] {
             display: none;
         }
 
@@ -501,11 +501,8 @@
         }
 
         /*
-         * Where a ramp or template style came from, and the one way to take its
-         * stops in hand (#806). #807 puts the template picker in
-         * .vs-template-source.
+         * The one way to take a ramp or template style's stops in hand (#806).
          */
-        .vs-template-source,
         .vs-customise {
             display: flex;
             flex-wrap: wrap;
@@ -514,17 +511,21 @@
             margin-block: 0.75rem;
         }
 
-        .vs-template-source p,
         .vs-customise p {
             margin: 0;
         }
 
-        .vs-template-source-swatch {
-            display: inline-block;
-            width: 120px;
-            height: 14px;
-            border-radius: 3px;
-            border: 1px solid var(--w-color-border-furniture);
+        /* A template style's template, picked in place (#807). */
+        .vs-template-source {
+            margin-block: 0.75rem;
+        }
+
+        .vs-template-source > legend {
+            margin-bottom: 0.5rem;
+        }
+
+        .vs-template-source > p {
+            margin: 0 0 0.5rem;
         }
 
         .vs-out-of-range {
@@ -925,9 +926,9 @@
             <section class="vs-panel vs-style-editor" id="vs-style-editor"{% if show_chooser %} hidden{% endif %}>
                 {% comment %}
                     The selected style's header: what is being edited, the path
-                    it was made by (#806), and the two actions that act on it as
-                    a whole. Their forms sit outside #vs-style-form, which a
-                    form cannot nest in.
+                    it was made by (#806), and the actions that act on it as a
+                    whole: Start over (#807), Make default and Delete. Their
+                    forms sit outside #vs-style-form, which a form cannot nest in.
                 {% endcomment %}
                 <header class="vs-style-header">
                     <h2 class="w-label-1">
@@ -943,6 +944,12 @@
                     {% if selected %}
                         <div class="vs-style-actions">
                             <span class="vs-origin-label" id="vs-origin-label">{{ selected.get_origin_display }}</span>
+                            {# "Start over" (#807): the chooser, for this style. Guarded like the tabs: it leaves unsaved edits behind. #}
+                            <span data-unsaved-guard>
+                                <a href="{{ start_over_url }}" class="button button-small button-secondary" id="vs-start-over">
+                                    {% trans "Start over" %}
+                                </a>
+                            </span>
                             {% if not selected.is_default %}
                                 <form method="post" action="{{ form_url }}">
                                     {% csrf_token %}
@@ -2238,6 +2245,29 @@
                     }
                 });
                 reverseInput.addEventListener('change', rampInputsChanged);
+            }
+            /**
+             A template style's picker (#807): picking another template shows
+             its bands, and its out-of-range settings, at once. Each radio
+             carries them, so nothing is fetched; Save writes them. The guard
+             sees the change itself, as it does any input in this form.
+             **/
+            if (origin === 'template') {
+                form.querySelectorAll('input[name="template"][data-stops]').forEach(function (radio) {
+                    radio.addEventListener('change', function () {
+                        if (!radio.checked) {
+                            return;
+                        }
+                        body.replaceChildren();
+                        JSON.parse(radio.dataset.stops).forEach(function (stop) {
+                            addRow(stop.value, stop.color);
+                        });
+                        underSelect.value = radio.dataset.under;
+                        overSelect.value = radio.dataset.over;
+                        markStopsEdited();
+                        renderPreview();
+                    });
+                });
             }
             if (reverseButton) {
                 reverseButton.addEventListener('click', reverseStopsInPlace);

@@ -1,11 +1,14 @@
 {% load i18n %}
 {% comment %}
     The editor of a style applied from a Style template (#806): its name and
-    the template it came from. The stops are the template's bands and no save
-    changes them; "Customise stops" is the way to edit them.
+    the template it came from. The stops are the template's bands; "Customise
+    stops" is the way to edit them by hand.
 
-    .vs-template-source is where the template picker goes (#807); it is a
-    read-only line until then.
+    The template is picked in place (#807), from the catalogue the chooser
+    offers, filtered to the variable's unit. Picking another repaints the
+    preview with its bands at once; Save writes them, and the style keeps its
+    name, slug and default status. The default style may also take the new
+    template's range and curve, as a first style does in the chooser.
 {% endcomment %}
 <div class="vs-field-row">
     <div class="vs-field">
@@ -13,15 +16,46 @@
         {{ style_form.name }}
     </div>
 </div>
-<div class="vs-template-source" id="vs-template-source">
+<fieldset class="vs-template-source vs-template-picker" id="vs-template-source">
+    <legend class="w-label-3">{% trans "Template" %}</legend>
     {% if selected.template %}
-        <span class="vs-template-source-swatch" style="background: {{ selected.template.css_gradient }};"></span>
-        <p>
-            {% blocktrans with template=selected.template.name %}From the Style template “{{ template }}”.{% endblocktrans %}
-            <span class="help-text">{{ selected.template.levels_label }}</span>
+        <p class="help-text">
+            {% blocktrans with template=selected.template.name %}From the Style template “{{ template }}”. Pick another to replace the stops with its bands; nothing changes until you save.{% endblocktrans %}
         </p>
     {% else %}
-        <p>{% trans "From a Style template that no longer exists." %}</p>
+        <p class="help-text">{% trans "From a Style template that no longer exists. Pick one to replace the stops with its bands." %}</p>
     {% endif %}
-</div>
+    {% if template_picker.offered %}
+        <div class="vs-template-catalogue">
+            {% for group in template_picker.offered %}
+                {% include "core/_styling_template_group.html" with group=group in_place=True %}
+            {% endfor %}
+        </div>
+    {% else %}
+        <p class="help-text">
+            {% blocktrans with unit=variable.source_unit.symbol %}No Style template is in a unit that converts into {{ unit }}.{% endblocktrans %}
+        </p>
+    {% endif %}
+    {% if template_picker.excluded %}
+        <details class="vs-template-excluded">
+            <summary>
+                {% blocktrans count counter=template_picker.excluded_count %}Show all templates ({{ counter }} more, not offered for this unit){% plural %}Show all templates ({{ counter }} more, not offered for this unit){% endblocktrans %}
+            </summary>
+            <div class="vs-template-catalogue">
+                {% for group in template_picker.excluded %}
+                    {% include "core/_styling_template_group.html" with group=group excluded=True %}
+                {% endfor %}
+            </div>
+        </details>
+    {% endif %}
+    {% if template_picker.offered and offer_template_encoding %}
+        <div class="vs-field">
+            <label class="vs-template-encoding-choice">
+                <input type="checkbox" name="accept_encoding" checked>
+                {% trans "Also use its range and curve (applies to every style of this variable)" %}
+            </label>
+            <p class="help-text">{% trans "Only when you pick another template." %}</p>
+        </div>
+    {% endif %}
+</fieldset>
 {% include "core/_style_editor_customise.html" %}

@@ -42,6 +42,7 @@ __all__ = [
     "proposed_encoding",
     "template_stops",
     "unique_style_slug",
+    "use_template",
     "warnings",
 ]
 
@@ -152,49 +153,58 @@ def _new_style(variable, name, **fields) -> VariableStyle:
     )
 
 
-def start_from_ramp(ramp, variable, *, mode=VariableStyle.Mode.CONTINUOUS, steps=None) -> VariableStyle:
+def start_from_ramp(ramp, variable, *, mode=VariableStyle.Mode.CONTINUOUS, steps=None, style=None) -> VariableStyle:
     """A new style on ``variable`` from ``ramp`` (#800): named after the ramp,
     its stops generated over the Variable's current range, the default when it
-    is the Variable's first. ``steps`` counts only when ``mode`` is stepped."""
+    is the Variable's first. ``steps`` counts only when ``mode`` is stepped.
+
+    Given ``style``, that style is remade from ``ramp`` instead ("Start over",
+    #807): its origin, stops and link replaced, its name, slug and default
+    status kept."""
     with transaction.atomic():
-        style = _new_style(
-            variable,
-            ramp.name,
-            origin=VariableStyle.Origin.RAMP,
-            ramp=ramp,
-            mode=mode,
-            steps=steps if mode == VariableStyle.Mode.STEPPED else None,
-        )
+        if style is None:
+            style = _new_style(variable, ramp.name)
+        style.start_over(VariableStyle.Origin.RAMP, ramp=ramp)
+        style.mode = mode
+        style.steps = steps if mode == VariableStyle.Mode.STEPPED else None
         style.apply_ramp()
         style.full_clean()
         style.save()
     return style
 
 
-def apply_template(template, variable, *, name=None) -> VariableStyle:
-    """A new stepped style on ``variable`` with ``template``'s look.
+def use_template(style, template):
+    """Give ``style`` ``template``'s bands, out-of-range settings and link,
+    unsaved (#807): what applying a template writes, and what picking another
+    template in a template style's editor replaces. The name, slug and default
+    status are the style's own and stay. Raises :class:`ConversionRefused`
+    when the template's unit does not convert into the Variable's source unit.
+    """
+    style.stops = template_stops(template, style.variable)
+    style.template = template
+    style.mode = VariableStyle.Mode.STEPPED
+    style.steps = len(template.colors)
+    style.under = template.under
+    style.over = template.over
 
-    The style is the default when it is the Variable's first
+
+def apply_template(template, variable, *, name=None, style=None) -> VariableStyle:
+    """A new stepped style on ``variable`` with ``template``'s look — or, given
+    ``style``, that style remade from ``template`` ("Start over", #807): its
+    origin, stops and link replaced, its name, slug and default status kept.
+
+    A new style is the default when it is the Variable's first
     (:attr:`Variable.new_style_is_default`); a later one is promoted from its
     own tab (#800). The Variable's range and curve are left alone:
     :func:`proposed_encoding` is a proposal, set by :func:`accept_encoding`
     only. Raises :class:`ConversionRefused` when the
     template's unit does not convert into the Variable's source unit.
     """
-    stops = template_stops(template, variable)
-    name = name or template.name
     with transaction.atomic():
-        style = _new_style(
-            variable,
-            name,
-            mode=VariableStyle.Mode.STEPPED,
-            steps=len(template.colors),
-            stops=stops,
-            under=template.under,
-            over=template.over,
-            template=template,
-            origin=VariableStyle.Origin.TEMPLATE,
-        )
+        if style is None:
+            style = _new_style(variable, name or template.name)
+        style.start_over(VariableStyle.Origin.TEMPLATE, template=template)
+        use_template(style, template)
         style.full_clean()
         style.save()
     return style

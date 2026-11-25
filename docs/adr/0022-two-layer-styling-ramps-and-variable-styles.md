@@ -128,6 +128,15 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    save rewrites them. A data migration recorded the origin of every existing
    style by the #801 comparison, once: a hand-tuned ramp style became custom.
 
+   **Amended (#807): a style's path can be switched without making a new one.**
+   A template style's editor picks its template in place, from the catalogue
+   the chooser offers; another pick repaints the preview at once and a save
+   writes its bands and link. "Start over", on every path, reopens the chooser
+   for the selected style and, after a confirmation, replaces its origin, stops
+   and ramp or template link. Both keep the style's name, slug and default
+   status. Only the default style may take a template's range and curve this
+   way, as only a first style may in the chooser.
+
 4. **`Variable` keeps `value_min`/`value_max`/`scale_type`.** They are the
    encoding contract (`imageUnscale`, the ADR 0021 render-config token), not
    styling. The `min < max` validation moves onto `Variable.clean()`,
