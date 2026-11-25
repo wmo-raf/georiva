@@ -2418,8 +2418,11 @@
                 });
             });
             {% if scratch %}
-                // "From scratch" lands with the stops as JSON open, to paste into.
-                document.getElementById('vs-json-toggle')?.click();
+                // "From scratch" lands with the stops as JSON open, to paste into:
+                // the toggle lives inside the Advanced disclosure, so open that first.
+                const advanced = document.getElementById('vs-advanced');
+                if (advanced) advanced.open = true;
+                advanced?.querySelector('#vs-json-toggle')?.click();
             {% endif %}
         });
     </script>

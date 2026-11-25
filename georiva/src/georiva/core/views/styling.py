@@ -755,7 +755,9 @@ def variable_styling(request, collection_pk, variable_pk):
         "style_form": style_form,
         "stop_rows": stop_rows,
         "stops_tuned": stops_tuned,
-        "advanced_open": stops_tuned or bool(style_form.errors),
+        # "From scratch" has no ramp to generate from: the stops are the style,
+        # so the disclosure holding them starts open.
+        "advanced_open": stops_tuned or bool(style_form.errors) or scratch,
         "ramp_groups": ramp_groups,
         "selected_ramp": selected_ramp,
         "ramp_catalog_url": reverse("colorramp:index"),
