@@ -647,6 +647,22 @@ class PreviewColourTableTests(StylingSurfaceTestCase):
         colormap = build_variable_payload(Variable.objects.get(pk=self.variable.pk))["colormap"]
         self.assertEqual(response.json()["colourTable"], [colormap[code] for code in range(256)])
 
+    def test_unsaved_stops_get_the_legend_they_would_get_once_saved(self):
+        # The Styling page's preview bar is drawn from it (#812), like every other legend.
+        from georiva.core.machine_plane.render_contract import render_contract
+
+        response = self.client.get(self.colours_url, {"stops": json.dumps(self.STOPS)})
+
+        VariableStyle.objects.create(variable=self.variable, name="S", slug="s", is_default=True, stops=self.STOPS)
+        self.assertEqual(response.json()["legend"], render_contract(Variable.objects.get(pk=self.variable.pk)).legend)
+
+    def test_the_styling_page_draws_its_preview_bar_with_the_shared_legend(self):
+        # Even with no data to map, the bar is the legend every other page draws.
+        response = self.client.get(self.form_url)
+
+        self.assertContains(response, "js/legend.js")
+        self.assertContains(response, f'data-legend-url="{self.colours_url}"')
+
     def test_no_stops_is_grayscale(self):
         response = self.client.get(self.colours_url, {"stops": "[]"})
         self.assertEqual(response.json()["colourTable"][128], [128, 128, 128, 255])

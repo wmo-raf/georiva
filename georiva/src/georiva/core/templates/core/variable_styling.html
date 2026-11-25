@@ -129,19 +129,18 @@
             padding-left: 1rem;
         }
 
+        /* The preview bar is the shared legend (legend.js, #812): its bar is
+           the gradient over a checkerboard, so a transparent band reads as one. */
         .vs-preview {
-            height: 22px;
-            border-radius: 4px;
-            border: 1px solid var(--w-color-border-furniture);
-            margin: 0.75rem 0 0.25rem;
+            min-height: 1.75rem;
+            margin: 0.75rem 0;
+            color: var(--w-color-text-meta);
         }
 
-        .vs-preview-labels {
-            display: flex;
-            justify-content: space-between;
-            color: var(--w-color-text-meta);
-            font-size: 0.85em;
-            margin-bottom: 0.75rem;
+        .vs-preview .legend-bar {
+            border-radius: 2px;
+            background: var(--legend-gradient),
+                repeating-conic-gradient(var(--w-color-border-furniture) 0% 25%, var(--w-color-surface-page) 0% 50%) 0 0 / 8px 8px;
         }
 
         /* The ramp picker: a gradient-bar toggle over a grouped swatch menu. */
@@ -1289,11 +1288,7 @@
                     </div>
 
                     <h3 class="w-label-2">{% trans "Preview" %}</h3>
-                    <div class="vs-preview" id="vs-preview"></div>
-                    <div class="vs-preview-labels">
-                        <span id="vs-preview-min"></span>
-                        <span id="vs-preview-max"></span>
-                    </div>
+                    <div class="vs-preview" id="vs-preview" data-legend-url="{{ colours_url }}"></div>
 
                     {% comment %}
                         The one "Save style" (#802), pinned to the foot of the
@@ -1477,6 +1472,7 @@
     <script src="{% static 'js/georiva-basemap.js' %}"></script>
     <script src="{% static 'js/colour_table.js' %}"></script>
     <script src="{% static 'js/raster_preview.js' %}"></script>
+    <script src="{% static 'js/legend.js' %}"></script>
     <script src="{% static 'core/js/stepped_classes.js' %}"></script>
     <script src="{% static 'core/js/unsaved_guard.js' %}"
             data-confirm-suffix="{% trans 'Discard them and continue?' %}"></script>
@@ -1513,8 +1509,6 @@
             const overSelect = form.querySelector('[name="over"]');
             const body = document.getElementById('vs-stops-body');
             const preview = document.getElementById('vs-preview');
-            const previewMin = document.getElementById('vs-preview-min');
-            const previewMax = document.getElementById('vs-preview-max');
             const previewConfigEl = document.getElementById('vs-preview-config');
             const previewConfig = previewConfigEl
                 ? JSON.parse(previewConfigEl.textContent)
@@ -1628,12 +1622,6 @@
             }
 
             /**
-             The live preview: the current stop rows as a gradient, values
-             normalized over their own span — the same reading
-             VariableStyle.css_gradient() gives the saved snapshot.
-             **/
-
-            /**
              The range hint: the stops cover less than half of the saved-or-
              edited range, so most of the encoded texture's resolution sits
              where no stop colors it. Reads the Range inputs, not the saved
@@ -1726,49 +1714,29 @@
             function renderPreview() {
                 const stops = readStops();
                 updateRangeHint(stops);
-                if (!stops.length) {
-                    preview.style.background = '';
-                    previewMin.textContent = '';
-                    previewMax.textContent = '';
-                    return;
-                }
-                const low = stops[0].value;
-                const high = stops[stops.length - 1].value;
-                const span = high - low;
-                let gradient;
-                if (span === 0 || stops.length === 1) {
-                    gradient = 'linear-gradient(to right, ' + stops[0].color + ', ' + stops[0].color + ')';
-                } else {
-                    const parts = stops.map(function (stop) {
-                        return stop.color + ' ' + ((stop.value - low) / span * 100) + '%';
-                    });
-                    gradient = 'linear-gradient(to right, ' + parts.join(', ') + ')';
-                }
-                preview.style.background = gradient;
-                previewMin.textContent = String(low);
-                previewMax.textContent = String(high);
-
                 paintMap(stops);
             }
 
             /**
-             The map's colours, from the same rows the gradient bar reads.
-             The map colours each texture code from a colour table, and the
-             server builds that table for every renderer (#785), so the rows
-             are sent to it rather than turned into colours here: what the
-             operator sees is what Titiler will serve once this is saved.
-             Asked once the typing settles; an answer overtaken by a later
-             edit, or refused for a half-typed row, leaves the map as it was.
-             No rows is a styleless variable's table, grayscale, shown
-             honestly rather than as an empty map.
+             The preview bar and the map's colours, from the same rows. The
+             map colours each texture code from a colour table, and the server
+             builds that table for every renderer (#785); it lays the legend
+             out for every page too (#790, #812), so the rows are sent to it
+             rather than turned into colours here: the bar is drawn by the same
+             legend.js as the item page's, and what the operator sees is what
+             Titiler will serve once this is saved. Asked once the typing
+             settles; an answer overtaken by a later edit, or refused for a
+             half-typed row, leaves both as they were. No rows is a styleless
+             variable's table, grayscale, shown honestly rather than as an
+             empty map.
              **/
 
             const COLOUR_TABLE_DELAY_MS = 150;
             let colourTableTimer = null;
             let colourTableAsked = 0;
 
-            async function fetchColourTable(stops) {
-                const url = new URL(previewConfig.coloursUrl, window.location.origin);
+            async function fetchColours(stops) {
+                const url = new URL(preview.dataset.legendUrl, window.location.origin);
                 url.searchParams.set('stops', JSON.stringify(stops));
                 url.searchParams.set('under', underSelect.value);
                 url.searchParams.set('over', overSelect.value);
@@ -1776,21 +1744,25 @@
                 if (!response.ok) {
                     return null;
                 }
-                return (await response.json()).colourTable;
+                return response.json();
             }
 
             function requestColourTable(stops) {
                 clearTimeout(colourTableTimer);
                 colourTableTimer = setTimeout(async function () {
                     const asked = ++colourTableAsked;
-                    let table = null;
+                    let colours = null;
                     try {
-                        table = await fetchColourTable(stops);
+                        colours = await fetchColours(stops);
                     } catch (error) {
                         console.error('Styling preview: colour table failed', error);
                     }
-                    if (table && asked === colourTableAsked && mapPreview) {
-                        mapPreview.setColourTable(table);
+                    if (!colours || asked !== colourTableAsked) {
+                        return;
+                    }
+                    GeoRivaLegend.render(preview, colours.legend);
+                    if (mapPreview) {
+                        mapPreview.setColourTable(colours.colourTable);
                     }
                 }, COLOUR_TABLE_DELAY_MS);
             }
@@ -1817,10 +1789,9 @@
             }
 
             function paintMap(stops) {
-                if (!previewConfig) {
-                    return;
+                if (previewConfig) {
+                    updateClipWarning(stops);
                 }
-                updateClipWarning(stops);
                 requestColourTable(stops);
             }
 
