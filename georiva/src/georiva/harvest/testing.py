@@ -127,12 +127,16 @@ class FakeUpstream:
         self.field_places: dict[str, str] = {}
         #: The steps, by index, a sample of each forecast array finds its run holding; one not here says none.
         self.field_steps: dict[str, tuple[int, ...]] = {}
+        #: What each field's sample says it declares of its time statistic (ADR 0051), by path.
+        self.field_declared: dict = {}
         #: Why a sample of an array cannot be read, by path.
         self.field_problems: dict[str, str] = {}
         #: The samples asked for, in order: the store, the arrays, and the places the read may follow.
         self.samples_asked: list[tuple[str, list[StoreField], dict[str, str]]] = []
         #: What the store holds: by array path, each `(run, valid time)` — `run` is `None` where there are no runs.
         self.held: dict[str, set[tuple[datetime | None, datetime]]] = {}
+        #: What each array declares of its time statistic (ADR 0051), by path.
+        self.declared: dict = {}
         #: A message for a store that describes itself and cannot be listed.
         self.store_unreachable: str | None = None
         #: The listings of Held steps asked for, in order: the store, the arrays, and the window.
@@ -221,6 +225,10 @@ class FakeUpstream:
         """The store holds data for the array at `path` at valid time `when`, of `run` where it has runs."""
         self.held.setdefault(path, set()).add((run, when))
 
+    def declare(self, path: str, declared) -> None:
+        """The array at `path` declares this time statistic, as its `step_type` would (ADR 0051)."""
+        self.declared[path] = declared
+
     def release(self, path: str, when: datetime, *, run: datetime | None = None) -> None:
         """The store no longer holds that step of that array."""
         self.held.get(path, set()).discard((run, when))
@@ -294,6 +302,7 @@ class FakeUpstream:
                 arrays=frozenset(paths),
                 run_steps=self._run_steps(run),
                 array_steps=self._array_steps(run, paths),
+                declared={path: self.declared[path] for path in paths if path in self.declared},
             )
             for (run, when), paths in sorted(steps.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
         ]
@@ -304,17 +313,14 @@ class FakeUpstream:
         return self.expected_steps.get(run, self.steps_per_run)
 
     def _array_steps(self, run: datetime | None, paths) -> dict[str, frozenset[timedelta]]:
-        """As the real store answers: an array expects its run's lead times from
-        its own first Held step on (#681), whichever it holds past them (#672)."""
+        """As the real store answers: an array is published at its run's
+        expected lead times, whichever it holds past them (#672); which of them
+        its Variable is expected at is the Variable's to say (ADR 0051)."""
         steps = self._run_steps(run)
         if steps is None:
             return {}
-        leads = [n * self.lead_interval for n in range(steps)]
-        found = {}
-        for path in paths:
-            first = min(when for held_run, when in self.held[path] if held_run == run) - run
-            found[path] = frozenset(lead for lead in leads if lead >= first)
-        return found
+        leads = frozenset(n * self.lead_interval for n in range(steps))
+        return dict.fromkeys(paths, leads)
 
     @staticmethod
     def _break_after(items, count):
@@ -454,7 +460,13 @@ class FakeUpstream:
             else:
                 low, high = self.field_ranges.get(field.path, (0.0, 100.0))
                 steps = self.field_steps.get(field.path, ())
-                samples[field.path] = FieldSample(readable=True, value_min=low, value_max=high, held_steps=steps)
+                samples[field.path] = FieldSample(
+                    readable=True,
+                    value_min=low,
+                    value_max=high,
+                    held_steps=steps,
+                    declared=self.field_declared.get(field.path),
+                )
         return samples
 
 
@@ -580,6 +592,9 @@ class StoreVariable:
     source_unit: str = "K"
     unit: str = ""
     water: bool = False
+    #: Its time statistic and window (ADR 0051): a non-instant one gets no row at a run's first step.
+    time_statistic: str = "instant"
+    statistic_window: str = ""
 
 
 @dataclass(frozen=True)
@@ -809,6 +824,8 @@ class LocalStore:
                 source_unit=unit(wanted.source_unit),
                 unit=unit(wanted.unit or wanted.source_unit),
                 water=wanted.water,
+                time_statistic=wanted.time_statistic,
+                statistic_window=wanted.statistic_window,
             )
             VariableMapping.objects.create(feed=feed, asset_key=path, variable=made[path])
         vector_variables = []
@@ -830,7 +847,12 @@ class LocalStore:
 
         for run, reference_time in enumerate(self.runs):
             for step, lead in enumerate(self.leads):
-                holding = [path for path in made if self._array(path).holds(run, step)]
+                # As a harvest indexes them: a step its Variable has, that the store holds.
+                holding = [
+                    path
+                    for path in made
+                    if self._array(path).holds(run, step) and made[path].has_step(reference_time, reference_time + lead)
+                ]
                 if not holding:
                     continue
                 item = Item.objects.create(

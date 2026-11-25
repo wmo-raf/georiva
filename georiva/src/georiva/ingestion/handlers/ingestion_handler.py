@@ -84,6 +84,15 @@ class IngestionHandler:
         ctx = self.ctx
         clipper = ctx.clipper
 
+        # A statistic has no lead-0 step (ADR 0051): at a run's reference time
+        # only the instant Variables are written, and a file holding none of
+        # them there writes nothing — not even an empty Item.
+        run = ensure_utc(ctx.reference_time) if ctx.reference_time else None
+        stepping = [v for v in variables if v.has_step(run, ensure_utc(timestamp))]
+        if not stepping:
+            logger.info("%s @ %s: no Variable has a step at its run's start", collection, timestamp)
+            return None, [], {"original_size": None, "clipped_size": None}, []
+
         # ── Spatial metadata from first variable ──────────────────────────────
         first_var = variables[0]
         meta = ctx.extractor.get_metadata(first_var, local_path, timestamp)
@@ -145,7 +154,7 @@ class IngestionHandler:
         assets: list[Asset] = []
         failed_variables: list[str] = []
 
-        for variable in variables:
+        for variable in stepping:
             process = partial(
                 self.asset_handler.process_variable,
                 variable=variable,

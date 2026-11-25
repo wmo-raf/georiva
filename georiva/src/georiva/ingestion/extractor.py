@@ -47,6 +47,8 @@ class VariableExtractor:
     def __init__(self, format_plugin: BaseFormatPlugin):
         self.plugin = format_plugin
         self.logger = logging.getLogger("georiva.extractor")
+        #: The Variables whose time statistic was compared with the file's, by (collection, slug).
+        self._compared: set = set()
 
     def extract(
         self,
@@ -75,7 +77,7 @@ class VariableExtractor:
         transform = variable.transform_type
 
         if transform == variable.TransformType.PASSTHROUGH:
-            data = self._extract_passthrough(sources, file_path, timestamp, window)
+            data = self._extract_passthrough(sources, file_path, timestamp, window, variable=variable)
 
         elif transform == variable.TransformType.VECTOR_MAGNITUDE:
             data = self._extract_vector_magnitude(sources, file_path, timestamp, window)
@@ -187,26 +189,40 @@ class VariableExtractor:
         Returns:
             2D numpy array (float32) in the source file's native units
         """
-        kwargs = self._build_plugin_kwargs(source)
+        extracted = self._read_source(source, file_path, timestamp, window)
+        return np.asarray(extracted.data, dtype=np.float32)
 
-        extracted = self.plugin.extract_variable(
+    def _read_source(self, source, file_path: Path, timestamp: datetime, window: tuple = None):
+        """The format plugin's ExtractedVariable for one source StructValue: its values and what the file says."""
+        return self.plugin.extract_variable(
             file_path=file_path,
             variable_name=source["source_name"],
             timestamp=timestamp,
             window=window,
-            **kwargs,
+            **self._build_plugin_kwargs(source),
         )
-
-        return np.asarray(extracted.data, dtype=np.float32)
 
     # =========================================================================
     # Transform Implementations
     # =========================================================================
 
-    def _extract_passthrough(self, sources, file_path, timestamp, window) -> np.ndarray:
+    def _extract_passthrough(self, sources, file_path, timestamp, window, variable=None) -> np.ndarray:
         """Direct read from primary source with no computation."""
         primary = self._get_primary_source(sources)
-        return self._extract_source(primary, file_path, timestamp, window)
+        extracted = self._read_source(primary, file_path, timestamp, window)
+        if variable is not None:
+            self._compare_time_statistic(variable, extracted.metadata, file_path)
+        return np.asarray(extracted.data, dtype=np.float32)
+
+    def _compare_time_statistic(self, variable, metadata: dict, file_path) -> None:
+        """Compare what the file declares of the field's time statistic with
+        the Variable's, once per Variable per file: a disagreement is logged,
+        and the Variable's own declaration stands (ADR 0051)."""
+        key = (variable.collection_id, variable.slug)
+        if key in self._compared:
+            return
+        self._compared.add(key)
+        variable.agrees_with((metadata or {}).get("declared"), source=f"file {Path(file_path).name}")
 
     def _extract_vector_magnitude(self, sources, file_path, timestamp, window) -> np.ndarray:
         """

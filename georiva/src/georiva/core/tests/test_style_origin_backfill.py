@@ -128,9 +128,11 @@ AFTER = [("georivacore", "0030_backfill_variablestyle_origin")]
 class BackfillMigrationTests(TestCase):
     """The data migration, run forwards over rows the historical models made.
 
-    A plain TestCase: between 0029 and 0030 no migration runs DDL, so going
-    back and forth inside the test's transaction is safe, and its rollback
-    restores the migration records with everything else.
+    A plain TestCase: going back to 0029 runs before any row is made, and
+    0029 to 0030 runs no DDL, so going back and forth inside the test's
+    transaction is safe, and its rollback restores the schema and the
+    migration records with everything else. Its rows are made with the
+    historical models, which later migrations do not change.
     """
 
     def migrate(self, targets):
@@ -144,8 +146,16 @@ class BackfillMigrationTests(TestCase):
 
     def test_the_migration_records_each_styles_origin_from_its_stops(self):
         org = make_organisation()
-        variable = make_org_tree(org)["variable"]
         old = self.old_apps.get_model
+        # Made with the historical models: today's Variable has columns 0029's does not.
+        catalog = old("georivacore", "Catalog").objects.create(
+            organisation_id=org.pk, name="Models", slug="models", file_format="geotiff"
+        )
+        collection = old("georivacore", "Collection").objects.create(catalog=catalog, name="Surface", slug="surface")
+        unit, _ = old("georivacore", "Unit").objects.get_or_create(name="Celsius", symbol="C")
+        variable = old("georivacore", "Variable").objects.create(
+            collection=collection, name="tas", slug="tas", source_unit=unit, unit=unit, value_min=0, value_max=50
+        )
         ramp = old("georivacore", "ColorRamp").objects.create(name="House ramp", organisation_id=org.pk)
         for i, hex_value in enumerate(("#000000", "#ffffff")):
             old("georivacore", "ColorRampStop").objects.create(ramp=ramp, hex_value=hex_value, sort_order=i)

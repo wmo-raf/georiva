@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils.text import slugify
 
 from georiva.core.provisioning import build_source_block, resolve_unit
+from georiva.core.time_statistic import Declared
 from georiva.sources.collection_definitions import CollectionDefinition, CollectionVariable
 
 logger = logging.getLogger("georiva.sources.setup_service")
@@ -423,12 +424,16 @@ class SourceSetupService:
 
         defaults = {**base_defaults, "transform_type": transform, "sources": sources_data}
 
+        declared = Declared(var_def.time_statistic, var_def.statistic_window) if var_def.time_statistic else None
         variable, created = Variable.objects.update_or_create(
             collection=collection,
             slug=slug,
             defaults=defaults,
-            create_defaults={**defaults, **seed_defaults},
+            # The plugin's time statistic seeds a new Variable only (ADR 0051).
+            create_defaults={**defaults, **seed_defaults, **(declared.fields() if declared else {})},
         )
+        if not created:
+            variable.agrees_with(declared, source="its plugin's collection definition")
         if created:
             # Seeding (and its degradation warnings) is create-only: a
             # re-provision neither writes styles nor nags about a declaration

@@ -16,7 +16,9 @@ def ingest_file(path: Path, plugin, variable_name: str):
     failure record is built from.
     """
     primary = SimpleNamespace(block_type="primary", value={"source_name": variable_name})
-    variable = SimpleNamespace(slug=variable_name, is_active=True, sources=[primary])
+    variable = SimpleNamespace(
+        slug=variable_name, is_active=True, sources=[primary], has_step=lambda reference_time, time: True
+    )
     collection = MagicMock(slug="test-collection")
     collection.variables.all.return_value = [variable]
     catalog = MagicMock(clip_mode="none")

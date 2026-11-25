@@ -67,6 +67,12 @@ class CollectionVariable:
     palette: str | None = None
     palette_stops: tuple[tuple[float, str], ...] | None = None
     style_template: str | None = None
+    #: Its time statistic (ADR 0051): `instant`, or a `sum` / `mean` / `max` /
+    #: `min` over `statistic_window` — `run_start` or `preceding_interval`.
+    #: Create-only, like the styling seed: after that the operator's value
+    #: wins. `None` declares nothing: the Variable is created `instant`.
+    time_statistic: str | None = None
+    statistic_window: str = ""
 
     def __post_init__(self):
         if self.transform == "passthrough" and self.source_variable is None:
@@ -239,6 +245,8 @@ def _parse_variable(v: dict) -> CollectionVariable:
             palette=v.get("palette"),
             palette_stops=_freeze_palette_stops(v.get("palette_stops")),
             style_template=v.get("style_template"),
+            time_statistic=v.get("time_statistic"),
+            statistic_window=v.get("statistic_window", ""),
         )
 
     # Vector-derived variable

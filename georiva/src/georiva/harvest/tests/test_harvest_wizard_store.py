@@ -14,6 +14,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from georiva.core.models import Asset, Catalog, Collection, Unit, Variable
+from georiva.core.time_statistic import Declared
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import StoreField, UpstreamCollection
@@ -947,3 +948,54 @@ class WizardProposesFixedFieldsTests(StoreWizardMixin, TestCase):
         rows = self.client.get(step(4)).context["details"]
 
         self.assertEqual([row["fixed"] for row in rows], [True, False])
+
+
+class WizardSetsTheTimeStatisticTests(StoreWizardMixin, TestCase):
+    """A Variable made from a store's array takes the time statistic the array
+    declares: its `step_type`, with its window from its name or comment (#818,
+    ADR 0051)."""
+
+    def setUp(self):
+        super().setUp()
+        self.arrays = {
+            "temperature_2m": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "2 metre temperature", "unit": "°C"}),
+            "total_precipitation_run_total_surface": (RUN_STEP_GRID, WHOLE_FIELD, {"title": "Rain", "unit": "°C"}),
+        }
+        self.upstream.field_declared = {
+            "temperature_2m": Declared("instant"),
+            "total_precipitation_run_total_surface": Declared("sum", "run_start"),
+        }
+        self.store()
+
+    def choose_both(self):
+        typed = {
+            **{f"name_{index}": f"Field {index}" for index in (0, 1)},
+            **{f"unit_{index}": self.celsius.pk for index in (0, 1)},
+            **{f"low_{index}": "0" for index in (0, 1)},
+            **{f"high_{index}": "100" for index in (0, 1)},
+        }
+        self.tick(0, 1)
+        return self.tick(0, 1, **typed)
+
+    def test_each_variable_is_declared_as_its_array_is(self):
+        self.reach_fields()
+
+        self.choose_both()
+        self.save_store()
+
+        self.assertEqual(
+            dict(Variable.objects.values_list("slug", "time_statistic")),
+            {"temperature_2m": "instant", "total_precipitation_run_total_surface": "sum"},
+        )
+        self.assertEqual(
+            Variable.objects.get(time_statistic="sum").statistic_window, Variable.StatisticWindow.RUN_START
+        )
+
+    def test_an_array_that_says_nothing_makes_an_instant_variable(self):
+        self.upstream.field_declared = {}
+        self.reach_fields()
+
+        self.choose_both()
+        self.save_store()
+
+        self.assertEqual(set(Variable.objects.values_list("time_statistic", flat=True)), {"instant"})

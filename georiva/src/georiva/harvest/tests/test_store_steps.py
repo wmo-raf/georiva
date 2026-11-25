@@ -16,6 +16,7 @@ import xarray
 import zarr
 from django.test import SimpleTestCase
 
+from georiva.core.time_statistic import Declared
 from georiva.harvest import upstream
 from georiva.harvest.upstream import (
     HeldStep,
@@ -33,6 +34,7 @@ WIND = StoreField("wind_u_10m", FORECAST)
 #: An average over the hours before each step: never held at a run's first step.
 CLOUD = StoreField("total_cloud_cover_atmosphere", FORECAST)
 EVERYTHING = (None, None)
+RUN_TOTAL = Declared("sum", "run_start")
 
 #: Three runs, six hours apart, each of four steps three hours apart, on a 4 × 8 grid.
 RUNS = [datetime(2026, 3, 1, tzinfo=UTC) + timedelta(hours=6 * n) for n in range(3)]
@@ -133,7 +135,7 @@ class HeldStepsOfAForecastTests(StoreFixture, SimpleTestCase):
                     reference_time=datetime(2026, 3, 1, 6, tzinfo=UTC),
                     arrays=frozenset({"temperature_2m"}),
                     run_steps=len(LEADS),
-                    array_steps={"temperature_2m": frozenset({LEADS[3]})},
+                    array_steps={"temperature_2m": frozenset(LEADS)},
                 )
             ],
         )
@@ -377,13 +379,13 @@ class AStoreThatCannotBeListedTests(StoreFixture, SimpleTestCase):
 
 
 class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
-    """Which steps of a run each array is expected at (#681, #672).
+    """Which steps of a run each array is published at (#672, ADR 0051).
 
-    The store declares no per-array mask, and an average, accumulation, flux or
-    extreme is never held at a run's first step. So an array expects the run's
-    expected lead times from its own first Held step on — the steps themselves,
-    not how many, so a step held past the expected length cannot stand in for
-    a missing one.
+    Every array of a run is published at the run's expected lead times — the
+    steps themselves, not how many, so a step held past the expected length
+    cannot stand in for a missing one. Whether a Variable mapped from it has a
+    lead-0 step is the Variable's declaration to say, not the steps the store
+    happens to hold.
     """
 
     def expected(self, *fields):
@@ -415,7 +417,7 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.assertEqual(self.expected(), {(0, "temperature_2m"): frozenset(LEADS)})
 
-    def test_an_array_not_held_at_a_runs_first_step_expects_the_steps_from_its_first(self):
+    def test_an_array_not_held_at_a_runs_first_step_is_still_published_at_every_step(self):
         def build(store):
             self.coordinates(store)
             self.forecast(store)[0] = 1.0
@@ -425,7 +427,7 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.assertEqual(
             self.expected(TEMPERATURE, CLOUD),
-            {(0, "temperature_2m"): frozenset(LEADS), (0, CLOUD.path): frozenset(LEADS[1:])},
+            {(0, "temperature_2m"): frozenset(LEADS), (0, CLOUD.path): frozenset(LEADS)},
         )
 
     def test_a_gap_after_an_arrays_first_step_is_still_expected(self):
@@ -447,7 +449,7 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.commit(build)
 
-        self.assertEqual(self.expected(CLOUD), {(0, CLOUD.path): frozenset(LEADS[1:3])})
+        self.assertEqual(self.expected(CLOUD), {(0, CLOUD.path): frozenset(LEADS[:3])})
 
     def test_a_step_held_past_the_expected_length_is_listed_and_not_expected(self):
         def build(store):
@@ -474,5 +476,42 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.assertEqual(
             self.expected(),
-            {(0, "temperature_2m"): frozenset(LEADS), (1, "temperature_2m"): frozenset(LEADS[2:])},
+            {(0, "temperature_2m"): frozenset(LEADS), (1, "temperature_2m"): frozenset(LEADS)},
         )
+
+
+class AnArraysDeclaredTimeStatisticTests(StoreFixture, SimpleTestCase):
+    """What a store array declares of its time statistic travels with its Held
+    steps, to be compared with its Variable's (ADR 0051)."""
+
+    def declared(self, *fields):
+        found = {}
+        for step in self.held(*fields):
+            found.update(step.declared)
+        return found
+
+    def test_a_running_total_is_declared_as_one(self):
+        def build(store):
+            self.coordinates(store)
+            array = self.forecast(store, CLOUD.path)
+            array.attrs["step_type"] = "avg"
+            array[0] = 1.0
+            total = self.forecast(store, "precipitation_run_total_surface")
+            total.attrs["step_type"] = "accum"
+            total[0] = 1.0
+
+        self.commit(build)
+
+        self.assertEqual(
+            self.declared(CLOUD, StoreField("precipitation_run_total_surface", FORECAST)),
+            {CLOUD.path: Declared("mean", "preceding_interval"), "precipitation_run_total_surface": RUN_TOTAL},
+        )
+
+    def test_an_array_that_says_nothing_declares_nothing(self):
+        def build(store):
+            self.coordinates(store)
+            self.forecast(store)[0] = 1.0
+
+        self.commit(build)
+
+        self.assertEqual(self.declared(), {})

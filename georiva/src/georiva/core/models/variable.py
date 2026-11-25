@@ -1,4 +1,6 @@
+import logging
 from dataclasses import dataclass
+from datetime import timedelta
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
@@ -13,7 +15,10 @@ from wagtail.fields import StreamField
 from wagtail.models import Orderable
 
 from georiva.core.panels import StylingSummaryPanel
+from georiva.core.time_statistic import Declared
 from georiva.core.unit_utils import Conversion, ConversionRefused
+
+logger = logging.getLogger(__name__)
 
 
 class SourceBlock(StructBlock):
@@ -102,6 +107,17 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         LOG = "log", "Logarithmic"
         SQRT = "sqrt", "Square Root"
         DIVERGING = "diverging", "Diverging"
+
+    class TimeStatistic(models.TextChoices):
+        INSTANT = "instant", "Instantaneous (the value at its time)"
+        SUM = "sum", "Sum (an accumulation)"
+        MEAN = "mean", "Mean"
+        MAX = "max", "Maximum"
+        MIN = "min", "Minimum"
+
+    class StatisticWindow(models.TextChoices):
+        RUN_START = "run_start", "Since the run started"
+        PRECEDING_INTERVAL = "preceding_interval", "Over the interval before each step"
 
     ORGANISATION_LOOKUP = "collection__catalog__organisation"
 
@@ -213,6 +229,29 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         ),
     )
 
+    # Time statistic (ADR 0051): what one value is over time. The source sets
+    # it when the Variable is created; after that the operator's value wins.
+    time_statistic = models.CharField(
+        max_length=10,
+        choices=TimeStatistic.choices,
+        default=TimeStatistic.INSTANT,
+        help_text=(
+            "Whether a value is the field at its time, or a statistic over a window. "
+            "A statistic has no value at a forecast's first step: its window is empty there, "
+            "so that step is never written."
+        ),
+    )
+    statistic_window = models.CharField(
+        max_length=20,
+        choices=StatisticWindow.choices,
+        blank=True,
+        default="",
+        help_text=(
+            "The window a statistic is over: since the forecast run started (a running total), "
+            "or the interval before each step. Left empty for an instantaneous value."
+        ),
+    )
+
     # Status
     is_active = models.BooleanField(
         default=True,
@@ -239,6 +278,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         FieldPanel("source_unit"),
         FieldPanel("unit"),
         FieldPanel("water"),
+        FieldPanel("time_statistic"),
+        FieldPanel("statistic_window"),
         # Range and styling are read-only here (issue #323): the Styling
         # surface is the one place that tunes them (ADR 0022).
         StylingSummaryPanel(heading="Styling"),
@@ -283,6 +324,53 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def units(self):
         return self.unit.symbol
 
+    # ── Time statistic (ADR 0051) ───────────────────────────────────────────
+
+    @property
+    def declared(self) -> Declared:
+        """Its time statistic and window."""
+        return Declared(self.time_statistic, self.statistic_window)
+
+    @property
+    def is_instant(self) -> bool:
+        return self.time_statistic == self.TimeStatistic.INSTANT
+
+    def has_step(self, reference_time, time) -> bool:
+        """Whether a step of this Variable exists at `time`: the one rule every
+        writer and every expectation asks (ADR 0051). A statistic's window is
+        empty at its run's first step, so a non-instant Variable has no lead-0
+        step. A step of no run — `reference_time` `None` — always exists."""
+        return reference_time is None or self.is_instant or time != reference_time
+
+    def expected_leads(self, leads):
+        """Of a run's lead times (`timedelta`s), those this Variable is expected at."""
+        return frozenset(lead for lead in leads if self.is_instant or lead != timedelta(0))
+
+    @property
+    def zero_at_run_start(self) -> bool:
+        """Whether it is a running total since its run started, so zero at the
+        run's reference time by definition — where it has no step."""
+        return self.time_statistic == self.TimeStatistic.SUM and self.statistic_window == self.StatisticWindow.RUN_START
+
+    def agrees_with(self, declared: Declared | None, *, source: str) -> bool:
+        """Whether what `source` declares of this Variable agrees with its own
+        declaration. The stored value wins: a disagreement is logged, naming the
+        Variable, and nothing is changed. A source that says nothing agrees."""
+        if declared is None or declared == self.declared:
+            return True
+        collection = self.collection if self.collection_id is not None else None
+        logger.warning(
+            "Variable %s%s is declared %s, but %s says %s. Kept %s; if the source is right, change the "
+            "Variable's time statistic in the admin.",
+            f"{collection.slug}/" if collection is not None else "",
+            self.slug,
+            self.declared,
+            source,
+            declared,
+            self.declared,
+        )
+        return False
+
     @staticmethod
     def validate_value_range(value_min, value_max):
         """
@@ -303,6 +391,9 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def clean(self):
         super().clean()
         errors = {}
+
+        if not self.is_instant and not self.statistic_window:
+            errors["statistic_window"] = _("Say which window this statistic is over.")
 
         for validate in (
             lambda: self.validate_value_range(self.value_min, self.value_max),
@@ -348,6 +439,9 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         A source unit is locked once the Variable has an asset (ADR 0046 §8):
         whatever saves it, a change raises. :meth:`correct_source_unit` is the
         one way past the lock."""
+        if self.is_instant:
+            # An instantaneous value is over no window.
+            self.statistic_window = ""
         update_fields = kwargs.get("update_fields")
         if not getattr(self, "_correcting_source_unit", False) and (
             update_fields is None or "source_unit" in update_fields

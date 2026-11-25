@@ -30,6 +30,7 @@ import xarray as xr
 from rasterio.crs import CRS
 from rasterio.errors import CRSError
 
+from georiva.core.time_statistic import from_cell_methods
 from georiva.utils.path import PathLike
 
 from .base import BaseFormatPlugin, ExtractedVariable, UnsupportedGridError, VariableInfo
@@ -76,6 +77,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         try:
             with self._open(file_path) as ds:
                 for var_name, var in ds.data_vars.items():
+                    declared = from_cell_methods(var.attrs.get("cell_methods"))
                     results.append(
                         {
                             "name": var_name,
@@ -84,6 +86,8 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                             "standard_name": var.attrs.get("standard_name", ""),
                             "dimensions": list(var.dims),
                             "shape": tuple(var.shape),
+                            # What its cell_methods declare of its time statistic (ADR 0051).
+                            **(declared.fields() if declared else {}),
                         }
                     )
         except Exception as e:
@@ -184,6 +188,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                     "source_file": str(file_path),
                     "long_name": var.attrs.get("long_name", ""),
                     "standard_name": var.attrs.get("standard_name", ""),
+                    "declared": from_cell_methods(var.attrs.get("cell_methods")),
                     "full_width": int(full_width),
                     "full_height": int(full_height),
                 },

@@ -756,9 +756,8 @@ class RunIngestion(models.Model):
         blank=True,
         help_text=(
             "For a harvested Upstream store: the lead times, in seconds, of this run each mapped Variable's array "
-            "is expected at, by Variable pk — the run's expected steps from the array's own first held step on, "
-            "since an average is never held at a run's first step (ADR 0044 §6). A Variable not here is not held "
-            "whole."
+            "is expected at, by Variable pk — the run's expected steps, without the first for a Variable whose "
+            "time statistic is not instant (ADR 0051). A Variable not here is not held whole."
         ),
     )
     last_file_at = models.DateTimeField(

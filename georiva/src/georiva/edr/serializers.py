@@ -67,6 +67,19 @@ class EDRBaseURLMixin:
 # =============================================================================
 
 
+#: A Variable's time statistic as an EDR measurementType method (ADR 0051).
+EDR_METHODS = {"sum": "sum", "mean": "mean", "max": "maximum", "min": "minimum"}
+
+
+def measurement_type(variable) -> dict:
+    """The parameter's `measurementType`, for a Variable that is a statistic
+    over time: its method alone. `period` is left out — a running total's
+    window grows with each step, and an interval's length is not recorded.
+    Nothing for an instantaneous one."""
+    method = EDR_METHODS.get(variable.time_statistic)
+    return {"measurementType": {"method": method}} if method else {}
+
+
 class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
     """
     Serializes a GeoRiva Variable as an EDR parameter_names entry.
@@ -96,6 +109,8 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
 
         if variable.description:
             data["description"] = variable.description
+
+        data.update(measurement_type(variable))
 
         # Stored in the source unit, served beside the unit above (ADR 0046 §15).
         value_min, value_max = variable.served_range
@@ -480,6 +495,7 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
                 "label": variable.name,
                 "observedProperty": {"id": variable.slug, "label": variable.name},
                 **({"unit": {"symbol": variable.unit.symbol}} if variable.unit else {}),
+                **measurement_type(variable),
             }
 
         # Use annotated value from view — avoids one EXISTS query per collection.

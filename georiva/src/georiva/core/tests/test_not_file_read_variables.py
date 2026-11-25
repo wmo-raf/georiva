@@ -142,6 +142,8 @@ class CollectionEditorTests(NotFileReadFixture, TestCase):
             "description": "",
             "source_unit": self.unit.pk,
             "unit": self.unit.pk,
+            "time_statistic": "instant",
+            "statistic_window": "",
         }
 
     def errors(self, response):
