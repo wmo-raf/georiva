@@ -19,11 +19,14 @@ Positions are reckoned in the source unit, where the encoding is; tick values
 are served (ADR 0046 §15). ``under`` and ``over`` say whether each end is
 clamped, drawn with an arrow, or transparent, drawn without one.
 
-``labels`` says which ticks are labelled (#812): a stepped legend every class
-boundary, up to :data:`STEPPED_LABELS` of them; a continuous one at most
-:data:`CONTINUOUS_LABELS`; beyond that they thin at an even stride, both ends
-kept. That is a count; whether they fit is the drawing's to judge, since only it
-knows how wide the bar is — a narrow one thins them further, the same way.
+``labels`` says which ticks are labelled, and is the only pick there is: every
+drawing shows these and no others. A stepped legend labels every class boundary,
+up to :data:`STEPPED_LABELS` of them, thinned at an even stride beyond that with
+both ends kept (#812). A continuous or styleless one labels what every legend
+labelled before #812: at most :data:`CONTINUOUS_LABELS`, picked as legend.js
+once picked them. ``stepped`` says which kind it is, since only a stepped
+legend's labels may thin further where the bar is too narrow for them, which
+only the drawing can judge, knowing the bar's width.
 """
 
 from georiva.core.models import OutOfRange
@@ -42,10 +45,20 @@ CONTINUOUS_LABELS = 6
 _PLACES = 6
 
 
-def _labelled(count: int, most: int) -> list:
-    """Which of ``count`` ticks are labelled: at most ``most``, picked at an even
-    stride, both ends always. A pick closer than half a stride to the last tick
-    gives way to it, so the end is never crowded."""
+def _capped(count: int) -> list:
+    """Which of a continuous or styleless legend's ``count`` ticks are labelled:
+    every ``ceil((count - 1) / 5)``-th and the last, as before #812, so at most
+    :data:`CONTINUOUS_LABELS`, the last two however close."""
+    every = max(1, -(-(count - 1) // (CONTINUOUS_LABELS - 1)))
+    return sorted({*range(0, count, every), count - 1}) if count else []
+
+
+def _stepped_labels(count: int) -> list:
+    """Which of a stepped legend's ``count`` boundaries are labelled: all of them
+    up to :data:`STEPPED_LABELS`, else at most that many, picked at an even
+    stride, both ends always. A pick closer than half a stride to the last
+    boundary gives way to it, so the end is never crowded."""
+    most = STEPPED_LABELS
     if count <= most:
         return list(range(count))
     stride = -(-(count - 1) // (most - 1))
@@ -127,22 +140,25 @@ def legend(variable, style=None) -> dict:
     """``style``'s legend for ``variable``, or the default style's when none is named.
 
     ``{"gradient": [[position, [r, g, b, a]], ...], "ticks": [[position, value], ...],
-    "labels": [tick index, ...], "under": "clamp" | "transparent", "over": ...}``,
-    every position 0–1 along the bar, every tick value served, and ``labels`` the
-    ticks that carry their value as text, in order, both ends always.
+    "labels": [tick index, ...], "stepped": bool, "under": "clamp" | "transparent",
+    "over": ...}``, every position 0–1 along the bar, every tick value served,
+    ``labels`` the ticks that carry their value as text, in order, both ends
+    always, and ``stepped`` whether the style is drawn as equal-width bands.
     """
     style = style if style is not None else variable.default_style
     vmin, vmax = variable.value_min, variable.value_max
     curve = encoding_curve(variable)
     stops = sorted(style_stops(style), key=lambda stop: stop[0])
+    bands = _bands(stops) if stops else None
     if not stops:
-        layout, most = _styleless(vmin, vmax, curve, variable.served), STYLELESS_STEPS + 1
+        layout = _styleless(vmin, vmax, curve, variable.served)
         under = over = OutOfRange.CLAMP
-    else:
-        bands = _bands(stops)
-        if bands:
-            layout, most = _stepped(bands, variable.served), STEPPED_LABELS
-        else:
-            layout, most = _continuous(stops, vmin, vmax, curve, variable.served), CONTINUOUS_LABELS
+    elif bands:
+        layout = _stepped(bands, variable.served)
         under, over = style.under, style.over
-    return {**layout, "labels": _labelled(len(layout["ticks"]), most), "under": under, "over": over}
+    else:
+        layout = _continuous(stops, vmin, vmax, curve, variable.served)
+        under, over = style.under, style.over
+    count = len(layout["ticks"])
+    labels = _stepped_labels(count) if bands else _capped(count)
+    return {**layout, "labels": labels, "stepped": bool(bands), "under": under, "over": over}

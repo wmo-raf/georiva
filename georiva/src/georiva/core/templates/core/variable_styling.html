@@ -6,6 +6,7 @@
 {% block extra_css %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'css/vendor/maplibre-gl.css' %}">
+    <link rel="stylesheet" href="{% static 'css/legend.css' %}">
     <style>
         .vs-layout {
             display: grid;
@@ -129,18 +130,11 @@
             padding-left: 1rem;
         }
 
-        /* The preview bar is the shared legend (legend.js, #812): its bar is
-           the gradient over a checkerboard, so a transparent band reads as one. */
+        /* The preview bar is the shared legend (legend.js and legend.css, #812). */
         .vs-preview {
             min-height: 1.75rem;
             margin: 0.75rem 0;
             color: var(--w-color-text-meta);
-        }
-
-        .vs-preview .legend-bar {
-            border-radius: 2px;
-            background: var(--legend-gradient),
-                repeating-conic-gradient(var(--w-color-border-furniture) 0% 25%, var(--w-color-surface-page) 0% 50%) 0 0 / 8px 8px;
         }
 
         /* The ramp picker: a gradient-bar toggle over a grouped swatch menu. */
@@ -1721,7 +1715,7 @@
             function renderPreview() {
                 const stops = readStops();
                 updateRangeHint(stops);
-                paintMap(stops);
+                paintPreview(stops);
             }
 
             /**
@@ -1738,11 +1732,11 @@
              empty map.
              **/
 
-            const COLOUR_TABLE_DELAY_MS = 150;
-            let colourTableTimer = null;
-            let colourTableAsked = 0;
+            const LEGEND_AND_COLOURS_DELAY_MS = 150;
+            let legendAndColoursTimer = null;
+            let legendAndColoursAsked = 0;
 
-            async function fetchColours(stops) {
+            async function fetchLegendAndColours(stops) {
                 const url = new URL(preview.dataset.legendUrl, window.location.origin);
                 url.searchParams.set('stops', JSON.stringify(stops));
                 url.searchParams.set('under', underSelect.value);
@@ -1754,24 +1748,24 @@
                 return response.json();
             }
 
-            function requestColourTable(stops) {
-                clearTimeout(colourTableTimer);
-                colourTableTimer = setTimeout(async function () {
-                    const asked = ++colourTableAsked;
-                    let colours = null;
+            function requestLegendAndColours(stops) {
+                clearTimeout(legendAndColoursTimer);
+                legendAndColoursTimer = setTimeout(async function () {
+                    const asked = ++legendAndColoursAsked;
+                    let answer = null;
                     try {
-                        colours = await fetchColours(stops);
+                        answer = await fetchLegendAndColours(stops);
                     } catch (error) {
-                        console.error('Styling preview: colour table failed', error);
+                        console.error('Styling preview: legend and colour table failed', error);
                     }
-                    if (!colours || asked !== colourTableAsked) {
+                    if (!answer || asked !== legendAndColoursAsked) {
                         return;
                     }
-                    GeoRivaLegend.render(preview, colours.legend);
+                    GeoRivaLegend.render(preview, answer.legend);
                     if (mapPreview) {
-                        mapPreview.setColourTable(colours.colourTable);
+                        mapPreview.setColourTable(answer.colourTable);
                     }
-                }, COLOUR_TABLE_DELAY_MS);
+                }, LEGEND_AND_COLOURS_DELAY_MS);
             }
 
             /**
@@ -1795,11 +1789,11 @@
                 }
             }
 
-            function paintMap(stops) {
+            function paintPreview(stops) {
                 if (previewConfig) {
                     updateClipWarning(stops);
                 }
-                requestColourTable(stops);
+                requestLegendAndColours(stops);
             }
 
             function syncPicker(row) {
@@ -2357,8 +2351,8 @@
                         }[code] || mapStatus.dataset.textureFailed;
                     }
                 });
-                // The first colours, asked while the basemap and texture load.
-                requestColourTable(readStops());
+                // The first legend and colours, asked while the basemap and texture load.
+                requestLegendAndColours(readStops());
                 document.getElementById('vs-basemap').addEventListener('change', function (event) {
                     if (mapPreview) {
                         mapPreview.setBasemap(event.target.value);
@@ -2530,7 +2524,7 @@
                 select.addEventListener('change', function () {
                     styleDirty = true;
                     refreshState();
-                    paintMap(readStops());
+                    paintPreview(readStops());
                 });
             });
             form.querySelector('[name="name"]').addEventListener('input', function () {

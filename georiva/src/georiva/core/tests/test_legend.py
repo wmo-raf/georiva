@@ -196,8 +196,36 @@ class LegendLabelTests(LegendCase):
         self.assertEqual(len(legend["ticks"]), 11)
         self.assertEqual(legend["labels"], [0, 2, 4, 6, 8, 10])
 
+    def test_a_continuous_legend_picks_the_labels_it_picked_before_812(self):
+        # What legend.js's labelled() picked before #812: every ceil((n - 1) / 5)th
+        # stop and the last, however close the last two sit — worked by hand.
+        before = {
+            6: [0, 1, 2, 3, 4, 5],
+            7: [0, 2, 4, 6],
+            12: [0, 3, 6, 9, 11],
+            14: [0, 3, 6, 9, 12, 13],
+            22: [0, 5, 10, 15, 20, 21],
+        }
+        for count, labels in before.items():
+            with self.subTest(count=count):
+                VariableStyle.objects.filter(variable_id=self.variable_pk).delete()
+                stops = [{"value": 233.15 + index * 4, "color": f"#{index * 10:02x}0000"} for index in range(count)]
+
+                legend = self.legend(stops)
+
+                self.assertEqual(len(legend["ticks"]), count)
+                self.assertEqual(legend["labels"], labels)
+
     def test_a_styleless_legend_labels_each_of_its_steps(self):
         self.assertEqual(self.legend()["labels"], [0, 1, 2, 3, 4])
+
+    def test_only_a_stepped_legend_says_it_is_stepped(self):
+        # Only a stepped legend's labels may thin further on a narrow bar.
+        self.assertIs(self.legend(stepped(RAIN_LEVELS))["stepped"], True)
+        VariableStyle.objects.filter(variable_id=self.variable_pk).delete()
+        self.assertIs(self.legend(CONTINUOUS)["stepped"], False)
+        VariableStyle.objects.filter(variable_id=self.variable_pk).delete()
+        self.assertIs(self.legend()["stepped"], False)
 
 
 class EveryLegendReadsTheContractsLegendTests(TestCase):
@@ -237,6 +265,7 @@ class EveryLegendReadsTheContractsLegendTests(TestCase):
         "gradient": [[0.0, BLUE], [0.5, BLUE], [0.5, RED], [1.0, RED]],
         "ticks": [[0.0, 0.5], [0.5, 1.0], [1.0, 200.0]],
         "labels": [0, 1, 2],
+        "stepped": True,
         "under": "transparent",
         "over": "clamp",
     }

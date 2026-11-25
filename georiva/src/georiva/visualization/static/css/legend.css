@@ -1,0 +1,8 @@
+/* The bar js/legend.js draws, on an admin page (the item preview, the Styling
+   page's preview): its gradient, set by legend.js, over a checkerboard in
+   Wagtail's theme colours, so a translucent or clear band reads as one. */
+.legend-bar {
+    border-radius: 2px;
+    background: var(--legend-gradient),
+        repeating-conic-gradient(var(--w-color-border-furniture) 0% 25%, var(--w-color-surface-page) 0% 50%) 0 0 / 8px 8px;
+}

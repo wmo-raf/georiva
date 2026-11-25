@@ -9,12 +9,15 @@
  *   legend = {gradient: [[position, [r, g, b, a]], ...],   // 0–1 along the bar
  *             ticks: [[position, value], ...],              // value served
  *             labels: [tick index, ...],                    // which carry text
+ *             stepped: true | false,                        // equal-width bands
  *             under: 'clamp' | 'transparent', over: ...}
  *
- * `labels` is the server's pick (#812): every class boundary of a stepped
- * legend up to 16, fewer on a continuous one. Only here is the bar's width
- * known, so where those labels would overlap they thin further, at an even
- * stride with both ends kept, and again whenever the bar is resized.
+ * `labels` is the server's pick (#812), and this never adds to it. Only here is
+ * the bar's width known, so a stepped legend's labels that would overlap on it
+ * thin further, every second, third ... of them with both ends kept, and again
+ * whenever the bar is resized; where even the two ends would overlap, the first
+ * stands alone. A continuous legend's labels are drawn as picked. A legend with
+ * no `labels` labels at most six ticks, as every legend did before #812.
  *
  * An end arrow is drawn only where the end is clamped: values beyond it take
  * the end colour. A transparent end has none, since those values are not drawn.
@@ -22,9 +25,10 @@
  *   GeoRivaLegend.render(container, legend);
  *
  * Layout is styled inline; text takes the container's colour and font. The
- * bar is a `.legend-bar` whose background each page draws in its own theme's
- * colours: its gradient, `var(--legend-gradient)`, over a checkerboard, so a
- * translucent or clear band reads as one.
+ * bar is a `.legend-bar`, its gradient `var(--legend-gradient)`, drawn over a
+ * checkerboard so a translucent or clear band reads as one: an admin page draws
+ * it with `css/legend.css` beside this script, in Wagtail's theme colours; the
+ * public item page with its own theme's (`georiva-map.css`).
  */
 (function (global) {
     'use strict';
@@ -33,6 +37,8 @@
     const ARROW_WIDTH = 7;
     /** Pixels of clear space between two neighbouring labels. */
     const LABEL_GAP = 4;
+    /** At most this many labels on a legend that does not say which to label. */
+    const MAX_LABELS = 6;
 
     function css(colour) {
         const alpha = colour.length > 3 ? colour[3] / 255 : 1;
@@ -66,32 +72,29 @@
         return String(Number(value.toFixed(magnitude < 10 ? 2 : 1)));
     }
 
-    /**
-     * Every `every`-th of `count` labels, both ends always; one closer than half
-     * a stride to the last gives way to it. Mirrors `_labelled` in legend.py.
-     */
-    function stride(count, every) {
-        const picked = [];
+    /** Every `every`-th of `count` indices and the last, in order. */
+    function everyNth(count, every) {
+        const picked = new Set([count - 1]);
         for (let i = 0; i < count; i += every) {
-            picked.push(i);
+            picked.add(i);
         }
-        if (picked[picked.length - 1] !== count - 1) {
-            if ((count - 1 - picked[picked.length - 1]) * 2 < every) {
-                picked.pop();
-            }
-            picked.push(count - 1);
-        }
-        return picked;
+        return [...picked].sort((a, b) => a - b);
+    }
+
+    /** A legend without `labels`: at most six ticks, as before #812. */
+    function capped(count) {
+        return count ? everyNth(count, Math.max(1, Math.ceil((count - 1) / (MAX_LABELS - 1)))) : [];
     }
 
     /**
      * Which of the labels to show, given each one's `[left, right]` in pixels:
-     * the densest even stride under which no two overlap, both ends always.
+     * the densest every-nth under which no two overlap, both ends kept; the
+     * first alone when even the two ends overlap.
      */
     function fitting(extents) {
         const count = extents.length;
-        for (let every = 1; every < count - 1; every++) {
-            const picked = stride(count, every);
+        for (let every = 1; every < count; every++) {
+            const picked = everyNth(count, every);
             const clear = picked.every(
                 (index, at) => at === 0 || extents[picked[at - 1]][1] + LABEL_GAP <= extents[index][0]
             );
@@ -99,7 +102,7 @@
                 return picked;
             }
         }
-        return count > 1 ? [0, count - 1] : [0];
+        return [0];
     }
 
     /** Shows the labels that fit `scale`'s width, hiding the rest. */
@@ -161,7 +164,7 @@
         scale.style.fontSize = '0.625rem';
         scale.style.fontVariantNumeric = 'tabular-nums';
 
-        const withLabel = new Set(legend.labels || ticks.map((_tick, index) => index));
+        const withLabel = new Set(legend.labels || capped(ticks.length));
         const labels = [];
         ticks.forEach(([position, value], index) => {
             const left = `${position * 100}%`;
@@ -191,6 +194,9 @@
         });
         container.appendChild(scale);
 
+        if (!legend.stepped) {
+            return;
+        }
         fit(scale, labels);
         if (typeof ResizeObserver !== 'undefined') {
             container.legendObserver = new ResizeObserver(() => fit(scale, labels));
