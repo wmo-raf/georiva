@@ -516,6 +516,8 @@ def _template_picker(templates, variable):
             "gradient": template.css_gradient(),
             "levels_label": template.levels_label(),
             "owner_label": template.owner_label(),
+            # Which shipped catalogue it is from, and the upstream style (#811).
+            "source_label": template.source_label(),
             "reason": reason,
         }
         if reason is None:

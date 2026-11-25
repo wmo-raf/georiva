@@ -445,7 +445,7 @@ class StyleTemplate(TimeStampedModel):
     Tiered like the ramp catalog (ADR 0011): no organisation is the
     instance-wide tier every organisation reads and only the instance admin
     writes. One rule goes further: a template with an ``origin`` was shipped by
-    GeoRiva (the earthkit-plots catalogue) and is read-only to everyone, the
+    GeoRiva (the earthkit-plots or the Magics catalogue) and is read-only to everyone, the
     instance admin included, so a later release can refresh it. Anyone adapts
     one by copying it into their organisation.
     """
@@ -625,6 +625,20 @@ class StyleTemplate(TimeStampedModel):
         return "Instance-wide (shipped)" if self.is_shipped else "Instance-wide"
 
     owner_label.short_description = "Owner"
+
+    #: How a shipped catalogue is named to an operator, by ``origin``.
+    ORIGIN_LABELS = {"earthkit-plots": "earthkit-plots", "magics": "Magics"}
+
+    def source_label(self):
+        """Where a shipped template comes from and the upstream style it was
+        converted from, "Magics · sh_blured_f05t300lst"; empty for one an
+        organisation authored (#811)."""
+        if not self.is_shipped:
+            return ""
+        origin = self.ORIGIN_LABELS.get(self.origin, self.origin)
+        return f"{origin} · {self.source_name}" if self.source_name else origin
+
+    source_label.short_description = "Source"
 
     # -------- presentation helpers --------
 

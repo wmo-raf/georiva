@@ -1,0 +1,11 @@
+# Corrections to what generate.py infers for a Magics style (#811), by style name.
+#
+#   scale_type  the encoding curve, where the level spacing suggests the wrong one
+#   quantity    the group the picker lists it under
+#
+# The curve is otherwise read off the level spacing: even is linear, roughly multiplying is
+# log, otherwise widening is sqrt.
+
+# u and v components run from negative to positive around a calm zero.
+sh_blue_red_64: {scale_type: diverging}
+sh_blue_red_100: {scale_type: diverging}

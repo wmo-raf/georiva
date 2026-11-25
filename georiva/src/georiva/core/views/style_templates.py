@@ -160,7 +160,7 @@ class StyleTemplateViewSet(OrgScopedViewSetMixin, ModelViewSet):
     # Wagtail's copy view saves over its source (see ColorRampModelViewSet);
     # templates are copied by "Copy to my organisation" instead.
     copy_view_enabled = False
-    list_display = ["name", "quantity", "preview", "levels_label", "under", "over", "owner_label"]
+    list_display = ["name", "quantity", "preview", "levels_label", "under", "over", "owner_label", "source_label"]
     list_filter = ["quantity"]
     search_fields = ["name", "slug", "source_name"]
 

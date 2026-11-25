@@ -100,6 +100,10 @@ class StyleTemplateCatalogueTests(TestCase):
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
         cls.uganda = provision_organisation(name="Uganda Met", slug="uganda")
+        # The migrations' shipped catalogues (earthkit-plots and Magics, #811) are more
+        # rows than the listing's first page: these tests are about the tiers, so the
+        # listing holds only their own four.
+        StyleTemplate.objects.filter(organisation=None).delete()
         cls.shipped = _saved(
             name="Shipped precipitation",
             slug="shipped-precip",
