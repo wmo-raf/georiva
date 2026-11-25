@@ -424,14 +424,15 @@ class CompatibilityTests(SimpleTestCase):
 
 class DownloadTests(TestCase):
     def test_a_signed_in_user_can_download_the_script(self):
-        org = make_organisation("kmd")
+        # A slug no instance picks for its central org: the test DB bootstraps that one from .env (#815).
+        org = make_organisation("push-test")
         user = get_user_model().objects.create_user("ops", password="x")
         user.user_permissions.add(Permission.objects.get(codename="access_admin"))
-        join_org(user, org)
+        join_org(user, org.slug)
         catalog = Catalog.objects.create(organisation=org, name="WRF", slug="wrf", file_format="netcdf")
         feed = PushFeed.objects.create(catalog=catalog, name="WRF", valid_time_format="CONTENT")
         self.client.force_login(user)
-        dial_org(self.client, org)
+        dial_org(self.client, org.slug)
 
         page = self.client.get(f"/admin/push-feeds/{feed.pk}/")
         self.assertContains(page, "/admin/push-feeds/georiva_push.py")

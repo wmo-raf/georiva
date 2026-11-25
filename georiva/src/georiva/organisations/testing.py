@@ -37,6 +37,12 @@ def org_host(slug=DEFAULT_TEST_ORG_SLUG):
     return f"{slug}.testserver"
 
 
+def _require_slug(slug, helper):
+    """Refuse anything but a slug string: ``str(org)`` is its name, not its slug (#815)."""
+    if not isinstance(slug, str):
+        raise TypeError(f"{helper}() takes an organisation slug, got {type(slug).__name__}; pass org.slug")
+
+
 def dial_org(client, slug=DEFAULT_TEST_ORG_SLUG):
     """Point ``client`` at ``slug``'s host for every request it makes.
 
@@ -44,6 +50,7 @@ def dial_org(client, slug=DEFAULT_TEST_ORG_SLUG):
     on every URL, and a test that only drives admin views has no other reason to
     build one.
     """
+    _require_slug(slug, "dial_org")
     make_organisation(slug)
     client.defaults["HTTP_HOST"] = org_host(slug)
     return client
@@ -57,6 +64,7 @@ def join_org(user, slug=DEFAULT_TEST_ORG_SLUG, role=None):
     """
     from .models import OrganisationMembership
 
+    _require_slug(slug, "join_org")
     return OrganisationMembership.objects.create(
         user=user,
         organisation=make_organisation(slug),
