@@ -126,6 +126,26 @@ class TemplatePickerTests(ApplyStyleTemplateTestCase):
 
         self.assertEqual(self.names(picker["offered"]), {"Precipitation": ["Rain bands"]})
 
+    def test_a_specific_energy_template_is_not_offered_for_a_depth_or_a_length(self):
+        # J/kg is m²/s², which the registry bridges to a length through gravity
+        # for geopotential height; CAPE in J/kg is still not a rainfall depth (#809).
+        _template(
+            name="CAPE",
+            slug="cape",
+            quantity=StyleTemplate.Quantity.CONVECTION,
+            unit=_unit("J/kg"),
+            levels=[50, 100, 4000],
+            colors=["#ffff00", "#ff0000"],
+        )
+        for source_unit in ("mm", "m"):
+            with self.subTest(source_unit=source_unit):
+                picker = self.picker(self.make_variable(f"v-{source_unit}", source_unit))
+
+                offered = [row["name"] for group in picker["offered"] for row in group["templates"]]
+                self.assertNotIn("CAPE", offered)
+                cape = next(row for group in picker["excluded"] for row in group["templates"] if row["name"] == "CAPE")
+                self.assertIn("J/kg", cape["reason"])
+
     def test_an_excluded_template_says_why(self):
         picker = self.picker(self.make_variable("dust", "kg/m²"))
 

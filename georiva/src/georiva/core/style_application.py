@@ -27,7 +27,7 @@ from django.utils.translation import gettext as _
 from georiva.core.machine_plane.colour_table import CODES, encode, encoding_curve
 from georiva.core.models import Variable, VariableStyle
 from georiva.core.models.visualization import band_stops
-from georiva.core.unit_utils import Conversion, ConversionRefused
+from georiva.core.unit_utils import Conversion, ConversionRefused, same_quantity_conversion
 from georiva.utils.slugs import free_slug
 
 #: A band given fewer codes than this is drawn as a sliver, or not at all.
@@ -66,8 +66,13 @@ class Encoding:
 
 def conversion(template, variable) -> Conversion:
     """Values in ``template``'s unit into ``variable``'s source unit, or
-    :class:`ConversionRefused` with the reason it is not offered."""
-    return Conversion.between(template.unit.symbol, variable.source_unit.symbol, water=variable.water)
+    :class:`ConversionRefused` with the reason it is not offered.
+
+    Only between units of one quantity, water's bridge aside (#809): a
+    template drawn for CAPE in J/kg is no rainfall template, though the
+    registry's geopotential context would carry J/kg into mm.
+    """
+    return same_quantity_conversion(template.unit.symbol, variable.source_unit.symbol, water=variable.water)
 
 
 def template_stops(template, variable) -> list:
