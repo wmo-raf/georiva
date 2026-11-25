@@ -15,8 +15,11 @@ the map; what is tested here is the state the page opens in.
 
 import re
 
+from django.template.loader import render_to_string
+
 from georiva.core.models import VariableStyle
 from georiva.core.tests.test_styling_surface import StylingSurfaceTestCase
+from georiva.core.views.styling import styling_summary
 
 
 def stops(*values):
@@ -101,6 +104,14 @@ class SelectedStyleHeaderTests(StylingSurfaceTestCase):
         self.assertEqual(len(forms), 1)
         self.assertIn('name="style_slug" value="draft"', forms[0])
 
+    def test_delete_keeps_its_own_confirm_and_the_unsaved_guard_lets_it_through(self):
+        response = self.client.get(self.form_url, {"style": "draft"})
+
+        form = self.action_forms(response, "delete-style")[0]
+        tag = re.match(r"<form[^>]*>", form).group(0)
+        self.assertIn("data-confirm=", tag)
+        self.assertIn('data-unsaved-discards="vs-style-form"', tag)
+
     def test_a_new_style_has_nothing_to_promote_or_delete(self):
         response = self.client.get(self.form_url, {"style": "__new__"})
 
@@ -180,3 +191,43 @@ class SharedRangeSectionTests(StylingSurfaceTestCase):
         )
 
         self.assertTrue(self.is_open(self.range_section(response)))
+
+
+class SharedEncodingWordingTests(StylingSurfaceTestCase):
+    """The overview and the Variable edit panel say what the Styling page does
+    (#798): the range and curve are shared by every style, and a variable with
+    none is pointed at the guided start."""
+
+    def summary_panel(self):
+        return render_to_string(
+            "core/panels/styling_summary.html", {"variable": self.variable, **styling_summary(self.variable)}
+        )
+
+    def test_the_overview_says_the_range_and_curve_are_shared_and_points_to_set_up(self):
+        response = self.client.get(self.page_url)
+
+        self.assertContains(response, "shared by every style")
+        self.assertRegex(response.content.decode(), rf'<a href="{re.escape(self.form_url)}"[^>]*>\s*Set up styling')
+
+    def test_the_overview_offers_no_set_up_for_a_styled_variable(self):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official", is_default=True, stops=stops(0, 50)
+        )
+
+        self.assertNotContains(self.client.get(self.page_url), "Set up styling")
+
+    def test_the_panel_says_the_range_and_curve_are_shared_and_points_to_set_up(self):
+        html = self.summary_panel()
+
+        self.assertIn("shared by every style", html)
+        self.assertIn("Set up styling", html)
+
+    def test_the_panel_edits_styling_once_a_style_exists(self):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official", is_default=True, stops=stops(0, 50)
+        )
+        html = self.summary_panel()
+
+        self.assertIn("shared by every style", html)
+        self.assertIn("Edit styling", html)
+        self.assertNotIn("Set up styling", html)

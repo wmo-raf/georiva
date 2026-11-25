@@ -111,8 +111,9 @@
             <div class="vs-field-row">
                 <fieldset class="vs-field vs-chooser-mode">
                     <legend>{% trans "Rendering" %}</legend>
-                    <label><input type="radio" name="mode" value="continuous" checked> {% trans "Smooth" %}</label>
-                    <label><input type="radio" name="mode" value="stepped"> {% trans "Stepped" %}</label>
+                    {% for value, label in mode_choices %}
+                        <label><input type="radio" name="mode" value="{{ value }}"{% if forloop.first %} checked{% endif %}> {{ label }}</label>
+                    {% endfor %}
                 </fieldset>
                 <div class="vs-field">
                     <label for="vs-chooser-steps">{% trans "Classes, when stepped" %}</label>
@@ -135,7 +136,8 @@
             <span class="w-status">{% trans "Advanced" %}</span>
             <span class="vs-chooser-blurb">{% trans "An empty stops table, to type or paste a palette you already have." %}</span>
         </summary>
-        <p>
+        {# Guarded like the style tabs: following it leaves unsaved range edits behind. #}
+        <p data-unsaved-guard>
             <a class="button button-secondary" href="{{ new_style_url }}&amp;start=scratch">{% trans "Start from scratch" %}</a>
         </p>
         <p class="help-text">{% trans "Nothing is stored until you save, and a style needs at least one stop." %}</p>

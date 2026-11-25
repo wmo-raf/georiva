@@ -8,6 +8,7 @@ editor. Each start is read through what it stores and the page it lands on.
 
 import re
 
+from georiva.core import style_application
 from georiva.core.models import StyleTemplate, Variable, VariableStyle
 from georiva.core.tests.test_apply_style_template import _template, _unit
 from georiva.core.tests.test_styling_surface import StylingSurfaceTestCase
@@ -256,6 +257,18 @@ class ScratchStartTests(ChooserPageTestCase):
         self.assertIn('id="vs-json-toggle"', html[start : html.index("</details>", start)])
         self.assertIn("advanced?.querySelector('#vs-json-toggle')?.click()", html)
 
+    def test_start_from_scratch_is_guarded_like_the_tabs(self):
+        chooser = self.chooser(self.client.get(self.form_url))
+
+        guarded = re.findall(r"<[a-z]+[^>]*data-unsaved-guard.*?start=scratch", chooser, re.S)
+        self.assertTrue(guarded, "the scratch link is not inside a [data-unsaved-guard]")
+
+    def test_the_rendering_choices_are_the_styles_modes(self):
+        chooser = self.chooser(self.client.get(self.form_url))
+
+        for mode in VariableStyle.Mode.values:
+            self.assertIn(f'name="mode" value="{mode}"', chooser)
+
     def test_the_chooser_does_not_open_the_json_panel(self):
         html = self.client.get(self.form_url).content.decode()
 
@@ -302,3 +315,31 @@ class FirstStyleIsTheDefaultTests(ChooserPageTestCase):
         self.client.post(self.form_url, {"action": "apply-template", "template": _template().pk, "make_default": "on"})
 
         self.assertEqual(self.variable.default_style.slug, "official")
+
+
+class StartFromRampTests(ChooserPageTestCase):
+    """``style_application.start_from_ramp``: a style generated from a ramp,
+    named and slugged after it, default only when it is the first."""
+
+    def test_the_first_is_the_default_and_a_second_with_the_same_ramp_gets_its_own_slug(self):
+        first = style_application.start_from_ramp(self.org_ramp, self.variable)
+        second = style_application.start_from_ramp(
+            self.org_ramp, self.variable, mode=VariableStyle.Mode.STEPPED, steps=3
+        )
+
+        self.assertTrue(first.is_default)
+        self.assertFalse(second.is_default)
+        self.assertNotEqual(first.slug, second.slug)
+        self.assertEqual(len(second.stops), 6)
+        self.assertFalse(second.is_hand_tuned)
+
+
+class NewStyleIsDefaultTests(ChooserPageTestCase):
+    def test_a_new_style_is_the_default_only_while_the_variable_has_none(self):
+        self.assertTrue(self.variable.new_style_is_default)
+
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official", is_default=True, stops=stops(0, 50)
+        )
+
+        self.assertFalse(Variable.objects.get(pk=self.variable.pk).new_style_is_default)

@@ -38,7 +38,7 @@
 
 {% block main_content %}
     <p class="styling-lead">
-        {% trans "Every variable in this collection with its value range and default style. A variable without a style of its own renders as grayscale until one is applied." %}
+        {% trans "Every variable in this collection with its range, curve and default style. A variable's range and curve are shared by every style it has. A variable without a style renders as grayscale until its styling is set up." %}
     </p>
 
     {% if rows %}
@@ -80,6 +80,9 @@
                                 {% trans "Grayscale (no style yet)" %}
                             {% endif %}
                         </span>
+                        {% if not row.default_style %}
+                            <a href="{{ row.url }}" class="button button-small button-secondary">{% trans "Set up styling" %}</a>
+                        {% endif %}
                     </td>
                     <td>{{ row.style_count }}</td>
                 </tr>

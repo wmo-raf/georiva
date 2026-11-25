@@ -37,7 +37,7 @@ class HandTuningCheckTests(StylingSurfaceTestCase):
         style = self.style()
 
         self.assertFalse(style.is_hand_tuned)
-        self.assertFalse(style.as_generated().reverse)
+        self.assertFalse(style.is_ramp_reversed)
 
     def test_a_stepped_style_as_generated_is_not_hand_tuned(self):
         style = self.style(mode=VariableStyle.Mode.STEPPED, steps=5)
@@ -49,13 +49,13 @@ class HandTuningCheckTests(StylingSurfaceTestCase):
         style = self.style(stops=[{"value": 0.0, "color": "#ffffff"}, {"value": 50.0, "color": "#000000"}])
 
         self.assertFalse(style.is_hand_tuned)
-        self.assertTrue(style.as_generated().reverse)
+        self.assertTrue(style.is_ramp_reversed)
 
     def test_a_hand_edited_stop_is_hand_tuned(self):
         style = self.style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 42.0, "color": "#ffffff"}])
 
         self.assertTrue(style.is_hand_tuned)
-        self.assertIsNone(style.as_generated())
+        self.assertFalse(style.is_ramp_reversed)
 
     def test_a_hand_edited_colour_is_hand_tuned(self):
         style = self.style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#fffffe"}])
@@ -94,6 +94,15 @@ class ReversedGenerationTests(StylingSurfaceTestCase):
             response.json()["stops"],
             [{"value": 0.0, "color": "#ffffff"}, {"value": 50.0, "color": "#000000"}],
         )
+
+    def test_reverse_reads_like_any_ticked_checkbox(self):
+        forward = self.client.get(self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous"}).json()
+        for ticked in ("1", "true", "on"):
+            with self.subTest(reverse=ticked):
+                stops = self.client.get(
+                    self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous", "reverse": ticked}
+                ).json()["stops"]
+                self.assertEqual(stops[0]["color"], forward["stops"][-1]["color"])
 
     def test_a_reversed_stepped_ramp_keeps_its_class_pairs(self):
         forward = served_ramp_stops(self.org_ramp, self.variable, mode="stepped", steps=3)
@@ -184,3 +193,11 @@ class EditorViewsTests(StylingSurfaceTestCase):
         self.assertNotContains(response, "Apply ramp")
         self.assertNotContains(response, "vs-apply-ramp")
         self.assertContains(response, "Regenerate from ramp (replaces your stops)")
+
+    def test_reverse_is_one_control_the_basic_checkbox(self):
+        self.make_style(stops=[{"value": 0.0, "color": "#000000"}, {"value": 42.0, "color": "#ffffff"}])
+        response = self.client.get(self.form_url)
+
+        self.assertEqual(len(re.findall(r'<input[^>]*name="reverse"', response.content.decode())), 1)
+        self.assertNotContains(response, "vs-reverse-stops")
+        self.assertNotContains(response, "Reverse colors")

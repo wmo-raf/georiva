@@ -12,10 +12,12 @@
 
  Before unsaved work is lost the page asks:
  * leaving the page — the browser's own `beforeunload` prompt;
- * following a link inside a `[data-unsaved-guard]` (the style tabs and
-   "+ New style");
+ * following a link inside a `[data-unsaved-guard]` (the style tabs,
+   "+ New style" and the chooser's "Start from scratch");
  * submitting any form while a *different* guarded form is dirty. Submitting
-   a dirty form itself is its save, so it is not asked about.
+   a dirty form itself is its save, so it is not asked about; nor is a form
+   whose `data-unsaved-discards` names the guarded form it throws away anyway
+   (Delete, which asks its own question about the style).
  A clean page navigates and submits without a prompt.
 
  The functions are defined as the script loads, so the page's own script can
@@ -93,8 +95,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (event.defaultPrevented) {
             return;
         }
+        const discards = event.target.dataset ? event.target.dataset.unsavedDiscards : undefined;
         const others = forms.filter(function (form) {
-            return form !== event.target;
+            return form !== event.target && form.id !== discards;
         });
         if (mayDiscard(others)) {
             leaving = true;

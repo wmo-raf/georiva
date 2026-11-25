@@ -145,24 +145,52 @@ def unique_style_slug(variable, name) -> str:
     return free_slug(slugify(name) or "style", set(variable.styles.values_list("slug", flat=True)))
 
 
+def _new_style(variable, name, **fields) -> VariableStyle:
+    """An unsaved style on ``variable``: its slug minted from ``name``, the
+    default when it is the Variable's first."""
+    return VariableStyle(
+        variable=variable,
+        name=name,
+        slug=unique_style_slug(variable, name),
+        is_default=variable.new_style_is_default,
+        **fields,
+    )
+
+
+def start_from_ramp(ramp, variable, *, mode=VariableStyle.Mode.CONTINUOUS, steps=None) -> VariableStyle:
+    """A new style on ``variable`` from ``ramp`` (#800): named after the ramp,
+    its stops generated over the Variable's current range, the default when it
+    is the Variable's first. ``steps`` counts only when ``mode`` is stepped."""
+    with transaction.atomic():
+        style = _new_style(
+            variable,
+            ramp.name,
+            ramp=ramp,
+            mode=mode,
+            steps=steps if mode == VariableStyle.Mode.STEPPED else None,
+        )
+        style.apply_ramp()
+        style.full_clean()
+        style.save()
+    return style
+
+
 def apply_template(template, variable, *, name=None) -> VariableStyle:
     """A new stepped style on ``variable`` with ``template``'s look.
 
-    The style is the default when it is the Variable's first — the first style
-    is what serves; a later one is promoted from its own tab (#800). The Variable's range and curve are left
-    alone: :func:`proposed_encoding` is a proposal, set by
-    :func:`accept_encoding` only. Raises :class:`ConversionRefused` when the
+    The style is the default when it is the Variable's first
+    (:attr:`Variable.new_style_is_default`); a later one is promoted from its
+    own tab (#800). The Variable's range and curve are left alone:
+    :func:`proposed_encoding` is a proposal, set by :func:`accept_encoding`
+    only. Raises :class:`ConversionRefused` when the
     template's unit does not convert into the Variable's source unit.
     """
     stops = template_stops(template, variable)
     name = name or template.name
     with transaction.atomic():
-        first = not variable.styles.exists()
-        style = VariableStyle(
-            variable=variable,
-            name=name,
-            slug=unique_style_slug(variable, name),
-            is_default=first,
+        style = _new_style(
+            variable,
+            name,
             mode=VariableStyle.Mode.STEPPED,
             steps=len(template.colors),
             stops=stops,

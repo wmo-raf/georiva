@@ -102,14 +102,16 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    what the ramp produced.** The "Apply ramp" button is gone. Changing a style's
    ramp, mode, class count or reverse refills the stops through the same
    read-only endpoint and repaints the map at once — but only while the stops
-   are *as generated*. Nothing records that: `VariableStyle.as_generated()`
+   are *as generated*. Nothing records that: `VariableStyle.is_hand_tuned`
    regenerates the saved ramp, mode and steps over the Variable's current range,
    forwards and reversed, and compares to the stored stops. Anything else is
    *tuned*: a style applied from a template always is, and so is a ramp style
    after a range change, which errs on the safe side. Tuned stops — saved that
    way, or edited in the page, which makes them tuned for the rest of that
    session — are never replaced by a ramp change; only an explicit, confirmed
-   "Regenerate from ramp (replaces your stops)" replaces them. The rule above,
+   "Regenerate from ramp (replaces your stops)" replaces them. Reverse is the
+   one exception, and the one reverse control: on tuned stops it reverses their
+   colours in place, since reversing the snapshot keeps every tuned value. The rule above,
    that nothing silently overwrites tuning, holds unchanged. Nothing is written
    until Save.
 

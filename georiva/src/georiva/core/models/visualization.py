@@ -1,5 +1,4 @@
 import math
-from typing import NamedTuple
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
@@ -227,12 +226,6 @@ def _same_stops(a: list, b: list) -> bool:
         if not math.isclose(x["value"], y["value"], rel_tol=1e-9, abs_tol=1e-9):
             return False
     return True
-
-
-class AsGenerated(NamedTuple):
-    """How a style's stops are still exactly what its ramp produces."""
-
-    reverse: bool
 
 
 class ColorRamp(ClusterableModel):
@@ -793,9 +786,10 @@ class VariableStyle(TimeStampedModel):
             served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps, reverse=reverse)
         )
 
-    def as_generated(self):
-        """How the stops are still what the style's ramp produces, or ``None``
-        when they have been tuned by hand (#801, ADR 0022 amendment).
+    def _generated_reversed(self):
+        """Whether the stops are what the style's ramp produces forwards
+        (``False``) or reversed (``True``), or ``None`` when they have been
+        tuned by hand (#801, ADR 0022 amendment).
 
         Nothing records tuning: the saved ramp, mode and steps are regenerated
         over the Variable's *current* range, forwards and reversed, and
@@ -810,15 +804,21 @@ class VariableStyle(TimeStampedModel):
         stored = variable.served_stops(self.stops)
         generated = served_ramp_stops(self.ramp, variable, mode=self.mode, steps=self.steps)
         if _same_stops(stored, generated):
-            return AsGenerated(reverse=False)
+            return False
         if _same_stops(stored, reversed_colors(generated)):
-            return AsGenerated(reverse=True)
+            return True
         return None
 
     @property
     def is_hand_tuned(self) -> bool:
         """Whether a ramp change must ask before replacing these stops."""
-        return self.as_generated() is None
+        return self._generated_reversed() is None
+
+    @property
+    def is_ramp_reversed(self) -> bool:
+        """Whether the stops are the style's ramp generated reversed — what the
+        editor's "Reverse" box opens ticked for. Hand-tuned stops never are."""
+        return self._generated_reversed() is True
 
     # -------- runtime conversion helpers --------
 

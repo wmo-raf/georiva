@@ -903,8 +903,10 @@
                                     </button>
                                 </form>
                             {% endif %}
+                            {# Deleting throws the style's unsaved edits away too, so the unsaved guard leaves its confirm to ask alone. #}
                             <form method="post" action="{{ form_url }}"
-                                  data-confirm="{% trans 'Delete this style?' %}">
+                                  data-confirm="{% trans 'Delete this style?' %}"
+                                  data-unsaved-discards="vs-style-form">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="delete-style">
                                 <input type="hidden" name="style_slug" value="{{ selected.slug }}">
@@ -1019,6 +1021,16 @@
                             <label for="{{ style_form.steps.id_for_label }}">{% trans "Classes" %}</label>
                             {{ style_form.steps }}
                         </div>
+                        {% comment %}
+                            The one reverse control (#801). On stops as the
+                            ramp generated them it regenerates them reversed;
+                            on tuned stops it reverses their colours in place.
+                            It lives with the basic controls rather than in a
+                            ramp menu, where QGIS puts it: there the ramp is the
+                            live style, but under ADR 0022 it is only a seed and
+                            the snapshot is the truth — so reversing reverses
+                            hand-tuned stops and pinned thresholds too.
+                        {% endcomment %}
                         <div class="vs-field vs-reverse-field">
                             <label class="vs-reverse-label">
                                 {{ style_form.reverse }}
@@ -1036,7 +1048,7 @@
                     {% endcomment %}
                     <div class="vs-regenerate" id="vs-regenerate-row" hidden>
                         <p class="help-text">
-                            {% trans "These stops are tuned by hand, so changing the ramp, rendering, classes or reverse leaves them as they are." %}
+                            {% trans "These stops are tuned by hand, so changing the ramp, rendering or classes leaves them as they are, and Reverse reverses their colors in place." %}
                         </p>
                         <button type="button" class="button button-small button-secondary" id="vs-regenerate"
                                 data-confirm="{% trans 'Replace your stops with stops generated from this ramp? Your tuning is lost when you save.' %}">
@@ -1129,17 +1141,6 @@
                     </template>
                     <div class="vs-stop-tools">
                         <button type="button" class="button button-small button-secondary" id="vs-add-stop">{% trans "Add stop" %}</button>
-                        {% comment %}
-                            Reversal lives here rather than in the ramp menu,
-                            where QGIS puts it. There the ramp is the live
-                            style; under ADR 0022 it is only a seed and the
-                            snapshot is the truth — so reversing the snapshot
-                            reverses hand-tuned stops and pinned thresholds
-                            too, not only freshly generated ones.
-                        {% endcomment %}
-                        <button type="button" class="button button-small button-secondary" id="vs-reverse-stops">
-                            {% trans "Reverse colors" %}
-                        </button>
                         <button type="button" class="button button-small button-secondary" id="vs-json-toggle"
                                 aria-expanded="false" aria-controls="vs-json-panel">
                             {% trans "Edit as JSON" %}
@@ -1391,11 +1392,11 @@
              `stopsTuned`: whether the stops in the table are no longer what the
              ramp produced (#801). The server says so on load — it regenerates
              the saved ramp, mode and steps over the current range and compares
-             (VariableStyle.as_generated) — and any edit to a stop here sets it
+             (VariableStyle.is_hand_tuned) — and any edit to a stop here sets it
              for the rest of the session. While it is false, a change to the
              ramp, mode, classes or reverse regenerates the stops at once; once
              it is true, nothing replaces them but the confirmed "Regenerate
-             from ramp" (ADR 0022).
+             from ramp" (ADR 0022), and Reverse reverses them in place.
 
              `styleDirty`: anything on this form that the database has not been
              told about. Regenerating writes nothing, and the swatch in the
@@ -1913,13 +1914,14 @@
 
             /**
              Reverse the colors against fixed values, which is what "reverse a
-             ramp" means once the ramp has been applied. Stepped snapshots
-             survive it because they are a list of doubled class colors, and
-             reversing a doubled list is still a doubled list — the class
-             boundaries stay paired and the values stay ascending.
+             ramp" means once the ramp has been applied — what the Reverse box
+             does to tuned stops. Stepped snapshots survive it because they are
+             a list of doubled class colors, and reversing a doubled list is
+             still a doubled list — the class boundaries stay paired and the
+             values stay ascending.
              **/
 
-            document.getElementById('vs-reverse-stops').addEventListener('click', function () {
+            function reverseStopsInPlace() {
                 const rows = [...body.querySelectorAll('.vs-stop-row')];
                 const colors = rows.map(function (row) {
                     return row.querySelector('[name="stop_color"]').value;
@@ -1933,7 +1935,7 @@
                 if (classModel) {
                     chooseEditor();
                 }
-            });
+            }
 
             /**
              The same rows as JSON, for pasting a scale in or copying one out.
@@ -2387,7 +2389,15 @@
                     stepsTimer = setTimeout(rampInputsChanged, 300);
                 }
             });
-            reverseInput.addEventListener('change', rampInputsChanged);
+            // Stops as generated follow the box like any ramp input; tuned
+            // ones (or stops with no ramp behind them) reverse in place.
+            reverseInput.addEventListener('change', function () {
+                if (!stopsTuned && rampInput.value) {
+                    rampInputsChanged();
+                } else {
+                    reverseStopsInPlace();
+                }
+            });
             [underSelect, overSelect].forEach(function (select) {
                 select.addEventListener('change', function () {
                     styleDirty = true;

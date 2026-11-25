@@ -507,6 +507,14 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         return None
 
     @property
+    def new_style_is_default(self) -> bool:
+        """Whether a style added now becomes the default: only the first does,
+        since the first style is what serves; later ones stage until promoted.
+        So only that style may also set the range and curve every style
+        shares (#791, #800). Reads prefetched styles without a query."""
+        return not self.styles.exists()
+
+    @property
     def weather_layers_palette(self):
         """The default style's snapshot for WeatherLayers, with grayscale fallback."""
         style = self.default_style

@@ -101,6 +101,13 @@ class VariableRangeForm(forms.Form):
         return cleaned
 
 
+def require_steps_when_stepped(form, cleaned):
+    """The one rule every ramp-generating form shares: stepped mode needs a
+    number of classes."""
+    if cleaned.get("mode") == VariableStyle.Mode.STEPPED and not cleaned.get("steps"):
+        form.add_error("steps", _("Stepped mode needs a number of classes."))
+
+
 class VariableStyleForm(forms.Form):
     """The style's own fields; the stops travel beside it as row inputs."""
 
@@ -110,7 +117,7 @@ class VariableStyleForm(forms.Form):
     steps = forms.IntegerField(required=False, min_value=2)
     # Runs the ramp's colours the other way over the same values. Not stored:
     # the stops are the style, and whether they read as the ramp reversed is
-    # worked out from them (``VariableStyle.as_generated``, #801).
+    # worked out from them (``VariableStyle.is_ramp_reversed``, #801).
     reverse = forms.BooleanField(required=False)
     # What values beyond the stops are drawn as (#788); a post without them
     # keeps today's behaviour, clamping.
@@ -123,8 +130,7 @@ class VariableStyleForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        if cleaned.get("mode") == VariableStyle.Mode.STEPPED and not cleaned.get("steps"):
-            self.add_error("steps", _("Stepped mode needs a number of classes."))
+        require_steps_when_stepped(self, cleaned)
         return cleaned
 
 
@@ -143,9 +149,15 @@ class RampStartForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        if cleaned.get("mode") == VariableStyle.Mode.STEPPED and not cleaned.get("steps"):
-            self.add_error("steps", _("Stepped mode needs a number of classes."))
+        require_steps_when_stepped(self, cleaned)
         return cleaned
+
+
+class RampStopsForm(RampStartForm):
+    """What the generator endpoint reads (#801): a ramp start, plus whether to
+    run its colours the other way."""
+
+    reverse = forms.BooleanField(required=False)
 
 
 def _stop_rows(post):
@@ -545,11 +557,11 @@ def variable_styling(request, collection_pk, variable_pk):
     # Whether the saved stops are still what the style's ramp produces (#801):
     # while they are, ramp changes regenerate them live; once tuned, only a
     # confirmed "Regenerate from ramp" replaces them.
-    as_generated = selected.as_generated() if selected else None
+    hand_tuned = selected.is_hand_tuned if selected else True
     style_form = VariableStyleForm(
         ramp_queryset=ramp_queryset,
         initial={
-            "reverse": bool(as_generated and as_generated.reverse),
+            "reverse": bool(selected and selected.is_ramp_reversed),
             "name": selected.name if selected else "",
             "ramp": selected.ramp_id if selected else None,
             "mode": selected.mode if selected else VariableStyle.Mode.CONTINUOUS,
@@ -584,9 +596,7 @@ def variable_styling(request, collection_pk, variable_pk):
                     style = VariableStyle(
                         variable=variable,
                         slug=style_application.unique_style_slug(variable, data["name"]),
-                        # The first style is what serves, so it is the default;
-                        # later ones stage until explicitly promoted.
-                        is_default=not styles,
+                        is_default=variable.new_style_is_default,
                     )
                 else:
                     style = selected
@@ -625,9 +635,9 @@ def variable_styling(request, collection_pk, variable_pk):
                 messages.error(request, _("Pick a Style template to apply."))
                 return redirect(style_url())
             # The range and curve are shared by every style, so only the style
-            # that will be the default — the first — may set them (#791), and
-            # only when the operator ticks to (#800). Posted otherwise, ignored.
-            take_encoding = not styles and bool(request.POST.get("accept_encoding"))
+            # that will be the default may set them (#791), and only when the
+            # operator ticks to (#800). Posted otherwise, ignored.
+            take_encoding = variable.new_style_is_default and bool(request.POST.get("accept_encoding"))
             try:
                 with transaction.atomic():
                     style = style_application.apply_template(template, variable)
@@ -645,16 +655,12 @@ def variable_styling(request, collection_pk, variable_pk):
                     % {"template": template.name, "why": " ".join(invalid.messages)},
                 )
                 return redirect(style_url())
-            if take_encoding:
-                messages.success(
-                    request,
-                    _('Applied the "%(template)s" template as a new style, with its range and curve.')
-                    % {"template": template.name},
-                )
-            else:
-                messages.success(
-                    request, _('Applied the "%(template)s" template as a new style.') % {"template": template.name}
-                )
+            applied = (
+                _('Applied the "%(template)s" template as a new style, with its range and curve.')
+                if take_encoding
+                else _('Applied the "%(template)s" template as a new style.')
+            )
+            messages.success(request, applied % {"template": template.name})
             for warning in style_application.warnings(template, variable, style_application.current_encoding(variable)):
                 messages.warning(request, warning)
             return redirect(style_url(style))
@@ -666,21 +672,8 @@ def variable_styling(request, collection_pk, variable_pk):
                     messages.error(request, " ".join(error))
                 return redirect(style_url())
             data = ramp_form.cleaned_data
-            name = data["ramp"].name
-            style = VariableStyle(
-                variable=variable,
-                name=name,
-                slug=style_application.unique_style_slug(variable, name),
-                # The first style is what serves, so it is the default.
-                is_default=not styles,
-                ramp=data["ramp"],
-                mode=data["mode"],
-                steps=data["steps"] if data["mode"] == VariableStyle.Mode.STEPPED else None,
-            )
-            style.apply_ramp()
-            style.full_clean()
-            style.save()
-            messages.success(request, _('Started a style from the "%(ramp)s" ramp.') % {"ramp": name})
+            style = style_application.start_from_ramp(data["ramp"], variable, mode=data["mode"], steps=data["steps"])
+            messages.success(request, _('Started a style from the "%(ramp)s" ramp.') % {"ramp": style.name})
             return redirect(style_url(style))
 
         elif action == "promote":
@@ -726,7 +719,7 @@ def variable_styling(request, collection_pk, variable_pk):
     if style_form.is_bound:
         stops_tuned = bool(stop_rows)
     else:
-        stops_tuned = bool(stop_rows) and as_generated is None
+        stops_tuned = bool(stop_rows) and hand_tuned
 
     context = {
         "breadcrumbs_items": [
@@ -766,6 +759,7 @@ def variable_styling(request, collection_pk, variable_pk):
         "new_style_url": style_url(),
         "grayscale_gradient": GRAYSCALE_GRADIENT,
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,
+        "mode_choices": VariableStyle.Mode.choices,
         "preview": _preview_context(variable),
         "show_chooser": show_chooser,
         "scratch": scratch,
@@ -779,9 +773,9 @@ def variable_styling(request, collection_pk, variable_pk):
             if show_chooser
             else None
         ),
-        # Only the style that will be the default — the first — may take a
-        # template's range and curve (#791, #800).
-        "offer_template_encoding": not styles,
+        # Only the style that will be the default may take a template's range
+        # and curve (#791, #800).
+        "offer_template_encoding": variable.new_style_is_default,
     }
     return render(request, "core/variable_styling.html", context)
 
@@ -805,34 +799,18 @@ def variable_style_stops(request, collection_pk, variable_pk):
     collection = get_org_object_or_404(request, Collection, pk=collection_pk)
     variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
 
-    try:
-        ramp_pk = int(request.GET.get("ramp", ""))
-    except ValueError:
-        ramp_pk = None
-    ramp = (
-        scoped_queryset(request, ColorRamp.objects.prefetch_related("stops")).filter(pk=ramp_pk).first()
-        if ramp_pk
-        else None
+    params = request.GET.copy()
+    params.setdefault("mode", VariableStyle.Mode.CONTINUOUS)
+    stops_form = RampStopsForm(
+        params, ramp_queryset=scoped_queryset(request, ColorRamp.objects.prefetch_related("stops"))
     )
-    if ramp is None:
-        return JsonResponse({"error": _("Pick a ramp to apply.")}, status=400)
-
-    mode = request.GET.get("mode", VariableStyle.Mode.CONTINUOUS)
-    if mode not in VariableStyle.Mode.values:
-        return JsonResponse({"error": _("Unknown rendering mode.")}, status=400)
-
-    steps = None
-    if mode == VariableStyle.Mode.STEPPED:
-        try:
-            steps = int(request.GET.get("steps", ""))
-        except ValueError:
-            steps = 0
-        if steps < 2:
-            return JsonResponse({"error": _("Stepped mode needs at least two classes.")}, status=400)
-
-    reverse_colors = request.GET.get("reverse") in ("1", "true", "on")
+    if not stops_form.is_valid():
+        first_error = next(iter(stops_form.errors.values()))[0]
+        return JsonResponse({"error": first_error}, status=400)
+    data = stops_form.cleaned_data
+    steps = data["steps"] if data["mode"] == VariableStyle.Mode.STEPPED else None
     return JsonResponse(
         {
-            "stops": served_ramp_stops(ramp, variable, mode=mode, steps=steps, reverse=reverse_colors),
+            "stops": served_ramp_stops(data["ramp"], variable, mode=data["mode"], steps=steps, reverse=data["reverse"]),
         }
     )

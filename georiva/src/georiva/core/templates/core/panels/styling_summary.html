@@ -4,7 +4,7 @@
 {% else %}
     <p>
         <span class="w-help-text">{% trans "Range:" %}</span>
-        {{ served_min }} &ndash; {{ served_max }} {{ variable.unit.symbol }}
+        {{ served_min }} &ndash; {{ served_max }} {{ variable.unit.symbol }}, {{ variable.get_scale_type_display|lower }}
         {{ swatch }}
         {% if default_style %}
             <span class="w-help-text">{{ default_style.name }}</span>
@@ -12,5 +12,10 @@
             <span class="w-help-text">{% trans "Grayscale — no style applied yet" %}</span>
         {% endif %}
     </p>
-    <p><a href="{{ styling_url }}">{% trans "Edit styling" %}</a></p>
+    <p class="w-help-text">{% trans "The range and curve are shared by every style of this variable." %}</p>
+    <p>
+        <a href="{{ styling_url }}">
+            {% if default_style %}{% trans "Edit styling" %}{% else %}{% trans "Set up styling" %}{% endif %}
+        </a>
+    </p>
 {% endif %}
