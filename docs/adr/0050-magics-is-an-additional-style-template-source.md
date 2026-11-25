@@ -56,4 +56,9 @@ commit, translated as Magics draws them.**
   than lists, levels by count, a level or colour Magics itself cannot read (it would draw red).
 - Refreshing is a new pin in `catalogue.yml`, a regenerated JSON file beside the old one and a migration that loads
   it, as for earthkit-plots.
+- The two generators share `georiva/scripts/style_sources.py`: fetching a pinned GitHub commit, the catalogue's
+  envelope and source block, the command line and the `Skip` a style is left out with. Only reading and translating
+  an upstream differ.
+- A further source is one `StyleTemplate.Origin` entry (its operator-facing label), its catalogue file and the
+  migration that loads it. `origin` stays a plain `CharField`, not one with choices: only `load_catalogue` writes it.
 - `NOTICE` carries the Magics attribution (Apache-2.0).

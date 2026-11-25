@@ -453,6 +453,18 @@ class StyleTemplate(TimeStampedModel):
     ORGANISATION_LOOKUP = "organisation"
     ORGANISATION_GLOBAL_TIER = True
 
+    class Origin(models.TextChoices):
+        """The shipped catalogues, by the source name their catalogue file gives
+        (``origin``), with the label an operator sees. A new source is one entry
+        here, its catalogue file and the migration that loads it.
+
+        Not the field's ``choices``: only :func:`~georiva.core.style_catalogue.load_catalogue`
+        writes ``origin``, never a form, so choices would validate nothing and
+        would cost a migration for every new source."""
+
+        EARTHKIT_PLOTS = "earthkit-plots", "earthkit-plots"
+        MAGICS = "magics", "Magics"
+
     class Quantity(models.TextChoices):
         TEMPERATURE = "temperature", "Temperature"
         PRECIPITATION = "precipitation", "Precipitation"
@@ -626,16 +638,14 @@ class StyleTemplate(TimeStampedModel):
 
     owner_label.short_description = "Owner"
 
-    #: How a shipped catalogue is named to an operator, by ``origin``.
-    ORIGIN_LABELS = {"earthkit-plots": "earthkit-plots", "magics": "Magics"}
-
     def source_label(self):
         """Where a shipped template comes from and the upstream style it was
         converted from, "Magics · sh_blured_f05t300lst"; empty for one an
-        organisation authored (#811)."""
+        organisation authored (#811). An origin :class:`Origin` does not know
+        reads as it is stored."""
         if not self.is_shipped:
             return ""
-        origin = self.ORIGIN_LABELS.get(self.origin, self.origin)
+        origin = self.Origin(self.origin).label if self.origin in self.Origin.values else self.origin
         return f"{origin} · {self.source_name}" if self.source_name else origin
 
     source_label.short_description = "Source"
