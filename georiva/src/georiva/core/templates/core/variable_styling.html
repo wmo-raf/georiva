@@ -583,6 +583,21 @@
             margin: 0.75rem 0;
         }
 
+        .vs-save-bar {
+            position: sticky;
+            bottom: 0;
+            z-index: 2;
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+            padding: 0.75rem 0;
+            border-top: 1px solid var(--w-color-border-furniture);
+            background: var(--w-color-surface-page);
+        }
+
         .vs-json-status {
             font-size: 0.85em;
             color: var(--w-color-text-meta);
@@ -796,7 +811,7 @@
                 below holds is never in doubt. Each is a link: picking a style
                 is a page load, as it always was.
             {% endcomment %}
-            <nav class="vs-style-tabs" aria-label="{% trans 'Styles' %}">
+            <nav class="vs-style-tabs" aria-label="{% trans 'Styles' %}" data-unsaved-guard>
                 <ul class="vs-style-tab-list">
                     {% for style in styles %}
                         <li>
@@ -876,7 +891,9 @@
                     </p>
                 {% endif %}
 
-                <form method="post" action="{{ form_url }}" id="vs-style-form">
+                <form method="post" action="{{ form_url }}" id="vs-style-form"
+                      data-unsaved-note="vs-unsaved"
+                      data-unsaved-message="{% trans 'This style has unsaved changes.' %}">
                     {% csrf_token %}
                     <input type="hidden" name="style_slug"
                            value="{% if creating %}{% else %}{{ selected.slug }}{% endif %}">
@@ -1120,9 +1137,6 @@
                     </div>
 
                     <div class="vs-actions">
-                        <button type="submit" name="action" value="save-style" class="button">
-                            {% trans "Save style" %}
-                        </button>
                         {% comment %}
                             Applying a ramp fills the table above from the
                             server's own generator and repaints the map — it
@@ -1134,9 +1148,6 @@
                                 data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
                             {% trans "Apply ramp" %}
                         </button>
-                        <p class="vs-unsaved" id="vs-unsaved" hidden>
-                            {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
-                        </p>
                     </div>
                     <ul class="vs-errors" id="vs-apply-error" hidden
                         data-pick-ramp="{% trans 'Pick a ramp to apply.' %}"
@@ -1144,6 +1155,21 @@
                     <p class="help-text">
                         {% trans "“Apply ramp” regenerates the stops from the selected ramp over the variable's saved range and shows them on the map. Nothing is written until you save." %}
                     </p>
+
+                    {% comment %}
+                        The one "Save style" (#802), pinned to the foot of the
+                        viewport while the form runs past it, so saving is in
+                        reach however tall the stops table grows. Keep it last
+                        in the form.
+                    {% endcomment %}
+                    <div class="vs-save-bar" id="vs-save-bar">
+                        <p class="vs-unsaved" id="vs-unsaved" hidden>
+                            {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
+                        </p>
+                        <button type="submit" name="action" value="save-style" class="button">
+                            {% trans "Save style" %}
+                        </button>
+                    </div>
                 </form>
             </section>
 
@@ -1168,7 +1194,9 @@
                         {{ variable.get_scale_type_display|lower }}
                     </span>
                 </summary>
-                <form method="post" action="{{ form_url }}">
+                <form method="post" action="{{ form_url }}"
+                      data-unsaved-note="vs-range-unsaved"
+                      data-unsaved-message="{% trans 'The range and curve have unsaved changes.' %}">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="save-range">
                     {% if selected %}
@@ -1292,6 +1320,8 @@
     <script src="{% static 'js/colour_table.js' %}"></script>
     <script src="{% static 'js/raster_preview.js' %}"></script>
     <script src="{% static 'core/js/stepped_classes.js' %}"></script>
+    <script src="{% static 'core/js/unsaved_guard.js' %}"
+            data-confirm-suffix="{% trans 'Discard them and continue?' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const form = document.getElementById('vs-style-form');
@@ -1315,7 +1345,6 @@
             const mapStatus = document.getElementById('vs-map-status');
             const applyButtons = [...document.querySelectorAll('.vs-apply-ramp')];
             const applyError = document.getElementById('vs-apply-error');
-            const unsavedNote = document.getElementById('vs-unsaved');
 
             /**
              Two pieces of state the page keeps about itself.
@@ -1355,7 +1384,11 @@
                 applyButtons.forEach(function (button) {
                     button.hidden = !changed;
                 });
-                unsavedNote.hidden = !styleDirty;
+                // Shown only, never hidden here: the guard (#802) may have
+                // marked the form dirty from an edit this script does not track.
+                if (styleDirty) {
+                    window.markStyleDirty();
+                }
             }
 
             function markStopsEdited() {
@@ -1451,7 +1484,6 @@
 
             const rangeHint = document.getElementById('vs-range-hint');
             const rangeHintText = document.getElementById('vs-range-hint-text');
-            const rangeUnsaved = document.getElementById('vs-range-unsaved');
             const rangeMinInput = document.querySelector('input[name="value_min"]');
             const rangeMaxInput = document.querySelector('input[name="value_max"]');
             const styleSpansEl = document.getElementById('vs-style-spans');
@@ -1519,12 +1551,12 @@
                     }
                     rangeMinInput.value = fitted[0];
                     rangeMaxInput.value = fitted[1];
-                    rangeUnsaved.hidden = false;
+                    window.markRangeDirty();
                     updateRangeHint(readStops());
                 });
                 [rangeMinInput, rangeMaxInput].forEach(function (input) {
                     input.addEventListener('input', function () {
-                        rangeUnsaved.hidden = false;
+                        window.markRangeDirty();
                         updateRangeHint(readStops());
                     });
                 });
