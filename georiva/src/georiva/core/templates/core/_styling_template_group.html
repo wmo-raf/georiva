@@ -4,7 +4,8 @@
     the ones whose unit does not convert: disabled, with the reason.
 
     ``in_place`` is a template style's own editor (#807): the style's template
-    comes checked and none is required, since keeping it is the usual save.
+    (or the one a rejected save picked, #810) comes checked and none is
+    required, since keeping it is the usual save.
     Each offered row carries its stops and out-of-range settings, so picking
     it repaints the preview before anything is saved.
 {% endcomment %}
@@ -14,7 +15,7 @@
         {% for template in group.templates %}
             <li>
                 <label class="vs-template{% if excluded %} vs-template--excluded{% endif %}">
-                    <input type="radio" name="template" value="{{ template.pk }}"{% if excluded %} disabled{% else %} data-stops="{{ template.stops_json }}" data-under="{{ template.under }}" data-over="{{ template.over }}"{% if in_place %}{% if template.pk == selected.template_id %} checked{% endif %}{% else %} required{% endif %}{% endif %}>
+                    <input type="radio" name="template" value="{{ template.pk }}"{% if excluded %} disabled{% else %} data-stops="{{ template.stops_json }}" data-under="{{ template.under }}" data-over="{{ template.over }}"{% if in_place %}{% if template.pk == picked_template_id %} checked{% endif %}{% else %} required{% endif %}{% endif %}>
                     <span class="vs-template-name">{{ template.name }}</span>
                     {# The bands are data: their colours are the template's. #}
                     <span class="vs-template-swatch" style="background: {{ template.gradient }};"></span>

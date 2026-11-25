@@ -58,26 +58,33 @@
          * Wagtail's default: text, number and select inputs in the chooser,
          * the editors, the stops and classes tables and the range section.
          * Scoped to .vs-layout, so Wagtail's inputs elsewhere are untouched.
+         *
+         * One height for all of them (#810): a fixed border-box height with
+         * no vertical padding, the text centred by its line-height, so an
+         * input, a select and a stops-table cell cannot differ by a padding
+         * or a min-height Wagtail sets for its own larger fields.
          */
         .vs-layout input[type="text"],
         .vs-layout input[type="number"],
         .vs-layout select {
+            box-sizing: border-box;
+            block-size: 2rem;
             min-height: 2rem;
+            padding-block: 0;
+            line-height: calc(2rem - 2px);
             font-size: 0.875rem;
             border-radius: 4px;
         }
 
         .vs-layout input[type="text"],
         .vs-layout input[type="number"] {
-            padding: 0.25rem 0.5rem;
-            line-height: 1.4;
+            padding-inline: 0.5rem;
         }
 
         /* Wagtail draws a select's chevron as two background gradients,
            placed for its own height: re-place them for this one. */
         .vs-layout select {
-            padding: 0 2rem 0 0.5rem;
-            line-height: calc(2rem - 2px);
+            padding-inline: 0.5rem 2rem;
             background-position-x: calc(100% - 1rem), calc(100% - 0.625rem);
             background-position-y: 0.8125rem, 0.8125rem;
         }
@@ -590,12 +597,14 @@
            input; the save button below them (#808). */
         .vs-range-fields {
             flex-direction: column;
-            align-items: stretch;
+            align-items: flex-start;
             gap: 0.75rem;
         }
 
+        /* A number's width, not half the card (#810). */
         .vs-range-fields > .vs-field {
-            max-inline-size: 18rem;
+            inline-size: 12rem;
+            max-inline-size: 100%;
         }
 
         .vs-range-fields > .button {
@@ -666,6 +675,47 @@
 
         .vs-template-source > p {
             margin: 0 0 0.5rem;
+        }
+
+        /* "Change template" (#810): the template in use on one line, the
+           toggle's chevron before it and its label at the end. */
+        .vs-template-current {
+            flex-wrap: wrap;
+            gap: 0.25rem 0.6rem;
+            padding: 0.4rem 0.5rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 5px;
+        }
+
+        .vs-template-current .vs-template-name {
+            font-weight: 600;
+        }
+
+        .vs-template-current .vs-template-swatch {
+            inline-size: 120px;
+        }
+
+        .vs-template-current .vs-template-swatch[hidden] {
+            display: none;
+        }
+
+        .vs-template-current .vs-template-levels {
+            color: var(--w-color-text-meta);
+            font-size: 0.85em;
+        }
+
+        .vs-template-change-label {
+            margin-inline-start: auto;
+            color: var(--w-color-text-link-default);
+            font-size: 0.9em;
+        }
+
+        .vs-template-current:hover .vs-template-change-label {
+            text-decoration: underline;
+        }
+
+        .vs-template-change[open] > .vs-template-current {
+            margin-block-end: 0.75rem;
         }
 
         .vs-out-of-range {
@@ -2392,6 +2442,20 @@
              carries them, so nothing is fetched; Save writes them. The guard
              sees the change itself, as it does any input in this form.
              **/
+            /**
+             "Change template"'s closed line (#810) names the template the
+             form will save: the picked one, copied from its row.
+             **/
+            const showPickedTemplate = function (radio) {
+                const row = radio.closest('.vs-template');
+                const swatch = document.getElementById('vs-template-current-swatch');
+                document.getElementById('vs-template-current-name').textContent =
+                    row.querySelector('.vs-template-name').textContent;
+                document.getElementById('vs-template-current-levels').textContent =
+                    row.querySelector('.vs-template-levels').textContent.split(' · ')[0];
+                swatch.style.background = row.querySelector('.vs-template-swatch').style.background;
+                swatch.hidden = false;
+            };
             if (origin === 'template') {
                 form.querySelectorAll('input[name="template"][data-stops]').forEach(function (radio) {
                     radio.addEventListener('change', function () {
@@ -2404,6 +2468,7 @@
                         });
                         underSelect.value = radio.dataset.under;
                         overSelect.value = radio.dataset.over;
+                        showPickedTemplate(radio);
                         markStopsEdited();
                         renderPreview();
                     });

@@ -822,6 +822,12 @@ def variable_styling(request, collection_pk, variable_pk):
         (ramp for group in ramp_groups for ramp in group["ramps"] if ramp["selected"]),
         None,
     )
+    # A template style's picker (#807, #810): its own template checked, unless
+    # a rejected save picked another, which comes back checked with "Change
+    # template" open.
+    picked_template_id = selected.template_id if selected else None
+    if origin == VariableStyle.Origin.TEMPLATE and request.method == "POST":
+        picked_template_id = _int_or_none(request.POST.get("template")) or picked_template_id
 
     context = {
         "breadcrumbs_items": [
@@ -876,6 +882,11 @@ def variable_styling(request, collection_pk, variable_pk):
             else None
         ),
         "offer_template_encoding": offer_template_encoding,
+        "picked_template_id": picked_template_id,
+        # Open, too, when the style's template no longer exists: there is
+        # nothing to show closed.
+        "template_change_open": bool(selected)
+        and (selected.template_id is None or picked_template_id != selected.template_id),
     }
     return render(request, "core/variable_styling.html", context)
 

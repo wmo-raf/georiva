@@ -284,3 +284,57 @@ class InPlaceTemplateSwitchTests(SwitchTestCase):
         self.save(style, template=self.template.pk, accept_encoding="on")
 
         self.assertEqual(self.encoding(), (0, 50))
+
+
+class ChangeTemplateDisclosureTests(SwitchTestCase):
+    """A template style shows only its template until "Change template" is opened (#810)."""
+
+    def disclosure(self, response):
+        editor = self.editor(response)
+        match = re.search(r'<details[^>]*id="vs-template-change".*?</details>\s*</fieldset>', editor, re.S)
+        self.assertIsNotNone(match, "no Change template disclosure in the editor")
+        return match.group(0)
+
+    def summary(self, disclosure):
+        return re.search(r"<summary.*?</summary>", disclosure, re.S).group(0)
+
+    def is_open(self, disclosure):
+        return re.match(r"<details[^>]*\sopen[\s>]", disclosure) is not None
+
+    def rejected_save(self, style, template):
+        # No name: the form refuses it and the editor comes back.
+        response = self.client.post(
+            self.form_url, {"action": "save-style", "style_slug": style.slug, "name": "", "template": template.pk}
+        )
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def test_the_current_template_shows_on_one_closed_line(self):
+        disclosure = self.disclosure(self.page(self.template_style()))
+
+        self.assertFalse(self.is_open(disclosure))
+        summary = self.summary(disclosure)
+        self.assertIn("House bands", summary)
+        self.assertIn("vs-template-swatch", summary)
+        self.assertIn("0, 10, 20", summary)
+        self.assertIn("Change template", summary)
+        self.assertNotIn('name="template"', summary)
+
+    def test_the_catalogue_and_range_checkbox_are_behind_the_toggle(self):
+        disclosure = self.disclosure(self.page(self.template_style()))
+
+        self.assertRegex(disclosure, rf'name="template" value="{self.other_template.pk}"')
+        self.assertIn('name="accept_encoding"', disclosure)
+
+    def test_it_opens_on_a_rejected_save_with_another_template_picked(self):
+        response = self.rejected_save(self.template_style(), self.other_template)
+
+        disclosure = self.disclosure(response)
+        self.assertTrue(self.is_open(disclosure))
+        self.assertRegex(disclosure, rf'value="{self.other_template.pk}"[^>]* checked')
+        self.assertNotRegex(disclosure, rf'value="{self.template.pk}"[^>]* checked')
+
+    def test_it_stays_closed_on_a_rejected_save_that_kept_the_template(self):
+        response = self.rejected_save(self.template_style(), self.template)
+
+        self.assertFalse(self.is_open(self.disclosure(response)))
