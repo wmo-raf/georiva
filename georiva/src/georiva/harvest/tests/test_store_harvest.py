@@ -41,6 +41,7 @@ CATALOG = "https://stac.upstream.example/catalog.json"
 STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
 STORE_HOST = "dynamical-noaa-gfs.s3.us-west-2.amazonaws.com"
 STORE_TYPE = "application/x-icechunk"
+WEB_PLACE = "https://wn.dynamical.org/chunks/"
 FORECAST = {"init_time": None, "lead_time": 209, "latitude": 721, "longitude": 1440}
 RUN_STEP_GRID = ("init_time", "lead_time", "latitude", "longitude")
 WHOLE_FIELD = (1, 1, 721, 1440)
@@ -391,6 +392,43 @@ class StoreMirrorTests(StoreFeedMixin, TestCase):
         self.assertEqual(failed.status, FetchRun.Status.FAILED)
         self.assertIn("private", failed.error_message)
         self.assertIn("store address refused", result.stop_reason)
+
+    def test_a_web_place_whose_host_now_resolves_to_a_private_address_stops_the_harvest(self):
+        # Judged as the store's own address is, at every harvest: DNS may answer otherwise later (#828).
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations={WEB_PLACE: ""})
+        self.feed.refresh_from_db()
+        self.upstream.addresses["wn.dynamical.org"] = ["10.0.0.7"]
+        self.hold("temperature_2m", 0, 3)
+
+        result = self.harvest()
+
+        self.assertEqual(self.upstream.steps_asked, [], "the store is not opened")
+        self.assertFalse(Asset.objects.exists())
+        self.assertIn("private", FetchRun.objects.get().error_message)
+        self.assertIn("data place refused", result.stop_reason)
+
+    def test_a_web_place_that_now_sends_its_reader_elsewhere_stops_the_harvest(self):
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations={WEB_PLACE: ""})
+        self.feed.refresh_from_db()
+        self.upstream.web_refusals[WEB_PLACE] = "it sends readers on to another address (https://elsewhere.example/)"
+        self.hold("temperature_2m", 0, 3)
+
+        result = self.harvest()
+
+        self.assertFalse(Asset.objects.exists())
+        self.assertIn("sends readers on to another address", FetchRun.objects.get().error_message)
+        self.assertIn("source unavailable", result.stop_reason)
+
+    def test_a_web_place_is_asked_about_at_every_harvest_and_other_places_are_not(self):
+        pins = {WEB_PLACE: "", "s3://noaa-gfs-bdp-pds/": "us-east-1"}
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations=pins)
+        self.feed.refresh_from_db()
+        self.hold("temperature_2m", 0, 3)
+
+        self.harvest()
+
+        self.assertEqual(self.upstream.web_places_asked, [(WEB_PLACE,)])
+        self.assertTrue(Asset.objects.exists())
 
     def test_a_plain_http_store_is_not_opened_unless_the_feed_allows_plain_http(self):
         plain = STORE.replace("https://", "http://")

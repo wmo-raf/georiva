@@ -618,6 +618,18 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual(found.store.chunk_regions, {"s3://ecmwf-forecasts/": "eu-central-1"})
         self.assertEqual(self.upstream.regions_asked, ["ecmwf-forecasts"], "only an Amazon bucket has a region to ask")
 
+    def test_a_web_address_is_a_place_its_data_may_live_with_no_region_to_ask(self):
+        # dynamical.org's WeatherNext stores keep their data on a web host of their own (#828).
+        self.map_shaped(chunk_locations=("https://wn.dynamical.org/chunks/",))
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.MAP_STORE)
+        self.assertEqual(found.axes.access, Access.ANONYMOUS)
+        self.assertEqual(found.store.chunk_locations, ["https://wn.dynamical.org/chunks/"])
+        self.assertEqual(found.store.chunk_regions, {})
+        self.assertEqual(self.upstream.regions_asked, [])
+
     def test_a_place_declared_without_its_closing_slash_is_the_same_place(self):
         self.upstream.regions["noaa-gfs-bdp-pds"] = "us-east-1"
         self.map_shaped(chunk_locations=("s3://noaa-gfs-bdp-pds",))
@@ -638,7 +650,7 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         kinds = {
             "az://forecasts/": "Microsoft Azure storage",
             "http://data.example/grib/": "a plain web address",
-            "https://data.example/grib/": "a plain web address",
+            "https://data.example:8443/grib/": "a web address spelled in a way GeoRiva does not follow",
             "file:///srv/grib/": "a folder on the provider's own computer",
             "ftp://data.example/": "a kind of storage GeoRiva does not know",
         }

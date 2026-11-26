@@ -294,14 +294,33 @@ _TIMEOUTS = {"timeout": f"{STORE_READ_TIMEOUT}s", "connect_timeout": f"{STORE_CO
 GCS_OPTIONS = dict(_TIMEOUTS)
 
 
+#: A web place's host, as Django's ``chunk_place`` takes it: lower case,
+#: dotted, ending in a label that is no number. Spelled to match it.
+_HOST_NAME = re.compile(r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+#: How a web place is read: at its own address, anonymously, every request bounded.
+HTTP_OPTIONS = dict(_TIMEOUTS)
+
+
 def place_kind(prefix: str) -> str | None:
     """``"s3"`` or ``"gs"`` for a prefix naming a bucket of that kind, or a
-    folder of one, ending in a slash; ``None`` for anything else (ADR 0044 §11)."""
-    scheme, separator, rest = prefix.partition("://")
-    name = _BUCKET_NAMES.get(scheme)
-    if not separator or name is None or not name.fullmatch(rest.partition("/")[0]) or not prefix.endswith("/"):
+    folder of one, and ``"https"`` for a folder of a web host spelled as the
+    reader matches it; ending in a slash; ``None`` for anything else (ADR 0044 §11)."""
+    if not prefix.endswith("/") or any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
         return None
-    if any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
+    scheme, separator, rest = prefix.partition("://")
+    if not separator:
+        return None
+    if scheme == "https":
+        host, _, path = rest.partition("/")
+        folders = path[:-1].split("/") if path else []
+        if not _HOST_NAME.fullmatch(host):
+            return None
+        if any(folder in ("", ".", "..") or not set(folder).isdisjoint("%?#") for folder in folders):
+            return None
+        return scheme
+    name = _BUCKET_NAMES.get(scheme)
+    if name is None or not name.fullmatch(rest.partition("/")[0]):
         return None
     return scheme
 
@@ -319,6 +338,9 @@ def _container(prefix: str, region: str):
     if kind == "gs":
         reader = icechunk.gcs_store(dict(GCS_OPTIONS))
         return icechunk.VirtualChunkContainer(prefix, reader), icechunk.gcs_credentials(anonymous=True)
+    if kind == "https":
+        reader = icechunk.http_store(opts=dict(HTTP_OPTIONS))
+        return icechunk.VirtualChunkContainer(prefix, reader), icechunk.credentials.HttpAccess
     # Django publishes no other kind. Meeting one means something else wrote
     # the entry, and a reader that guessed would be following it.
     raise StoreMisdescribed("This feed names a place for its data that maps are never read from.")

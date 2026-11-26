@@ -664,7 +664,11 @@ def _path_words(path: str) -> list[str]:
 def _chunk_places(store: dict) -> list[dict]:
     """Each place the store declares its data lives in, as an operator is asked
     about it: named by its own name, never by an address (ADR 0044 §11)."""
-    clouds = {"s3": _("Amazon's cloud storage"), "gs": _("Google's cloud storage")}
+    clouds = {
+        "s3": _("Amazon's cloud storage"),
+        "gs": _("Google's cloud storage"),
+        "https": _("the provider's own web server"),
+    }
     places = []
     for index, declared in enumerate(store["chunk_locations"]):
         place = chunk_place(declared)

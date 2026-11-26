@@ -805,7 +805,8 @@ _OTHER_PLACES = {
     "abfs": "Microsoft Azure storage",
     "abfss": "Microsoft Azure storage",
     "http": "a plain web address",
-    "https": "a plain web address",
+    # A web place is taken only spelled as its reader will match it (#828).
+    "https": "a web address spelled in a way GeoRiva does not follow",
     "file": "a folder on the provider's own computer",
 }
 

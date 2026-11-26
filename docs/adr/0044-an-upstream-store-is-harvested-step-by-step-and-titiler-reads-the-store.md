@@ -11,6 +11,10 @@ Revises ADR 0043 §9 for stores only.
 Amended after a second real store was read (ECMWF AIFS Single, virtual): §11 now says which kinds of place a store's
 data may be pinned in, and what happens when an operator confirms some and not others. Nothing is reversed.
 
+Amended when the first store keeping its data on a web host was surveyed (dynamical.org's Google WeatherNext,
+wmo-raf/georiva#828): §11's closed list of kinds of place gains a folder of an `https` host, judged as a COG's file
+host is and checked for redirects, which its reader would follow. Nothing is reversed.
+
 Amended when the first time-invariant field was mapped (wmo-raf/georiva#782): §6 now expects a Fixed field, one
 the operator declares the store holds at a run's first step only, at that step alone. Nothing is reversed.
 
@@ -173,11 +177,29 @@ the store, and Titiler draws maps by reading the store itself.**
     the reader discards the container configuration inside the repository and builds its own from the pins:
     anonymous, the public endpoint, those prefixes only. A chunk pointing anywhere else fails to read.
 
-    **The kinds of place are a closed list: an `s3://` bucket or a `gs://` bucket.** Each is read anonymously at its
-    provider's public endpoint and no further than the bucket. A store declaring any other kind is refused by the
+    **The kinds of place are a closed list: an `s3://` bucket, a `gs://` bucket, or a folder of an `https` host.**
+    A bucket is read anonymously at its provider's public endpoint and no further than the bucket; a web place at
+    its own host, anonymously, no further than its folder. A store declaring any other kind is refused by the
     survey, the kind named; a kind is added when its public endpoint is known and anonymous reading has been seen
     to work. A chunk location is handed to the store's reader as a prefix and is never translated to an `https`
     host, unlike a COG's Pinned location (ADR 0042 §9): the reader refuses a chunk outside its prefixes by itself.
+
+    **A web place is judged as a COG's file host is, and more** (#828). The reader normalises a chunk's address
+    before matching it against the prefixes, so a web place is taken only spelled as it will be matched: `https`,
+    a lower-case host name (never an address, never a port or credentials), folders with no dot segment, escape,
+    query or fragment, and a closing slash. `https://host/chunks/` then matches nothing under `https://host/other/`,
+    however a chunk's address is spelled. Its host must resolve to public addresses only — when the sample read of
+    §12 proves it, and again at the start of every harvest, as the store's own address is (#749). Every request
+    is bounded as the store's own are; no limit on size is set, since a chunk's length is the store's reference.
+
+    **The store's reader follows redirects, so we ask first.** Icechunk's HTTP reader follows a redirect to any
+    host, and nothing turns that off. So before a field is read from a web place — by the sample read, and by
+    every harvest for each mapped field's newest held step — the one file it is read from is asked for (one byte)
+    by our own reader, which connects only at an address it judged and follows no redirect. A host that answers
+    with a redirect, does not have the file or does not answer is refused, naming why: the sample fails the field;
+    a harvest stops (a re-check's harvest too). Between those asks, the tile server's reader can still follow a
+    redirect a host starts answering with, and resolves the host itself; as for a Remote asset read by GDAL
+    (ADR 0043), restricting the tile server's egress is the second layer, and neither is relied on alone.
 
     **Each declared place is confirmed separately, and the sample read of §12 is the proof.** It runs with the
     confirmed places only. A chosen field that needs a declined place stops the wizard, naming the place; the
@@ -251,6 +273,11 @@ the store, and Titiler draws maps by reading the store itself.**
   that commits several times a minute may expire snapshots, and a pinned one could vanish between harvests.
 - **Trust the repository's own container configuration.** The allowlist would guard the address of the store while
   the store's configuration chose where its reader goes next.
+- **Pin a web place's addresses in its reader.** Icechunk's HTTP reader resolves the host itself and takes no
+  address to connect to. Judging at the sample read and at every harvest is what a COG's host gets in Titiler.
+- **Refuse web places until the reader can be told not to follow a redirect.** dynamical.org's WeatherNext stores
+  keep all their data on one; asking for a file first catches a host that redirects, short of one that starts
+  between asks.
 - **Pin `s3://` buckets only.** ECMWF AIFS Single's virtual store declares an S3 and a Google bucket and, in every
   field sampled, keeps its data in the Google one; it reads anonymously with what is already installed.
 - **One question for all of a store's declared places, or pinning silently what the sample read used.** The first

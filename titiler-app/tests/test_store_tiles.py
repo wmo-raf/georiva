@@ -43,6 +43,7 @@ PALETTE = f"georiva:palette:{ORG}:{CATALOG}:{COLLECTION}:{VARIABLE}"
 
 #: Where the producer keeps its GRIB: a Google bucket, as ECMWF's AIFS store does.
 ECMWF = "gs://ecmwf-open-data/"
+WEATHERNEXT = "https://wn.dynamical.org/chunks/"
 #: A place the store also declares, and the feed did not pin.
 GFS = "s3://noaa-gfs-bdp-pds/"
 
@@ -393,7 +394,7 @@ class TestOnlyPinnedPlacesAreFollowed:
         assert not any(path.startswith("/ecmwf-open-data/") for path in upstream_store.requests)
 
     def test_a_pin_of_any_other_kind_fails_closed(self, client, rendering, upstream_store):
-        publish(rendering, {FIELD: published(upstream_store.href, {ECMWF: "", "https://data.example/": ""})})
+        publish(rendering, {FIELD: published(upstream_store.href, {ECMWF: "", "http://data.example/": ""})})
 
         response = tile(client)
 
@@ -418,6 +419,41 @@ class TestOnlyPinnedPlacesAreFollowed:
         gcs = str(containers[ECMWF].store)
         assert "gcs.internal" not in gcs
         assert "base_url" not in gcs
+
+    def test_a_web_place_is_read_at_its_own_address_anonymously_and_every_request_bounded(self, upstream_store):
+        opened = store_reader.open_repository(
+            icechunk.local_filesystem_storage(upstream_store.folder), ((WEATHERNEXT, ""),)
+        )
+        containers = opened.config.virtual_chunk_containers
+
+        assert containers.keys() == {WEATHERNEXT}
+        said = str(containers[WEATHERNEXT].store)
+        assert "Http" in said
+        assert '"timeout"' in said
+        assert '"connect_timeout"' in said
+        assert "allow_http" not in said, "plain http is never allowed to a web place"
+
+    @pytest.mark.parametrize(
+        "pinned, kind",
+        [
+            ("s3://noaa-gfs-bdp-pds/", "s3"),
+            ("gs://ecmwf-open-data/2026/", "gs"),
+            (WEATHERNEXT, "https"),
+            ("https://wn.dynamical.org/", "https"),
+            # Spelled as Django's chunk_place would never pin it: matched otherwise than judged.
+            ("http://wn.dynamical.org/chunks/", None),
+            ("https://wn.dynamical.org:8443/chunks/", None),
+            ("https://user@wn.dynamical.org/chunks/", None),
+            ("https://203.0.113.9/chunks/", None),
+            ("https://WN.dynamical.org/chunks/", None),
+            ("https://wn.dynamical.org/chunks/../other/", None),
+            ("https://wn.dynamical.org//chunks/", None),
+            ("https://wn.dynamical.org/%2e%2e/", None),
+            ("https://wn.dynamical.org/chunks", None),
+        ],
+    )
+    def test_the_kinds_of_place_are_djangos_closed_list(self, pinned, kind):
+        assert store_reader.place_kind(pinned) == kind
 
     def test_with_nothing_pinned_the_repositorys_own_places_are_dropped(self, upstream_store):
         opened = store_reader.open_repository(icechunk.local_filesystem_storage(upstream_store.folder), ())

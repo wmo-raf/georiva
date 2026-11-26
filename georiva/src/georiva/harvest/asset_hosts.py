@@ -98,36 +98,65 @@ def public_bucket_host(bucket: str, region: str) -> str | None:
 #: A Google bucket's name: dots and underscores are allowed in it, and it is never built into a host.
 _GS_BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]")
 
-#: The kinds of place a store's data may be pinned in, each with what names a
-#: bucket of that kind. A closed list (ADR 0044 §11): a kind is added when its
-#: public endpoint is known and anonymous reading has been seen to work.
-_CHUNK_PLACE_KINDS = {"s3": _BUCKET_NAME, "gs": _GS_BUCKET_NAME}
+#: The kinds of place a store's data may be pinned in that are buckets, each
+#: with what names a bucket of that kind.
+_BUCKET_KINDS = {"s3": _BUCKET_NAME, "gs": _GS_BUCKET_NAME}
+
+#: The kind of place that is a web address: a folder of an `https` host.
+WEB = "https"
+
+#: A host's name as a web place may spell it: lower case, dotted, ending in a
+#: label that is no number — never an address, never a name with no domain.
+_HOST_NAME = re.compile(r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 
 @dataclass(frozen=True)
 class ChunkPlace:
     """A place a virtual Upstream store declares its data lives in, of a kind
-    that can be pinned. It is handed to the store's reader as a prefix, as
-    declared, and is never translated to an `https` host: the reader refuses a
-    chunk outside its prefixes by itself (ADR 0044 §11)."""
+    that can be pinned: a bucket, or a folder of a web host. It is handed to the
+    store's reader as a prefix, as declared, and is never translated: the reader
+    refuses a chunk outside its prefixes by itself (ADR 0044 §11)."""
 
     kind: str
-    bucket: str
+    bucket: str = ""
+    host: str = ""
 
 
 def chunk_place(prefix: str) -> ChunkPlace | None:
-    """The place `prefix` names — an `s3://` or a `gs://` bucket, or a folder
-    of one — or `None` for anything else, which is never pinned. A prefix ends
-    in a slash: without one it would also match its bucket's longer-named
+    """The place `prefix` names — an `s3://` or a `gs://` bucket, a folder of
+    one, or a folder of an `https` host — or `None` for anything else, which is
+    never pinned. The kinds are a closed list (ADR 0044 §11): a kind is added
+    when its public endpoint is known and anonymous reading has been seen to work.
+
+    A prefix ends in a slash: without one it would also match its longer-named
     neighbours, and a store's reader will not take it."""
-    scheme, separator, rest = prefix.partition("://")
-    bucket_name = _CHUNK_PLACE_KINDS.get(scheme)
-    bucket = rest.partition("/")[0]
-    if not separator or bucket_name is None or not bucket_name.fullmatch(bucket) or not prefix.endswith("/"):
+    if not prefix.endswith("/") or any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
         return None
-    if any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
+    scheme, separator, rest = prefix.partition("://")
+    if not separator:
+        return None
+    if scheme == WEB:
+        return _web_place(rest)
+    bucket_name = _BUCKET_KINDS.get(scheme)
+    bucket = rest.partition("/")[0]
+    if bucket_name is None or not bucket_name.fullmatch(bucket):
         return None
     return ChunkPlace(kind=scheme, bucket=bucket)
+
+
+def _web_place(rest: str) -> ChunkPlace | None:
+    """The web place `https://` + `rest` names, when it is spelled exactly as
+    the store's reader will match a chunk's address against it — the reader
+    normalises an address before matching, so a prefix spelled any other way
+    (a port, a dot segment, an escape) would be judged as one place and
+    matched as another — and `None` otherwise."""
+    host, _, path = rest.partition("/")
+    if not _HOST_NAME.fullmatch(host):
+        return None
+    folders = path[:-1].split("/") if path else []
+    if any(folder in ("", ".", "..") or not set(folder).isdisjoint("%?#") for folder in folders):
+        return None
+    return ChunkPlace(kind=WEB, host=host)
 
 
 def _is_s3(href: str) -> bool:

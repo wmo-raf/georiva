@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, unquote, urljoin, urlsplit
@@ -328,6 +329,7 @@ class UpstreamCatalogClient(Protocol):
         *,
         skip_runs: frozenset = frozenset(),
         allow_http: bool = False,
+        web_places: tuple[str, ...] = (),
     ) -> Iterable[HeldStep]:
         """The steps the Upstream store at `href` holds for any of `fields`,
         each with the fields held there. `window` is on run time for a field
@@ -335,7 +337,10 @@ class UpstreamCatalogClient(Protocol):
         ahead — and on valid time for one that has none. The runs in
         `skip_runs` are not asked about: a closed run is not asked again (ADR
         0044 §6). Nothing is decoded and no data is followed anywhere. A plain
-        `http` store is opened only where `allow_http` says the feed allows it."""
+        `http` store is opened only where `allow_http` says the feed allows it.
+        Where the newest steps' data is kept in one of `web_places`, a file of
+        it is asked for by a reader that follows no redirect, and a refusal
+        raises `UpstreamUnreachable` naming the place (#828)."""
 
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
@@ -373,7 +378,9 @@ class UpstreamCatalogClient(Protocol):
         """Read one field of the newest closed run of each of `fields` from the
         store at `href`, following its data into `chunk_locations` — each
         confirmed place with its region — and nowhere else (ADR 0044 §11, §12).
-        One sample per field, by path. Never raises."""
+        A field kept in a web place is read only once a file of it was asked
+        for by a reader that follows no redirect (#828). One sample per field,
+        by path. Never raises."""
 
 
 # ── STAC JSON → what a harvest reads ────────────────────────────────────────
@@ -1003,19 +1010,29 @@ def open_repository(storage, chunk_locations: Mapping[str, str]):
     with its region (ADR 0044 §11).
 
     The container configuration inside the repository is discarded and one is
-    built from those places alone — anonymous, the provider's public endpoint,
-    those prefixes only — so a chunk pointing anywhere else fails to read,
-    whatever the repository says of where its chunks live. Everything else the
-    repository says of itself is kept: it names no address, and a large
-    store's own caching is what makes it quick to open (GFS's first array took
-    24 s with it and 112 s without).
+    built from those places alone — anonymous, the provider's public endpoint
+    or the web host itself, those prefixes only — so a chunk pointing anywhere
+    else fails to read, whatever the repository says of where its chunks live.
+    Everything else the repository says of itself is kept: it names no
+    address, and a large store's own caching is what makes it quick to open
+    (GFS's first array took 24 s with it and 112 s without).
     """
     import icechunk
 
-    from .asset_hosts import chunk_place
-
     # As it stands first, with nowhere authorised: that reads its settings and none of its data.
-    repository = icechunk.Repository.open(storage)
+    return following(icechunk.Repository.open(storage), chunk_locations)
+
+
+def following(repository, chunk_locations: Mapping[str, str]):
+    """`repository`, already open, reopened to follow its data into
+    `chunk_locations` and nowhere else: `open_repository`'s rule, for a caller
+    that reads one repository with more than one set of places."""
+    import icechunk
+
+    from georiva.core.values.store import CONNECT_TIMEOUT, READ_TIMEOUT
+
+    from .asset_hosts import WEB, chunk_place
+
     config = repository.config
     config.clear_virtual_chunk_containers()
     credentials = {}
@@ -1026,6 +1043,10 @@ def open_repository(storage, chunk_locations: Mapping[str, str]):
         if place.kind == "s3":
             reader = icechunk.s3_store(region=region or None, anonymous=True)
             credentials[prefix] = icechunk.s3_anonymous_credentials()
+        elif place.kind == WEB:
+            # Every request bounded, as the store's own address is; plain http is never allowed here.
+            reader = icechunk.http_store(opts={"timeout": READ_TIMEOUT, "connect_timeout": CONNECT_TIMEOUT})
+            credentials[prefix] = icechunk.credentials.HttpAccess
         else:
             reader = icechunk.gcs_store()
             credentials[prefix] = icechunk.gcs_credentials(anonymous=True)
@@ -1100,7 +1121,9 @@ def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | Non
     return None, f"none of its newest {RUNS_IN_REACH} forecasts has arrived in full yet", ()
 
 
-def _sample(store, field: StoreField) -> FieldSample:
+def _sample(store, field: StoreField, ask: Callable[[str, tuple], str | None] | None = None) -> FieldSample:
+    """A sample of `field` from `store`. `ask` says why the field at a cell
+    may not be read, before it is."""
     import zarr
 
     array = zarr.open_array(store, path=field.path, mode="r")
@@ -1109,7 +1132,10 @@ def _sample(store, field: StoreField) -> FieldSample:
     at, missing, held_steps = _newest_whole(store, array, field)
     if at is None:
         return FieldSample(readable=False, problem=missing)
-    low, high = display_range(array[tuple(at.get(part, slice(None)) for part in field.axes)])
+    where = tuple(at.get(part, slice(None)) for part in field.axes)
+    if ask is not None and (refused := ask(field.path, where)):
+        return FieldSample(readable=False, problem=refused)
+    low, high = display_range(array[where])
     if low is None:
         return FieldSample(readable=False, problem="the map that was read holds no values")
     return FieldSample(
@@ -1121,20 +1147,108 @@ def _sample(store, field: StoreField) -> FieldSample:
     )
 
 
+#: Seconds a web place's host has to answer for one file of it.
+CHUNK_TIMEOUT = 10
+
+#: How much of where a host sends its reader is repeated to an operator.
+LOCATION_CHARACTERS = 200
+
+
+def chunk_refusal(
+    url: str, *, resolve: Callable[[str], list[str]], fetch=None, timeout: float = CHUNK_TIMEOUT
+) -> str | None:
+    """Why the file at `url`, in a web place a store's data is kept at, may not
+    be read; `None` when it may (#828).
+
+    The host is judged as a COG's file host is (ADR 0042 §9) — `https`, a
+    public address — and one byte of the file is asked for at an address that
+    judgement saw, by a reader that follows no redirect. The store's own reader
+    would follow one to any host, so a host that answers with one is refused,
+    as is one that does not have the file."""
+    from .asset_hosts import AssetHostAllowlist
+
+    allowlist = AssetHostAllowlist([urlsplit(url).hostname or ""], allow_http=False, resolve=resolve)
+    addresses = allowlist.addresses(url)
+    if addresses is None:
+        return allowlist.refusal(url)
+    try:
+        answer = (fetch or pinned_open)(url, addresses[0], timeout=timeout, headers={"Range": "bytes=0-0"})
+    except Exception as exc:  # whatever the connection raises is an answer
+        logger.warning("Web place file %s did not answer: %s", url, exc)
+        return "it did not answer"
+    try:
+        if answer.status in _REDIRECTS:
+            location = (answer.headers.get("Location") or "an address it did not name")[:LOCATION_CHARACTERS]
+            return f"it sends readers on to another address ({location})"
+        if answer.status not in (200, 206):
+            return f"it answered {answer.status}"
+        return None
+    finally:
+        answer.release_conn()
+
+
+def _unchecked(_url: str) -> str:
+    return "it could not be checked"
+
+
+def _web_file(withheld, web: tuple[str, ...], path: str, where: tuple) -> str | None:
+    """The file in one of the web places `web` that the field at `path`, at
+    the cell `where`, is read from; `None` when it is read from none of them.
+    It is read from `withheld`, a store that follows no web place, whose
+    refusal names the file it would have read: nothing is fetched."""
+    import zarr
+
+    try:
+        zarr.open_array(withheld, path=path, mode="r")[where]
+    except Exception as exc:  # whatever else stops the read, the read itself will say
+        address = refused_place(str(exc))
+        if address and address.startswith(web):
+            return address
+    return None
+
+
+def _web_refusal(withheld, web: tuple[str, ...], check: Callable[[str], str | None], path: str, where: tuple):
+    """Why the field at `path`, at the cell `where`, may not be read from a web
+    place, or `None`: the file it is read from is asked about first (#828)."""
+    address = _web_file(withheld, web, path, where)
+    if address and (why := check(address)):
+        return f"the web address its data is kept at was refused: {why}"
+    return None
+
+
 def read_field_samples(
-    storage, fields: list[StoreField], chunk_locations: Mapping[str, str], *, into: dict | None = None
+    storage,
+    fields: list[StoreField],
+    chunk_locations: Mapping[str, str],
+    *,
+    into: dict | None = None,
+    check_chunk: Callable[[str], str | None] = _unchecked,
 ) -> dict[str, FieldSample]:
     """A sample of each of `fields` from the repository in `storage`, by path.
+
+    A field whose data is in a web place is read only once `check_chunk` has
+    said nothing against the file it is read from (#828).
 
     Raises when the repository itself does not open; what goes wrong with one
     field is that field's answer. `into` is filled as each field is read, so a
     caller that stops waiting keeps what was read by then.
     """
+    import icechunk
+
+    from .asset_hosts import WEB, chunk_place
+
     found = {} if into is None else into
-    store = open_store(storage, chunk_locations)
+    repository = icechunk.Repository.open(storage)
+    store = following(repository, chunk_locations).readonly_session("main").store
+    web = tuple(prefix for prefix in chunk_locations if getattr(chunk_place(prefix), "kind", None) == WEB)
+    ask = None
+    if web:
+        others = {prefix: region for prefix, region in chunk_locations.items() if prefix not in web}
+        withheld = following(repository, others).readonly_session("main").store
+        ask = partial(_web_refusal, withheld, web, check_chunk)
     for field_ in fields:
         try:
-            found[field_.path] = _sample(store, field_)
+            found[field_.path] = _sample(store, field_, ask)
         except Exception as exc:  # whatever the store or its library raises is an answer
             logger.warning("Upstream store field %s could not be read: %s", field_.path, exc)
             # Only a read the store's reader refused to follow names where it would have gone.
@@ -1147,7 +1261,12 @@ def read_field_samples(
 
 
 def sample_store(
-    href: str, fields: list[StoreField], chunk_locations: Mapping[str, str], *, timeout: float = SAMPLE_TIMEOUT
+    href: str,
+    fields: list[StoreField],
+    chunk_locations: Mapping[str, str],
+    *,
+    timeout: float = SAMPLE_TIMEOUT,
+    check_chunk: Callable[[str], str | None] = _unchecked,
 ) -> dict[str, FieldSample]:
     """Read a sample of each of `fields` from the store at `href`, following
     its data into `chunk_locations` only. Whatever goes wrong is an answer, in
@@ -1160,7 +1279,7 @@ def sample_store(
     def read():
         each = f"{max(1, int(min(timeout, 20)))}s"
         storage = repository_storage(href, timeout=each)
-        read_field_samples(storage, fields, chunk_locations, into=found)
+        read_field_samples(storage, fields, chunk_locations, into=found, check_chunk=check_chunk)
 
     problem = f"it did not answer within {int(timeout)} seconds"
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-sample")
@@ -1248,12 +1367,19 @@ def _duration(value) -> timedelta:
 
 
 def _field_steps(
-    store, field: StoreField, window: Window, known: dict, skip_runs: frozenset = frozenset(), declared=None
+    store,
+    field: StoreField,
+    window: Window,
+    known: dict,
+    skip_runs: frozenset = frozenset(),
+    declared=None,
+    newest=None,
 ) -> list[tuple[datetime | None, datetime, tuple[timedelta, ...] | None]]:
     """`(run, valid time, lead times its run expects)` of every step in
     `window` that the store holds for one field, of no run in `skip_runs`. The
     last is `None` for a store without runs. What the field declares of its
-    time statistic, where it does, goes into `declared`, by its path."""
+    time statistic, where it does, goes into `declared`, by its path; the cell
+    of its newest Held step into `newest`, by its path."""
     import numpy as np
     import zarr
 
@@ -1306,7 +1432,20 @@ def _field_steps(
     if not cells:
         return []
     held = _held(store, array, field.path, cells)
+    if newest is not None and any(held):
+        # Cells are asked in order of run, then step: the last held is the newest.
+        newest[field.path] = next(cell for cell, there in zip(reversed(cells), reversed(held), strict=True) if there)
     return [step for (_index, *step), there in zip(asked, held, strict=True) if there]
+
+
+def _ask_about_web_places(withheld, web: tuple[str, ...], check: Callable[[str], str | None], newest: dict):
+    """Raise `UpstreamUnreachable` where the file of a field's newest Held step,
+    kept in a web place, is refused by `check` (#828)."""
+    for path, cell in newest.items():
+        address = _web_file(withheld, web, path, cell)
+        if address and (why := check(address)):
+            place = next(prefix for prefix in web if address.startswith(prefix))
+            raise UpstreamUnreachable(f"upstream data at {place} was refused: {why}")
 
 
 def read_held_steps(
@@ -1316,26 +1455,36 @@ def read_held_steps(
     *,
     skip_runs: frozenset = frozenset(),
     branch: str = "main",
+    web: tuple[str, ...] = (),
+    check_chunk: Callable[[str], str | None] = _unchecked,
 ) -> list[HeldStep]:
     """The Held steps of `fields` in `window`, of no run in `skip_runs`, from
     the repository in `storage`.
 
     The repository is opened as it stands, with nowhere authorised: whether a
-    step is held is asked of the store by key, and a key is not data.
+    step is held is asked of the store by key, and a key is not data. Where the
+    newest Held step of a field is kept in one of the web places `web`, its
+    file is asked about by `check_chunk`, and a refusal raises
+    `UpstreamUnreachable` naming the place (#828).
     """
     import icechunk
 
-    store = icechunk.Repository.open(storage).readonly_session(branch).store
+    repository = icechunk.Repository.open(storage)
+    store = repository.readonly_session(branch).store
     found: dict[tuple[datetime | None, datetime], set[str]] = {}
     expected: dict[datetime, tuple[timedelta, ...]] = {}
     declared: dict[str, Declared] = {}
     known: dict = {}
+    newest: dict[str, tuple] | None = {} if web else None
     for field_ in fields:
-        for run, when, run_leads in _field_steps(store, field_, window, known, frozenset(skip_runs), declared):
+        steps = _field_steps(store, field_, window, known, frozenset(skip_runs), declared, newest)
+        for run, when, run_leads in steps:
             found.setdefault((run, when), set()).add(field_.path)
             if run is not None:
                 # The first array to say speaks for the run: arrays beside one another share its lead times.
                 expected.setdefault(run, run_leads)
+    if newest:
+        _ask_about_web_places(following(repository, {}).readonly_session(branch).store, web, check_chunk, newest)
     return [
         HeldStep(
             time=when,
@@ -1357,6 +1506,8 @@ def list_held_steps(
     skip_runs: frozenset = frozenset(),
     allow_http: bool = False,
     timeout: float = STEPS_TIMEOUT,
+    web_places: tuple[str, ...] = (),
+    resolve: Callable[[str], list[str]] | None = None,
 ) -> list[HeldStep]:
     """The Held steps of `fields` in `window`, from the store at `href` — over
     plain `http` only where `allow_http`, the feed's word (ADR 0042 §9).
@@ -1364,13 +1515,18 @@ def list_held_steps(
     Unlike a probe, this is a harvest's question, and a store that cannot
     answer it whole has not answered: whatever goes wrong raises
     `UpstreamUnreachable`, in words a run may show; the library's own are logged.
+
+    A file of each of `web_places` the newest steps are kept in is asked for
+    first, at an address of its host `resolve` gives, by a reader that follows
+    no redirect (#828).
     """
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as TimedOut
 
     def read():
         storage = repository_storage(href, allow_http=allow_http)
-        return read_held_steps(storage, fields, window, skip_runs=skip_runs)
+        check = (lambda url: chunk_refusal(url, resolve=resolve)) if resolve is not None else _unchecked
+        return read_held_steps(storage, fields, window, skip_runs=skip_runs, web=tuple(web_places), check_chunk=check)
 
     # Its own thread, so a store that stops answering costs the wait and no more.
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-steps")
@@ -1380,6 +1536,8 @@ def list_held_steps(
         raise UpstreamUnreachable(f"upstream store did not answer within {int(timeout)} seconds") from late
     except _StoreMisdescribed as misdescribed:
         raise UpstreamUnreachable(f"upstream store could not be listed: {misdescribed}") from misdescribed
+    except UpstreamUnreachable:
+        raise
     except Exception as exc:  # whatever the store or its library raises, the window was not listed
         logger.warning("Upstream store at %s could not be listed: %s", href, exc)
         raise UpstreamUnreachable("upstream store could not be opened and listed") from exc
@@ -1403,7 +1561,7 @@ def _scheme_host_port(url: str) -> tuple[str, str | None, int | None]:
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 
 
-def pinned_open(url: str, address: str, *, timeout: float):
+def pinned_open(url: str, address: str, *, timeout: float, headers: Mapping[str, str] | None = None):
     """GET `url` from `address` and from nowhere else (#723).
 
     The host is not looked up here: the connection goes to `address`, which
@@ -1435,7 +1593,7 @@ def pinned_open(url: str, address: str, *, timeout: float):
     return pool.urlopen(
         "GET",
         target,
-        headers={"Host": parts.netloc, "User-Agent": "GeoRiva/1.0"},
+        headers={**(headers or {}), "Host": parts.netloc, "User-Agent": "GeoRiva/1.0"},
         redirect=False,
         retries=False,
         preload_content=False,
@@ -1568,8 +1726,17 @@ class StacApiClient:
         *,
         skip_runs: frozenset = frozenset(),
         allow_http: bool = False,
+        web_places: tuple[str, ...] = (),
     ) -> list[HeldStep]:
-        return list_held_steps(href, fields, window, skip_runs=skip_runs, allow_http=allow_http)
+        return list_held_steps(
+            href,
+            fields,
+            window,
+            skip_runs=skip_runs,
+            allow_http=allow_http,
+            web_places=web_places,
+            resolve=self.resolve_host,
+        )
 
     def resolve_host(self, host: str) -> list[str]:
         try:
@@ -1681,7 +1848,11 @@ class StacApiClient:
     def sample_store(
         self, href: str, fields: list[StoreField], chunk_locations: dict[str, str]
     ) -> dict[str, FieldSample]:
-        return sample_store(href, fields, chunk_locations)
+        # A web place's file is asked about first, at an address judged here (#828).
+        return sample_store(href, fields, chunk_locations, check_chunk=self._chunk_refusal)
+
+    def _chunk_refusal(self, url: str) -> str | None:
+        return chunk_refusal(url, resolve=self.resolve_host)
 
     def _pages(self, url: str, params: dict | None = None) -> Iterator[tuple[dict, str]]:
         """Each page of a paged listing with the URL it came from, following `next` links."""
