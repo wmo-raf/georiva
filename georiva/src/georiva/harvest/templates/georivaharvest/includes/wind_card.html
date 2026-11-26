@@ -1,0 +1,18 @@
+{% load i18n %}
+{% comment %}
+    Two ticked fields that are one wind's parts: its speed and direction can be
+    shown too (ADR 0048). Placed after the later of its two parts' cards, and
+    out of the form while either part is unticked.
+{% endcomment %}
+<div class="gr-map-settings-card gr-map-settings-card--wind" data-wind data-parts="{{ pair.index }} {{ pair.v_index }}"
+     data-after="{{ pair.after }}">
+    <p class="hwiz-note">
+        {% blocktrans with u=pair.u v=pair.v %}<strong>{{ u }}</strong> and <strong>{{ v }}</strong> are the two parts of one wind. GeoRiva can also show its speed and the direction it blows from, worked out from the two whenever they are shown.{% endblocktrans %}
+    </p>
+    {% for offer in pair.offers %}
+        <label class="hwiz-check" for="{{ offer.name }}">
+            <input type="checkbox" name="{{ offer.name }}" id="{{ offer.name }}" {% if offer.chosen %}checked{% endif %}>
+            <span>{% blocktrans with name=offer.label %}Also show {{ name }}{% endblocktrans %}</span>
+        </label>
+    {% endfor %}
+</div>

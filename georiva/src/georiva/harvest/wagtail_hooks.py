@@ -10,6 +10,7 @@ def register_harvest_wizard_urls():
         harvest_wizard_step2,
         harvest_wizard_step3,
         harvest_wizard_step4,
+        harvest_wizard_step4_read,
         harvest_wizard_step5,
     )
 
@@ -18,6 +19,7 @@ def register_harvest_wizard_urls():
         path("harvest-feeds/wizard/collection/", harvest_wizard_step2, name="harvest_wizard_step2"),
         path("harvest-feeds/wizard/found/", harvest_wizard_step3, name="harvest_wizard_step3"),
         path("harvest-feeds/wizard/images/", harvest_wizard_step4, name="harvest_wizard_step4"),
+        path("harvest-feeds/wizard/images/read/", harvest_wizard_step4_read, name="harvest_wizard_step4_read"),
         path("harvest-feeds/wizard/save/", harvest_wizard_step5, name="harvest_wizard_step5"),
         path("harvest-feeds/<int:pk>/recheck/", harvest_recheck_upstream, name="harvest_recheck_upstream"),
     ]

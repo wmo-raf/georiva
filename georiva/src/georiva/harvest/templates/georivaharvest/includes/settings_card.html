@@ -1,0 +1,64 @@
+{% load i18n l10n %}
+{% comment %}
+    How one map appears: its name, description, units, the range it is coloured
+    by and — for a forecast field — whether it is fixed. The same card for a
+    store's field (`row.path`; unticked from the list above, or by its Remove)
+    and for a kind of image (`row.key`; shown or not by the box in its header).
+    The page renders it, and so does the read that follows a tick.
+{% endcomment %}
+<div class="gr-map-settings-card" data-settings="{{ row.index }}">
+    <div class="gr-map-settings-card__head">
+        {% if row.key %}
+            <input type="checkbox" name="use_{{ row.index }}" id="use_{{ row.index }}" class="gr-map-settings-card__use"
+                   aria-label="{% blocktrans with name=row.label %}Show {{ name }}{% endblocktrans %}"
+                   {% if row.use %}checked{% endif %}>
+        {% endif %}
+        <span class="gr-map-settings-card__title">{{ row.label }}</span>
+        {% include "georivaharvest/includes/map_badges.html" %}
+        {% if row.path %}
+            <button type="button" class="button button-small button-secondary gr-map-settings-card__remove"
+                    data-untick="{{ row.index }}" hidden>{% trans "Remove" %}</button>
+        {% endif %}
+    </div>
+    {% if row.ident != row.label %}<span class="gr-map-settings-card__id">{{ row.ident }}</span>{% endif %}
+    {% if row.warning %}<p class="hwiz-warning">{{ row.warning }}</p>{% endif %}
+    <div class="gr-map-settings-card__row">
+        <div class="gr-map-settings-card__field">
+            <label class="hwiz-units__label" for="name_{{ row.index }}">{% trans "Name" %}</label>
+            <input type="text" name="name_{{ row.index }}" id="name_{{ row.index }}" class="w-field__input"
+                   value="{{ row.name }}">
+        </div>
+        {% if row.path %}
+            <div class="gr-map-settings-card__field gr-map-settings-card__field--wide">
+                <label class="hwiz-units__label" for="about_{{ row.index }}">{% trans "Description (optional)" %}</label>
+                <input type="text" name="about_{{ row.index }}" id="about_{{ row.index }}" class="w-field__input"
+                       value="{{ row.about }}">
+            </div>
+        {% endif %}
+    </div>
+    {% include "georivaharvest/includes/wizard_units.html" %}
+    <div class="gr-map-settings-card__row">
+        <div class="gr-map-settings-card__field">
+            <label class="hwiz-units__label" for="low_{{ row.index }}">{% trans "Lowest value" %}</label>
+            <input type="number" step="any" name="low_{{ row.index }}" id="low_{{ row.index }}" class="w-field__input"
+                   value="{{ row.low|default_if_none:''|unlocalize }}">
+        </div>
+        <div class="gr-map-settings-card__field">
+            <label class="hwiz-units__label" for="high_{{ row.index }}">{% trans "Highest value" %}</label>
+            <input type="number" step="any" name="high_{{ row.index }}" id="high_{{ row.index }}" class="w-field__input"
+                   value="{{ row.high|default_if_none:''|unlocalize }}">
+        </div>
+        {% for unit in units %}
+            {% if unit.pk == row.range_unit_id %}
+                <p class="gr-map-settings-card__range">{% blocktrans with symbol=unit.symbol %}Lowest and highest values in {{ symbol }}.{% endblocktrans %}</p>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% if row.forecast %}
+        {# A field the store holds at a run's first step only: a run does not wait for the rest (#782). #}
+        <label class="hwiz-check" for="fixed_{{ row.index }}">
+            <input type="checkbox" name="fixed_{{ row.index }}" id="fixed_{{ row.index }}" {% if row.fixed %}checked{% endif %}>
+            <span>{% trans "Fixed field: published at each forecast's first step only, as orography or a land–sea mask is. A forecast is complete without its later steps." %}</span>
+        </label>
+    {% endif %}
+</div>

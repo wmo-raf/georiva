@@ -1,0 +1,10 @@
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    What a store's field is, at a glance: its unit, whether it comes in
+    forecast runs, and whether it is one part of a wind.
+{% endcomment %}
+<span class="gr-map-badges">
+    {% if row.unit %}{% status label=row.unit %}{% endif %}
+    {% if row.forecast %}{% trans "Forecast" as forecast_label %}{% status label=forecast_label classname="w-status--primary" %}{% endif %}
+    {% if row.component %}{% trans "Wind part" as wind_label %}{% status label=wind_label %}{% endif %}
+</span>
