@@ -25,6 +25,10 @@ Amended when the open was warmed in advance (wmo-raf/georiva#684): each tile ser
 published Store assets as it starts, in the background, so the cost recorded under Consequences falls on the worker
 rather than a user's first map. Nothing is reversed.
 
+Amended by [ADR-0052](0052-stac-says-what-exists-a-store-says-how-it-is-laid-out.md): §5's shape is now read from
+the store's own metadata, with the collection's published chunking as a fallback, so §12's opening of the store moves
+ahead of the shape. Series-shaped stores stay refused.
+
 Superseded in part by [ADR-0046](0046-values-are-stored-as-produced-and-converted-when-read.md): §9's "nothing is
 converted on the way" no longer holds for units. A store's values are still read as its decode chain produces them,
 in the Variable's source unit, and converted when they leave; still nothing is de-accumulated.

@@ -423,11 +423,31 @@ store (ADR 0044). A **virtual** upstream store holds no pixels of its own; its c
 producer's original files. Not our own Virtual Zarr, which is a manifest we build over our own assets.
 _Avoid_: dataset, cube, Zarr source, remote Zarr
 
+**Streamable**:
+An Upstream shape is Streamable for a read plane when one request on that plane reads upstream bytes in proportion
+to the request, not to the archive: a map tile at most the field at one step, a point time series at most the
+chunks holding the point. The admission test for every shape a harvest accepts; a collection is harvested only when
+it is Streamable for maps (ADR 0052).
+_Avoid_: cloud-native (names a format, not what a request costs), cheap, fast
+
 **Store shape**:
-What an Upstream store's chunking makes cheap. **Map-shaped**: a chunk is one whole field at one step.
+How an Upstream store's chunking divides its data, which decides the read planes it is **Streamable** for.
+**Map-shaped**: a chunk is one whole field at one step.
 **Series-shaped**: a chunk is a small area over many steps. The shape decides which read planes the collection
-offers; only map-shaped stores are harvested.
+offers; only map-shaped stores are harvested. Read from the store's own metadata; the collection's datacube
+description is a fallback for a store that cannot be opened (ADR 0052).
 _Avoid_: time-optimised / map-optimised (the Upstream's words), store type, layout
+
+**Store placement**:
+Where one readable store sits in an Upstream's catalog: **per collection** (one store holds the collection, as on
+dynamical.org), **per item** (each item is a whole dataset), or **per item per variable** (each item keeps a store
+for each variable). Only per collection is harvested (ADR 0052).
+_Avoid_: layout, structure, flavour
+
+**Store format**:
+The kind of store an Upstream store is: **Icechunk** or **plain Zarr**. A NetCDF, HDF or GRIB file is a file, not a
+store. Only Icechunk is read; a plain Zarr store's metadata is read by the survey to judge it (ADR 0052).
+_Avoid_: container, engine, backend
 
 **Held step**:
 A step of a run for which an Upstream store actually holds data for a given array. A store allocates its
@@ -470,8 +490,9 @@ _Avoid_: STAC wizard, remote wizard, import wizard
 **Upstream survey**:
 What the Harvest Feed Wizard learns about an Upstream collection before a feed exists: how its items are organised
 (the **shape**), which raster asset keys they carry, and where the files live. Two shapes can be harvested: "one COG
-per time step per asset key", and a map-shaped Upstream store whose codecs we can decode. The survey names the
-reason for any other. Re-run from the feed's page by "Re-check upstream".
+per time step per asset key", and a map-shaped Upstream store whose codecs we can decode. For a store, it says
+which Store placement, Store format and Store shape it found, read from the store itself, and names the one that
+stops any other (ADR 0052). Re-run from the feed's page by "Re-check upstream".
 _Avoid_: probe, discovery, crawl, validation
 
 **Sample item**:
