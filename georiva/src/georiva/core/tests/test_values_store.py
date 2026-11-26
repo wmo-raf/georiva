@@ -86,6 +86,14 @@ class AStoresAddressTests(SimpleTestCase):
             repository_storage(STORE, allow_http=True)
         self.assertNotIn("allow_http", opened.call_args.kwargs["opts"])
 
+    def test_an_address_published_with_a_closing_slash_is_opened_without_it(self):
+        # dynamical.org publishes some stores' addresses so (#825); Icechunk finds no repository there.
+        from georiva.core.values.store import repository_storage
+
+        with mock.patch.object(icechunk, "http_storage") as opened:
+            repository_storage(f"{STORE}/")
+        self.assertEqual(opened.call_args.args, (STORE.rstrip("/"),))
+
 
 class StoreReadTests(ReadsALocalStore, SimpleTestCase):
     def test_a_whole_field_is_read_north_up_float32_and_placed_by_the_stores_own_grid(self):

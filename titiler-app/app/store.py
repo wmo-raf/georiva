@@ -339,7 +339,9 @@ def storage(href: str, *, allow_http: bool = False):
     options = dict(_TIMEOUTS)
     if allow_http and href[: len("http://")].lower() == "http://":
         options["allow_http"] = "true"
-    return icechunk.http_storage(href, opts=options)
+    # A closing slash, as some publishers spell a store's address, makes every key `…//repo`, which no
+    # object store answers (#825): the address is the same store without it.
+    return icechunk.http_storage(href.rstrip("/"), opts=options)
 
 
 def open_repository(repository_storage, chunk_locations: tuple[tuple[str, str], ...]):
