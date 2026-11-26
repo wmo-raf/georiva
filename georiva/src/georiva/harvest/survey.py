@@ -152,6 +152,127 @@ def reason_for(shape: Shape) -> str:
     return _REASONS.get(shape, "")
 
 
+# ── The four axes an Upstream store varies along (ADR 0052) ─────────────────
+
+
+class Placement(StrEnum):
+    """Store placement: where one readable store sits in the catalog."""
+
+    PER_COLLECTION = "per-collection"
+    PER_ITEM = "per-item"
+    PER_ITEM_PER_VARIABLE = "per-item-per-variable"
+
+
+class StoreShape(StrEnum):
+    """Store shape: how its chunking divides its data (ADR 0044 §5)."""
+
+    MAP = "map"
+    SERIES = "series"
+    #: Each field cut into tiles within a single step: neither shape.
+    TILED = "tiled"
+    #: The store was read, and nothing in it or its collection says.
+    UNKNOWN = "unknown"
+
+
+class Format(StrEnum):
+    """Store format, with whether its codecs decode: a store of a format we
+    read must also unpack."""
+
+    ICECHUNK = "icechunk"
+    PLAIN_ZARR = "plain-zarr"
+    UNDECODABLE = "undecodable"
+
+
+class Access(StrEnum):
+    """Access: whether it, and every place its data is declared to live, can be read anonymously."""
+
+    ANONYMOUS = "anonymous"
+    #: The store itself was not read: its place is refused, or it would not open.
+    NOT_READ = "not-read"
+    #: It opened, but declares its data kept in a kind of place we do not read from.
+    KEPT_ELSEWHERE = "kept-elsewhere"
+
+
+#: The order a store's axes are judged in: what an operator can do least about first.
+AXES = ("placement", "shape", "format", "access")
+
+#: The one table of what is accepted. Accepting another value is adding it
+#: here, with the reader or enumerator it needs (ADR 0052 §4).
+ACCEPTED = {
+    "placement": {Placement.PER_COLLECTION},
+    "shape": {StoreShape.MAP},
+    "format": {Format.ICECHUNK},
+    "access": {Access.ANONYMOUS},
+}
+
+#: The verdict an operator is given for each refused value.
+_REFUSED_AS = {
+    Placement.PER_ITEM: Shape.STORE_PER_ITEM,
+    Placement.PER_ITEM_PER_VARIABLE: Shape.STORE_PER_ITEM_PER_VARIABLE,
+    StoreShape.SERIES: Shape.SERIES_STORE,
+    StoreShape.TILED: Shape.UNREADABLE_STORE,
+    StoreShape.UNKNOWN: Shape.UNREADABLE_STORE,
+    Format.PLAIN_ZARR: Shape.PLAIN_ZARR_STORE,
+    Format.UNDECODABLE: Shape.UNDECODABLE_STORE,
+    Access.NOT_READ: Shape.NEEDS_ACCOUNT,
+    Access.KEPT_ELSEWHERE: Shape.STORE_KEPT_ELSEWHERE,
+}
+
+
+@dataclass(frozen=True)
+class StoreAxes:
+    """The value the survey found on each axis of an Upstream store; `None`
+    where it could not be told — a store kept on the items is judged on its
+    placement alone, and one that was not read has no format. Each value may
+    carry what an operator is told of it beside its verdict."""
+
+    placement: Placement
+    shape: StoreShape | None = None
+    format: Format | None = None
+    access: Access | None = None
+    #: What was missing (UNKNOWN), or why it is neither shape (TILED).
+    shape_said: str = ""
+    #: The codecs that cannot be decoded (UNDECODABLE).
+    format_said: str = ""
+    #: Why the store was not read (NOT_READ), or the kinds of place its data is kept in (KEPT_ELSEWHERE).
+    access_said: str = ""
+
+    @property
+    def refused(self) -> tuple[str, StrEnum] | None:
+        """The first axis, in `AXES` order, whose value is not accepted, with
+        that value; `None` when every axis that could be told is."""
+        for axis in AXES:
+            value = getattr(self, axis)
+            if value is not None and value not in ACCEPTED[axis]:
+                return axis, value
+        return None
+
+    def verdict(self) -> tuple[Shape, str] | None:
+        """The verdict and its reason, in an operator's words, for the axis that
+        stops it; `None` when nothing does."""
+        refused = self.refused
+        if refused is None:
+            return None
+        axis, value = refused
+        shape = _REFUSED_AS[value]
+        reason = _REASONS[shape]
+        if value in (StoreShape.TILED, StoreShape.UNKNOWN):
+            reason = f"{reason}: {self.shape_said}."
+        elif value is StoreShape.SERIES and self.access is Access.NOT_READ:
+            said = "GeoRiva read this from the collection's description, as its data could not be opened"
+            reason = f"{reason} {said} ({self.access_said})."
+        elif value is Format.UNDECODABLE:
+            reason = f"{reason}: {self.format_said}."
+        elif value is Access.NOT_READ:
+            reason = f"{reason} ({self.access_said})"
+            if self.shape is StoreShape.MAP:
+                # What the collection says of its shape is named too: it is not what stops it (ADR 0052 §2).
+                reason += " The collection's description says it is laid out for drawing maps."
+        elif value is Access.KEPT_ELSEWHERE:
+            reason = f"{reason}: {self.access_said}."
+        return shape, reason
+
+
 @dataclass(frozen=True)
 class CatalogSurvey:
     """What an Upstream's root offers to choose from."""
@@ -266,6 +387,8 @@ class CollectionSurvey:
     locations: list[FileLocation] = field(default_factory=list)
     #: Set when the collection is an Upstream store, whatever the verdict on it.
     store: SurveyedStore | None = None
+    #: The value found on each axis, when the collection is kept as stores (ADR 0052).
+    axes: StoreAxes | None = None
 
     @property
     def harvestable(self) -> bool:
@@ -459,7 +582,9 @@ def survey_collection(
         ):
             return found
         if placed := _placed_in_items(items):
-            return _verdict(placed, sampled)
+            axes = StoreAxes(placement=placed)
+            shape, reason = axes.verdict()
+            return CollectionSurvey(shape, reason, sampled, axes=axes)
         if described is not None and any(_is_store(asset) for asset in described.assets.values()):
             return _verdict(Shape.STORE, sampled)
         return _verdict(Shape.NO_RASTERS if items else Shape.EMPTY, sampled)
@@ -484,7 +609,7 @@ def survey_collection(
     return CollectionSurvey(Shape.ONE_COG_PER_TIME, "", sampled, assets, locations)
 
 
-def _placed_in_items(items) -> Shape | None:
+def _placed_in_items(items) -> Placement | None:
     """The Store placement of a collection whose stores are on its items, not
     on itself; `None` when its items carry none (ADR 0052 §5). An item with more
     than one store keeps one per variable. Stores are told apart by name, so
@@ -492,8 +617,8 @@ def _placed_in_items(items) -> Shape | None:
     is one store."""
     most = max((len(_store_names(item)) for item in items), default=0)
     if most > 1:
-        return Shape.STORE_PER_ITEM_PER_VARIABLE
-    return Shape.STORE_PER_ITEM if most else None
+        return Placement.PER_ITEM_PER_VARIABLE
+    return Placement.PER_ITEM if most else None
 
 
 def _store_names(item) -> set[str]:
@@ -585,69 +710,71 @@ def _survey_store(
     places = _Places(upstream, catalog_url)
     location, href = places.of(asset.href)
 
-    def verdict(shape, reason, *, readable=False, problem="", **store):
+    def verdict(shape, reason, axes, *, readable=False, problem="", **store):
         here = FileLocation(location.host, location.bucket, location.own, readable, location.problem or problem)
         said = SurveyedStore(href=href, chunk_locations=declared, **store)
-        return CollectionSurvey(shape, reason, sampled, locations=[here], store=said)
+        return CollectionSurvey(shape, reason, sampled, locations=[here], store=said, axes=axes)
 
     # Judged as a harvest will judge it, and never opened anywhere that judgement refuses.
     probe, why_not_read = None, location.problem
     if not why_not_read:
         progress(OPENING_STORE)
         probe = upstream.describe_store(href)
-        if probe.timed_out and _store_shape(cube)[0] is not Shape.SERIES_STORE:
+        if probe.timed_out and _store_shape(cube)[0] is not StoreShape.SERIES:
             # A wait is worth trying again, unless what the collection says already refuses it.
             said = (probe.problem or "did not answer in time").removeprefix("it ")
             raise UpstreamTimedOut(f"the provider's data store {said}")
         if not probe.readable:
             why_not_read = probe.problem or "it could not be opened"
-    if not why_not_read:
+    read = not why_not_read
+    if read:
         cube = _as_the_store_says(cube, probe.chunking, held=probe.codecs.keys())
 
-    def refused_for_access(fields, shape_said=""):
-        reason = f"{_REASONS[Shape.NEEDS_ACCOUNT]} ({why_not_read}){shape_said}"
-        return verdict(Shape.NEEDS_ACCOUNT, reason, problem=why_not_read if probe else "", fields=fields)
+    shape, fields, shape_said = _store_shape(cube)
+    if shape is StoreShape.UNKNOWN and not read:
+        shape, shape_said = None, ""  # nothing to blame the collection for: STAC does not ask it to say
+    named = list(dict.fromkeys(codec for codecs in probe.codecs.values() for codec in codecs)) if read else []
+    axes = StoreAxes(
+        placement=Placement.PER_COLLECTION,
+        shape=shape,
+        shape_said=shape_said,
+        **(_format_of(probe, named) if read else {}),
+        **(_access_of(described, declared) if read else {"access": Access.NOT_READ, "access_said": why_not_read}),
+    )
+    store = {"readable": read, "fields": fields, "codecs": named}
+    store["problem"] = why_not_read if probe and not read else ""
+    if (refused := axes.verdict()) is not None:
+        return verdict(*refused, axes, **store)
 
-    layout, fields, missing = _store_shape(cube)
-    if missing and why_not_read:
-        # Nothing to blame the collection for: STAC does not ask it to say.
-        return refused_for_access(fields)
-    if missing:
-        return verdict(Shape.UNREADABLE_STORE, f"{_REASONS[Shape.UNREADABLE_STORE]}: {missing}.", fields=fields)
-    if layout is Shape.SERIES_STORE:
-        reason = _REASONS[Shape.SERIES_STORE]
-        if why_not_read:
-            said = "GeoRiva read this from the collection's description, as its data could not be opened"
-            reason += f" {said} ({why_not_read})."
-        return verdict(Shape.SERIES_STORE, reason, readable=not why_not_read, fields=fields)
-    if why_not_read:
-        # What the collection says of its shape is named too: it is not what stops it (ADR 0052 §2).
-        return refused_for_access(fields, " The collection's description says it is laid out for drawing maps.")
-    if probe.store_format is not StoreFormat.ICECHUNK:
-        return verdict(Shape.PLAIN_ZARR_STORE, _REASONS[Shape.PLAIN_ZARR_STORE], readable=True, fields=fields)
-    # Every asset's word counts here too: one twin may say what the other leaves out.
-    own_endpoint = {_as_prefix(place) for other in described.assets.values() for place in other.chunk_endpoints}
-    elsewhere = list(dict.fromkeys(_kind_of_place(place, place in own_endpoint) for place in declared))
-    if any(elsewhere):
-        kinds = ", ".join(kind for kind in elsewhere if kind)
-        reason = f"{_REASONS[Shape.STORE_KEPT_ELSEWHERE]}: {kinds}."
-        return verdict(Shape.STORE_KEPT_ELSEWHERE, reason, readable=True, fields=fields)
-
-    named = list(dict.fromkeys(codec for codecs in probe.codecs.values() for codec in codecs))
-    unknown = [codec for codec in named if not can_decode(codec)]
-    if unknown:
-        reason = f"{_REASONS[Shape.UNDECODABLE_STORE]}: {', '.join(f'“{codec}”' for codec in unknown)}."
-        return verdict(Shape.UNDECODABLE_STORE, reason, readable=True, fields=fields, codecs=named)
+    # Every axis is accepted: what is left is which of its arrays can be shown (ADR 0044 §8).
     arrays = _store_arrays(cube)
     if not any(array.offered for array in arrays):
         why = "; ".join(dict.fromkeys(array.reason for array in arrays))
-        reason = f"{_REASONS[Shape.UNMAPPABLE_STORE]} {why}"
-        return verdict(Shape.UNMAPPABLE_STORE, reason, readable=True, fields=fields, codecs=named)
+        return verdict(Shape.UNMAPPABLE_STORE, f"{_REASONS[Shape.UNMAPPABLE_STORE]} {why}", axes, **store)
     progress(FINDING_PLACES)
     regions = _chunk_regions(upstream, declared)
-    return verdict(
-        Shape.MAP_STORE, "", readable=True, fields=fields, codecs=named, arrays=arrays, chunk_regions=regions
-    )
+    return verdict(Shape.MAP_STORE, "", axes, **store, arrays=arrays, chunk_regions=regions)
+
+
+def _format_of(probe, named: list[str]) -> dict:
+    """The format axis of a store that was read: its kind, and whether every codec it names decodes."""
+    if probe.store_format is not StoreFormat.ICECHUNK:
+        return {"format": Format.PLAIN_ZARR}
+    unknown = [codec for codec in named if not can_decode(codec)]
+    if unknown:
+        return {"format": Format.UNDECODABLE, "format_said": ", ".join(f"“{codec}”" for codec in unknown)}
+    return {"format": Format.ICECHUNK}
+
+
+def _access_of(described: UpstreamCollection, declared: list[str]) -> dict:
+    """The access axis of a store that was read: whether every place its data
+    is declared to live is a kind we read anonymously (ADR 0044 §11)."""
+    # Every asset's word counts: one twin may say what the other leaves out.
+    own_endpoint = {_as_prefix(place) for other in described.assets.values() for place in other.chunk_endpoints}
+    elsewhere = [kind for kind in dict.fromkeys(_kind_of_place(p, p in own_endpoint) for p in declared) if kind]
+    if elsewhere:
+        return {"access": Access.KEPT_ELSEWHERE, "access_said": ", ".join(elsewhere)}
+    return {"access": Access.ANONYMOUS}
 
 
 #: What an operator is told a place GeoRiva does not read from is, by how its address begins.
@@ -845,7 +972,7 @@ def _as_the_store_says(cube: UpstreamCube, chunking: dict[str, StoreChunking], *
     return UpstreamCube(dimensions=dimensions, arrays=arrays)
 
 
-def _store_shape(cube: UpstreamCube) -> tuple[Shape | None, int, str]:
+def _store_shape(cube: UpstreamCube) -> tuple[StoreShape, int, str]:
     """`(shape, how many fields it was read from, what was missing)` for a
     store, from the chunking `cube` gives: the store's own, where it was read
     (`_as_the_store_says`), else what its collection published.
@@ -858,27 +985,27 @@ def _store_shape(cube: UpstreamCube) -> tuple[Shape | None, int, str]:
     horizontal = _horizontal(cube)
     across = set(horizontal)
     if set(horizontal.values()) != {"x", "y"}:
-        return None, 0, "the collection does not describe a grid with a width and a height"
+        return StoreShape.UNKNOWN, 0, "the collection does not describe a grid with a width and a height"
     fields = [array for array in cube.arrays.values() if len(across & set(array.dimensions)) == 2]
     if not fields:
-        return None, 0, "the collection lists no fields on its grid"
+        return StoreShape.UNKNOWN, 0, "the collection lists no fields on its grid"
 
     shapes = set()
     for array in fields:
-        layout, missing = _field_shape(array, cube, across)
+        found, missing = _field_shape(array, cube, across)
         if missing:
-            return None, len(fields), missing
-        shapes.add(layout)
-    if Shape.SERIES_STORE in shapes:
-        return Shape.SERIES_STORE, len(fields), ""
-    if shapes != {Shape.MAP_STORE}:
-        return None, len(fields), "its fields are stored as many small tiles, which GeoRiva cannot read yet"
-    return Shape.MAP_STORE, len(fields), ""
+            return StoreShape.UNKNOWN, len(fields), missing
+        shapes.add(found)
+    if StoreShape.SERIES in shapes:
+        return StoreShape.SERIES, len(fields), ""
+    if shapes != {StoreShape.MAP}:
+        return StoreShape.TILED, len(fields), "its fields are stored as many small tiles, which GeoRiva cannot read yet"
+    return StoreShape.MAP, len(fields), ""
 
 
-def _field_shape(array: CubeArray, cube: UpstreamCube, across: set[str]) -> tuple[Shape | None, str]:
-    """One field's shape, or what its description is missing. `None` with
-    nothing missing is a field cut into tiles within a single step."""
+def _field_shape(array: CubeArray, cube: UpstreamCube, across: set[str]) -> tuple[StoreShape | None, str]:
+    """One field's shape, or what its description is missing. `TILED` is a
+    field cut into tiles within a single step."""
     if array.chunks is None or len(array.chunks) != len(array.dimensions):
         return None, f"nothing says how “{array.path}” is divided up"
     whole = True
@@ -890,8 +1017,8 @@ def _field_shape(array: CubeArray, cube: UpstreamCube, across: set[str]) -> tupl
             whole = whole and span >= dimension.size
         elif (dimension is not None and dimension.kind == "temporal") or name.lower() in _STEP_NAMES:
             if span > 1:
-                return Shape.SERIES_STORE, ""
-    return (Shape.MAP_STORE if whole else None), ""
+                return StoreShape.SERIES, ""
+    return (StoreShape.MAP if whole else StoreShape.TILED), ""
 
 
 def _samples(items, rasters):

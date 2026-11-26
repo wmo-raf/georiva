@@ -11,7 +11,17 @@ from datetime import UTC, datetime
 
 from django.test import SimpleTestCase
 
-from georiva.harvest.survey import Shape, reason_for, survey_catalog, survey_collection
+from georiva.harvest.survey import (
+    Access,
+    Format,
+    Placement,
+    Shape,
+    StoreAxes,
+    StoreShape,
+    reason_for,
+    survey_catalog,
+    survey_collection,
+)
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import (
     AssetProbe,
@@ -192,6 +202,7 @@ class ShapeTests(SurveyMixin, SimpleTestCase):
         self.assertIn("keeps a store of its own for each variable", found.reason)
         self.assertIn("one store per collection", found.reason)
         self.assertNotIn("divided up", found.reason, "the collection is not blamed for what STAC does not ask")
+        self.assertEqual(found.axes, StoreAxes(placement=Placement.PER_ITEM_PER_VARIABLE), "judged on placement alone")
 
     def test_items_that_are_each_a_whole_store_cannot_and_say_so(self):
         # Earth Data Hub's `era5`: each item a dataset of its own, its store's asset untyped.
@@ -421,6 +432,26 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual(found.reason, "")
         self.assertEqual(self.upstream.stores_opened, [STORE])
         self.assertEqual((found.store.href, found.store.fields), (STORE, 2))
+
+    def test_an_accepted_store_reports_the_value_it_found_on_each_axis(self):
+        self.map_shaped()
+
+        found = self.survey()
+
+        self.assertEqual(
+            found.axes, StoreAxes(Placement.PER_COLLECTION, StoreShape.MAP, Format.ICECHUNK, Access.ANONYMOUS)
+        )
+        self.assertIsNone(found.axes.refused)
+
+    def test_a_store_refused_on_several_axes_is_refused_on_the_first_in_order(self):
+        # Packed in a way we cannot unpack, and kept somewhere we do not read: its format comes before its access.
+        self.map_shaped(codecs={"temperature_2m": ("acme_wavelet",)}, chunk_locations=(GRIB_BUCKET, "az://forecasts/"))
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.UNDECODABLE_STORE)
+        self.assertEqual((found.axes.format, found.axes.access), (Format.UNDECODABLE, Access.KEPT_ELSEWHERE))
+        self.assertEqual(found.axes.refused, ("format", Format.UNDECODABLE))
 
     def test_a_feed_can_be_set_up_from_an_accepted_store(self):
         self.map_shaped()
