@@ -51,7 +51,9 @@ def _reached(ip):
     return [ip, *(inner for inner in wrapped if inner is not None)]
 
 
-def _is_public(address: str) -> bool:
+def is_public_address(address: str) -> bool:
+    """Whether a connection to `address` ends somewhere public: never a private,
+    loopback, link-local, shared or reserved address, however it is wrapped."""
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
@@ -237,6 +239,6 @@ class AssetHostAllowlist:
             addresses = self._resolve(host)
         if not addresses:
             return f"host {host} does not resolve", ()
-        if not all(_is_public(address) for address in addresses):
+        if not all(is_public_address(address) for address in addresses):
             return f"host {host} resolves to a private, loopback or link-local address", ()
         return None, tuple(addresses)

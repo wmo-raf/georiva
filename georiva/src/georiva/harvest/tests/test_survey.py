@@ -11,13 +11,29 @@ from datetime import UTC, datetime
 
 from django.test import SimpleTestCase
 
-from georiva.harvest.survey import Shape, reason_for, survey_catalog, survey_collection
+from georiva.harvest import background_survey
+from georiva.harvest.survey import (
+    Access,
+    Format,
+    Placement,
+    Shape,
+    StoreAxes,
+    StoreShape,
+    reason_for,
+    survey_catalog,
+    survey_collection,
+)
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import (
+    STORE_TIMEOUT,
     AssetProbe,
+    CubeArray,
     CubeDimension,
+    StoreChunking,
+    StoreFormat,
     UpstreamAsset,
     UpstreamCollection,
+    UpstreamCube,
     UpstreamStatistics,
     UpstreamTimedOut,
     UpstreamUnreachable,
@@ -156,19 +172,73 @@ class ShapeTests(SurveyMixin, SimpleTestCase):
 
         self.assertTrue(self.survey().harvestable)
 
-    def test_a_zarr_or_netcdf_store_on_the_items_cannot(self):
-        for media_type, href in (
-            ("application/vnd+zarr", "abfs://era5/2020/12/precip.zarr"),
-            ("application/x-netcdf", f"{OWN}/2020-12.nc"),
-            ("", f"{OWN}/2020-12.zarr"),
-        ):
-            with self.subTest(media_type=media_type, href=href):
-                self.upstream.items = []
-                self.upstream.add_item(day(1), {"precip": UpstreamAsset(href=href, media_type=media_type)})
+    def test_items_that_each_keep_a_store_for_each_variable_cannot_and_say_so(self):
+        # Planetary Computer's `era5-pds`: one item a month, one store per variable, and a
+        # collection whose only file is a NetCDF of static fields beside a cube that gives no chunking.
+        self.upstream.collections = [
+            UpstreamCollection(
+                id="chirps",
+                assets={
+                    "era5-static-var": UpstreamAsset(href=f"{OWN}/era5_static.nc", media_type="application/netcdf")
+                },
+                cube=UpstreamCube(
+                    dimensions={"time": CubeDimension("time", kind="temporal")},
+                    arrays={"surface_air_pressure": CubeArray("surface_air_pressure", ("time", "lat", "lon"))},
+                ),
+            )
+        ]
+        for n in (1, 2):
+            self.upstream.add_item(
+                day(n),
+                {
+                    variable: UpstreamAsset(
+                        href=f"abfs://era5/ERA5/2020/0{n}/{variable}.zarr", media_type="application/vnd+zarr"
+                    )
+                    for variable in ("surface_air_pressure", "sea_surface_temperature")
+                },
+            )
 
-                found = self.survey()
+        found = self.survey()
 
-                self.assertEqual((found.shape, found.harvestable), (Shape.STORE, False))
+        self.assertEqual((found.shape, found.harvestable), (Shape.STORE_PER_ITEM_PER_VARIABLE, False))
+        self.assertIn("keeps a store of its own for each variable", found.reason)
+        self.assertIn("one store per collection", found.reason)
+        self.assertNotIn("divided up", found.reason, "the collection is not blamed for what STAC does not ask")
+        self.assertEqual(found.axes, StoreAxes(placement=Placement.PER_ITEM_PER_VARIABLE), "judged on placement alone")
+
+    def test_items_that_are_each_a_whole_store_cannot_and_say_so(self):
+        # Earth Data Hub's `era5`: each item a dataset of its own, its store's asset untyped.
+        for n, name in ((1, "era5-land"), (2, "era5-land-daily")):
+            self.upstream.add_item(
+                day(n),
+                {
+                    "data": f"https://data.upstream.example/era5/{name}-v0.zarr",
+                    "thumbnail": UpstreamAsset(href=f"{OWN}/{name}.png", media_type="image/png"),
+                },
+            )
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.harvestable), (Shape.STORE_PER_ITEM, False))
+        self.assertIn("Each item of this collection is a dataset with a store of its own", found.reason)
+
+    def test_one_store_an_item_publishes_at_two_addresses_is_one_store(self):
+        for n in (1, 2):
+            self.upstream.add_item(
+                day(n),
+                {
+                    "data": f"https://data.upstream.example/era5/month-{n}.zarr",
+                    "data-s3": f"s3://era5/month-{n}.zarr",
+                },
+            )
+
+        self.assertEqual(self.survey().shape, Shape.STORE_PER_ITEM)
+
+    def test_a_netcdf_file_on_the_items_is_a_file_not_a_store(self):
+        netcdf = UpstreamAsset(href=f"{OWN}/2020-12.nc", media_type="application/x-netcdf")
+        self.upstream.add_item(day(1), {"precip": netcdf})
+
+        self.assertEqual(self.survey().shape, Shape.NO_RASTERS)
 
     def test_a_store_on_the_collection_itself_cannot(self):
         self.upstream.collections = [
@@ -333,8 +403,25 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         with self.assertRaises(UpstreamTimedOut) as raised:
             self.survey()
 
-        self.assertEqual(str(raised.exception), "the provider's data store did not answer within 45 seconds")
+        self.assertEqual(
+            str(raised.exception), f"the provider's data store did not answer within {STORE_TIMEOUT} seconds"
+        )
         self.assert_plain(str(raised.exception))
+
+    def test_a_store_that_does_not_answer_in_time_carries_what_was_under_way_for_whoever_supports_the_operator(self):
+        self.map_shaped()
+        self.upstream.store_times_out = True
+        self.upstream.store_detail = f"Gave up after 170 s at {STORE}, while it was sending its table of contents."
+
+        with self.assertRaises(UpstreamTimedOut) as raised:
+            self.survey()
+
+        self.assertEqual(raised.exception.details["address"], STORE)
+        self.assertIn("sending its table of contents", raised.exception.details["error"])
+
+    def test_a_store_is_given_up_on_before_the_wizard_gives_up_waiting_for_the_survey(self):
+        # The catalog and the collection are read first, within the same wait (#825).
+        self.assertLess(STORE_TIMEOUT + 30, background_survey.GIVE_UP_SECONDS)
 
     def test_it_says_what_it_is_waiting_on_before_it_waits(self):
         self.map_shaped(chunk_locations=("s3://noaa-gfs-bdp-pds/",))
@@ -364,6 +451,26 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual(found.reason, "")
         self.assertEqual(self.upstream.stores_opened, [STORE])
         self.assertEqual((found.store.href, found.store.fields), (STORE, 2))
+
+    def test_an_accepted_store_reports_the_value_it_found_on_each_axis(self):
+        self.map_shaped()
+
+        found = self.survey()
+
+        self.assertEqual(
+            found.axes, StoreAxes(Placement.PER_COLLECTION, StoreShape.MAP, Format.ICECHUNK, Access.ANONYMOUS)
+        )
+        self.assertIsNone(found.axes.refused)
+
+    def test_a_store_refused_on_several_axes_is_refused_on_the_first_in_order(self):
+        # Packed in a way we cannot unpack, and kept somewhere we do not read: its format comes before its access.
+        self.map_shaped(codecs={"temperature_2m": ("acme_wavelet",)}, chunk_locations=(GRIB_BUCKET, "az://forecasts/"))
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.UNDECODABLE_STORE)
+        self.assertEqual((found.axes.format, found.axes.access), (Format.UNDECODABLE, Access.KEPT_ELSEWHERE))
+        self.assertEqual(found.axes.refused, ("format", Format.UNDECODABLE))
 
     def test_a_feed_can_be_set_up_from_an_accepted_store(self):
         self.map_shaped()
@@ -527,7 +634,7 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
 
         self.assertEqual(self.survey().store.chunk_regions, {})
 
-    def test_a_store_declaring_any_other_kind_of_place_is_refused_the_kind_named_and_never_opened(self):
+    def test_a_store_declaring_any_other_kind_of_place_is_refused_the_kind_named_and_its_data_never_read(self):
         kinds = {
             "az://forecasts/": "Microsoft Azure storage",
             "http://data.example/grib/": "a plain web address",
@@ -537,7 +644,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         }
         for declared, kind in kinds.items():
             with self.subTest(declared=declared):
-                self.upstream.stores_opened = []
                 self.map_shaped(chunk_locations=(GRIB_BUCKET, declared))
 
                 found = self.survey()
@@ -546,7 +652,7 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
                 self.assertFalse(found.harvestable)
                 self.assertIn(kind, found.reason)
                 self.assertIn(declared, found.reason)
-                self.assertEqual(self.upstream.stores_opened, [], "a verdict, before anything is opened")
+                self.assertEqual(self.upstream.samples_asked, [], "only the store's own description was read")
                 self.assert_plain(found.reason, but=declared)
 
     def test_a_place_served_at_an_address_of_its_own_is_refused_too(self):
@@ -622,12 +728,35 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertIn("cannot use it yet", found.reason)
         self.assert_plain(found.reason)
 
-    def test_a_series_shaped_store_is_never_opened(self):
+    def test_a_store_whose_collection_gives_no_chunking_has_its_shape_read_from_the_store(self):
+        for chunks, shape in (((1, 1, 721, 1440), Shape.MAP_STORE), ((1, 105, 121, 121), Shape.SERIES_STORE)):
+            with self.subTest(chunks=chunks):
+                self.upstream.become_store(
+                    STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, chunks), **BESIDE}, published_chunks=False
+                )
+
+                found = self.survey()
+
+                self.assertEqual(found.shape, shape)
+                self.assertNotIn("divided up", found.reason)
+
+    def test_the_store_is_believed_over_what_its_collection_says(self):
+        self.upstream.become_store(
+            STORE,
+            FORECAST,
+            {"temperature_2m": (RUN_STEP_GRID, (1, 105, 121, 121))},
+            published={"temperature_2m": (1, 1, 721, 1440)},
+        )
+
+        self.assertEqual(self.survey().shape, Shape.SERIES_STORE)
+
+    def test_a_series_shaped_store_is_judged_from_its_own_description_and_none_of_its_data_is_read(self):
         self.series_shaped()
 
         self.survey()
 
-        self.assertEqual(self.upstream.stores_opened, [], "its published layout already said no")
+        self.assertEqual(self.upstream.stores_opened, [STORE])
+        self.assertEqual(self.upstream.samples_asked, [])
 
     def test_many_times_in_one_piece_is_series_shaped_whatever_the_ground_it_covers(self):
         self.upstream.become_store(
@@ -659,6 +788,25 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.map_shaped()
 
         self.assertEqual(self.survey().shape, Shape.MAP_STORE)
+
+    # Refused: what kind of store it is.
+
+    def test_a_plain_zarr_store_is_refused_for_what_kind_of_store_it_is(self):
+        self.map_shaped(store_format=StoreFormat.ZARR)
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.harvestable), (Shape.PLAIN_ZARR_STORE, False))
+        self.assertIn("a kind of data store GeoRiva cannot read yet", found.reason)
+        self.assert_plain(found.reason)
+        self.assertEqual(self.upstream.samples_asked, [])
+
+    def test_a_series_shaped_plain_zarr_store_is_refused_for_its_shape_first(self):
+        self.upstream.become_store(
+            STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 105, 121, 121))}, store_format=StoreFormat.ZARR
+        )
+
+        self.assertEqual(self.survey().shape, Shape.SERIES_STORE)
 
     # Refused: what it is packed with.
 
@@ -700,6 +848,112 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertFalse(location.readable)
         self.assertEqual(found.proposed_locations, [])
 
+    def test_a_store_that_does_not_open_is_judged_from_what_its_collection_says_and_says_why(self):
+        self.series_shaped()
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.SERIES_STORE, "the shape before the access")
+        self.assertIn("not for drawing maps", found.reason)
+        self.assertIn("from the collection's description", found.reason)
+        self.assertIn("it did not open for a reader with no account", found.reason)
+        self.assert_plain(found.reason)
+
+    def test_a_map_shaped_store_that_does_not_open_is_refused_for_the_access_and_its_shape_is_named(self):
+        self.map_shaped()
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.NEEDS_ACCOUNT)
+        self.assertIn("it did not open for a reader with no account", found.reason)
+        self.assertIn("description says it is laid out for drawing maps", found.reason)
+        self.assert_plain(found.reason)
+
+    def test_a_store_at_a_place_never_opened_is_judged_from_what_its_collection_says(self):
+        self.upstream.addresses[STORE_HOST] = ["10.0.0.7"]
+        self.series_shaped()
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.SERIES_STORE)
+        self.assertIn("from the collection's description", found.reason)
+        self.assertEqual(self.upstream.stores_opened, [])
+
+    def test_a_series_shaped_store_that_does_not_answer_in_time_is_refused_for_what_its_collection_says(self):
+        self.series_shaped()
+        self.upstream.store_times_out = True
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.SERIES_STORE, "nothing a second try could change")
+        self.assertIn("did not answer", found.reason)
+
+    def test_an_array_the_store_does_not_hold_is_not_judged(self):
+        # The collection describes an array kept somewhere else, and says nothing of how it is divided up.
+        self.map_shaped(
+            arrays={"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)), "elsewhere": (RUN_STEP_GRID, None)}
+        )
+        del self.upstream.stores[STORE]["elsewhere"]
+
+        self.assertEqual(self.survey().shape, Shape.MAP_STORE)
+
+    def test_a_store_that_names_its_dimensions_otherwise_is_read_in_the_collections_order(self):
+        self.series_shaped()
+        self.upstream.store_chunking[STORE]["temperature_2m"] = StoreChunking(
+            ("init_time", "lead_time", "lat", "lon"), (1024, 209, 721, 1440), (1, 1, 721, 1440)
+        )
+
+        self.assertEqual(self.survey().shape, Shape.MAP_STORE, "the store's chunking, under the collection's names")
+
+    def test_a_store_that_does_not_open_and_whose_collection_gives_no_chunking_is_refused_for_the_access_alone(self):
+        self.upstream.become_store(
+            STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))}, published_chunks=False
+        )
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.NEEDS_ACCOUNT)
+        self.assertIn("it did not open for a reader with no account", found.reason)
+        self.assertNotIn("divided up", found.reason, "the collection is not blamed for what STAC does not ask")
+
+    def test_a_store_that_does_not_open_carries_what_its_library_said_beside_the_plain_reason(self):
+        self.map_shaped()
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+        self.upstream.store_detail = "RepositoryNotFoundError: the repository doesn't exist"
+
+        found = self.survey()
+
+        self.assertEqual(found.details["address"], STORE)
+        self.assertEqual(found.details["error"], "RepositoryNotFoundError: the repository doesn't exist")
+        self.assertNotIn("repository", found.reason, "the headline stays in an operator's words")
+
+    def test_a_refused_store_says_what_was_found_on_each_axis(self):
+        self.series_shaped()
+
+        found = self.survey()
+
+        self.assertEqual(
+            found.details["found"], "placement: per-collection · shape: series · format: icechunk · access: anonymous"
+        )
+
+    def test_fields_on_cells_that_are_no_grid_of_rows_and_columns_are_refused_for_that(self):
+        # DWD ICON-EU on its own icosahedral mesh: one `cell` dimension, no latitude or longitude one.
+        self.upstream.become_store(
+            STORE,
+            {"init_time": None, "lead_time": 93, "cell": 768608},
+            {"cloud_cover_high": (("init_time", "lead_time", "cell"), (1, 1, 768608))},
+        )
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.UNGRIDDED_STORE)
+        self.assertIn("not on a grid of rows and columns", found.reason)
+        self.assertNotIn("the collection does not", found.reason, "nothing the collection left out")
+        self.assert_plain(found.reason)
+
     def test_a_store_at_a_private_address_is_refused_and_never_opened(self):
         self.upstream.addresses[STORE_HOST] = ["10.0.0.7"]
         self.map_shaped()
@@ -727,22 +981,14 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual(self.upstream.stores_opened, [f"{STORE}/"])
         self.assertEqual(found.shape, Shape.MAP_STORE)
 
-    def test_a_store_whose_layout_the_collection_does_not_give_is_unreadable_and_says_what_is_missing(self):
+    def test_a_store_whose_layout_nothing_gives_is_unreadable_and_says_what_is_missing(self):
         cases = {
             "how “temperature_2m” is divided up": (FORECAST, {"temperature_2m": (RUN_STEP_GRID, None)}),
             "how “wind_u_10m” is divided up": (
                 FORECAST,
                 {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)), "wind_u_10m": (RUN_STEP_GRID, (1, 721, 1440))},
             ),
-            "the size of its grid along “latitude”": (
-                {**FORECAST, "latitude": None},
-                {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))},
-            ),
             "lists no fields on its grid": (FORECAST, dict(BESIDE)),
-            "a grid with a width and a height": (
-                {"init_time": None, "lead_time": 209, "station": 500},
-                {"temperature_2m": (("init_time", "lead_time", "station"), (1, 1, 500))},
-            ),
         }
         for missing, (dimensions, arrays) in cases.items():
             with self.subTest(missing=missing):
@@ -754,7 +1000,14 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
                 self.assertEqual((found.shape, found.accepted), (Shape.UNREADABLE_STORE, False))
                 self.assertIn(missing, found.reason)
                 self.assert_plain(found.reason)
-                self.assertEqual(self.upstream.stores_opened, [])
+                self.assertEqual(self.upstream.samples_asked, [])
+
+    def test_the_size_of_a_grid_the_collection_does_not_give_is_read_from_the_store(self):
+        self.upstream.become_store(
+            STORE, {**FORECAST, "latitude": None}, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))}
+        )
+
+        self.assertEqual(self.survey().shape, Shape.MAP_STORE)
 
     def test_fields_cut_into_tiles_within_one_step_are_neither_shape(self):
         self.upstream.become_store(STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 256, 256))})
@@ -773,7 +1026,15 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual(self.upstream.stores_opened, [])
 
     def test_no_reason_given_for_a_store_uses_its_makers_words(self):
-        for shape in (Shape.STORE, Shape.SERIES_STORE, Shape.UNDECODABLE_STORE, Shape.UNREADABLE_STORE):
+        for shape in (
+            Shape.STORE,
+            Shape.STORE_PER_ITEM,
+            Shape.STORE_PER_ITEM_PER_VARIABLE,
+            Shape.SERIES_STORE,
+            Shape.PLAIN_ZARR_STORE,
+            Shape.UNDECODABLE_STORE,
+            Shape.UNREADABLE_STORE,
+        ):
             with self.subTest(shape=shape):
                 self.assertTrue(reason_for(shape))
                 self.assert_plain(reason_for(shape))

@@ -16,7 +16,9 @@ from .upstream import (
     CubeDimension,
     FieldSample,
     HeldStep,
+    StoreChunking,
     StoreField,
+    StoreFormat,
     StoreProbe,
     UpstreamAsset,
     UpstreamCollection,
@@ -35,6 +37,10 @@ PUBLIC_ADDRESS = "93.184.216.34"
 
 #: The codecs a store's arrays name unless a test says otherwise: ones every install decodes.
 PLAIN_CODECS = ("bytes", "zstd")
+
+
+def _as_tuple(chunks) -> tuple[int, ...] | None:
+    return None if chunks is None else tuple(chunks)
 
 
 def cube_dimension(name: str, size: int | None) -> CubeDimension:
@@ -115,8 +121,14 @@ class FakeUpstream:
         # What only an Upstream store answers.
         #: The codecs each store's arrays name, by the store's address and the array's path.
         self.stores: dict[str, dict[str, tuple[str, ...]]] = {}
+        #: How each store's arrays are divided up, as the store itself says, by its address and the array's path.
+        self.store_chunking: dict[str, dict[str, StoreChunking]] = {}
+        #: The Store format of each store, by its address: an Icechunk repository unless a test says otherwise.
+        self.store_formats: dict[str, StoreFormat] = {}
         #: A message for a store that cannot be opened.
         self.store_unreadable: str | None = None
+        #: What the store's library says, word for word, when it does not open or answer.
+        self.store_detail: str = ""
         #: True for a store that does not answer in the time it is given.
         self.store_times_out = False
         #: The stores opened, in order.
@@ -163,6 +175,9 @@ class FakeUpstream:
         s3_href: str = "",
         media_type: str = "application/x-icechunk",
         described: bool = True,
+        published_chunks: bool = True,
+        published: dict[str, tuple[int, ...]] | None = None,
+        store_format: StoreFormat = StoreFormat.ICECHUNK,
     ) -> None:
         """Make the collection an Upstream store at `href`.
 
@@ -176,6 +191,12 @@ class FakeUpstream:
         `chunk_endpoints` are the declared places said to be served at an
         address of their own;
         `described=False` leaves the cube out of the collection.
+
+        The store itself says how each array is divided up: `chunks`, over
+        `dimensions`' sizes. The collection says the same unless told otherwise:
+        `published_chunks=False` leaves the chunking out of its cube, as most
+        publishers do, and `published` gives, by path, chunking it says instead
+        of the store's. `store_format=StoreFormat.ZARR` makes it a plain Zarr store.
         """
         asset = UpstreamAsset(
             href=href,
@@ -193,7 +214,12 @@ class FakeUpstream:
                 for name, size in dimensions.items()
             },
             arrays={
-                path: CubeArray(path, tuple(named), None if chunks is None else tuple(chunks), **dict(*said))
+                path: CubeArray(
+                    path,
+                    tuple(named),
+                    _as_tuple((published or {}).get(path, chunks) if published_chunks else None),
+                    **dict(*said),
+                )
                 for path, (named, chunks, *said) in arrays.items()
             },
         )
@@ -203,6 +229,17 @@ class FakeUpstream:
         ]
         self.items = []
         self.stores[href] = {path: (codecs or {}).get(path, PLAIN_CODECS) for path in arrays}
+        self.store_formats[href] = store_format
+        sizes = {name: size.size if isinstance(size, CubeDimension) else size for name, size in dimensions.items()}
+        self.store_chunking[href] = {
+            path: StoreChunking(
+                tuple(named),
+                tuple(sizes.get(name) or span for name, span in zip(named, chunks, strict=True)),
+                tuple(chunks),
+            )
+            for path, (named, chunks, *_said) in arrays.items()
+            if chunks is not None and len(chunks) == len(named)
+        }
         lead = dimensions.get("lead_time")
         self.steps_per_run = lead.size if isinstance(lead, CubeDimension) else lead
 
@@ -437,12 +474,17 @@ class FakeUpstream:
         self.stores_opened.append(href)
         if self.store_times_out:
             problem = f"it did not answer within {STORE_TIMEOUT} seconds"
-            return StoreProbe(readable=False, problem=problem, timed_out=True)
+            return StoreProbe(readable=False, problem=problem, timed_out=True, detail=self.store_detail)
         if self.store_unreadable:
-            return StoreProbe(readable=False, problem=self.store_unreadable)
+            return StoreProbe(readable=False, problem=self.store_unreadable, detail=self.store_detail)
         if href not in self.stores:
             return StoreProbe(readable=False, problem="there is no store at that address")
-        return StoreProbe(readable=True, codecs=dict(self.stores[href]))
+        return StoreProbe(
+            readable=True,
+            codecs=dict(self.stores[href]),
+            chunking=dict(self.store_chunking.get(href, {})),
+            store_format=self.store_formats.get(href, StoreFormat.ICECHUNK),
+        )
 
     def sample_store(
         self, href: str, fields: list[StoreField], chunk_locations: dict[str, str]

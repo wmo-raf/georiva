@@ -506,6 +506,16 @@ class TestFailures:
 
         assert store_reader.opened_store(upstream_store.href, ((ECMWF, ""),), True) is not None
 
+    def test_a_store_published_with_a_closing_slash_is_opened_without_it(self, monkeypatch):
+        # dynamical.org publishes some stores' addresses so (#825). Icechunk then asks for `…icechunk//repo`,
+        # which S3 and R2 answer 404 and this module's own server forgives: so the address is what is checked.
+        opened = []
+        monkeypatch.setattr(icechunk, "http_storage", lambda href, **_options: opened.append(href))
+
+        store_reader.storage("https://stores.example.org/gfs.icechunk/")
+
+        assert opened == ["https://stores.example.org/gfs.icechunk"]
+
     def test_a_plain_http_store_its_feed_no_longer_allows_is_not_warmed_and_let_go(self, rendering, upstream_store):
         publish(rendering, {FIELD: published(upstream_store.href)})
         warm.warm_stores()

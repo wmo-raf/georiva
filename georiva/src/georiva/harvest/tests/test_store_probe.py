@@ -3,13 +3,16 @@ Opening one Upstream store to see which codecs its arrays name: the read
 behind the survey's verdict on a store (ADR 0044 §12).
 
 The repositories here are built in a temporary directory and opened from it.
-Nothing reaches a network: where a probe would, the read is stood in for.
+Nothing reaches beyond this machine: where a probe would, the read is stood in
+for, and a plain Zarr store is served from this machine's own loopback.
 """
 
 import asyncio
+import functools
 import json
 import tempfile
 import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 import icechunk
@@ -18,10 +21,24 @@ from django.test import SimpleTestCase
 from zarr.core.buffer import default_buffer_prototype
 
 from georiva.harvest import upstream
-from georiva.harvest.upstream import StacApiClient, can_decode, codec_names, probe_store, read_store_codecs
+from georiva.harvest.upstream import (
+    StacApiClient,
+    StoreArrayMetadata,
+    StoreChunking,
+    StoreFormat,
+    can_decode,
+    codec_names,
+    probe_store,
+    read_plain_zarr,
+    read_store_arrays,
+)
 
 STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
 GRID = (2, 3, 4, 8)
+
+
+def codecs_of(storage):
+    return {path: array.codecs for path, array in read_store_arrays(storage).items()}
 
 
 class CodecNameTests(SimpleTestCase):
@@ -104,19 +121,47 @@ class ReadStoreCodecsTests(SimpleTestCase):
         )
         zarr.open_group(store, mode="a").create_group("pressure_level")
         zarr.create_array(
-            store, name="pressure_level/temperature", shape=GRID, chunks=(1, 1, 4, 8), shards=(1, 1, 4, 8), dtype="f4"
+            store, name="pressure_level/temperature", shape=GRID, chunks=(1, 1, 4, 8), shards=(2, 1, 4, 8), dtype="f4"
         )
 
     def test_every_array_is_found_by_its_full_path_with_the_codecs_it_names(self):
         self.commit(self.forecast)
 
-        codecs = read_store_codecs(self.storage)
+        codecs = codecs_of(self.storage)
 
         self.assertEqual(codecs.keys(), {"init_time", "temperature_2m", "pressure_level/temperature"})
         self.assertEqual(codecs["temperature_2m"], ("gribberish",))
         self.assertEqual(codecs["pressure_level/temperature"][0], "sharding_indexed")
         self.assertIn("zstd", codecs["pressure_level/temperature"], "a sharded array's inner codecs count")
         self.assertTrue(all(can_decode(codec) for named in codecs.values() for codec in named))
+
+    def test_each_arrays_layout_is_read_from_the_store_itself(self):
+        def build(store):
+            self.forecast(store)
+            zarr.create_array(
+                store,
+                name="precipitation",
+                shape=(2, 105, 40, 80),
+                chunks=(1, 105, 10, 10),
+                dtype="f4",
+                dimension_names=("init_time", "lead_time", "latitude", "longitude"),
+            )
+
+        self.commit(build)
+
+        arrays = read_store_arrays(self.storage)
+
+        self.assertEqual(
+            arrays["precipitation"].chunking,
+            StoreChunking(("init_time", "lead_time", "latitude", "longitude"), (2, 105, 40, 80), (1, 105, 10, 10)),
+        )
+        self.assertEqual(arrays["temperature_2m"].chunking.chunks, (1, 1, 4, 8))
+        self.assertEqual(arrays["temperature_2m"].chunking.dimensions, (), "a store that names no dimensions says so")
+        self.assertEqual(
+            arrays["pressure_level/temperature"].chunking.chunks,
+            (1, 1, 4, 8),
+            "a sharded array is read a piece of its shard at a time",
+        )
 
     def test_an_array_naming_a_codec_nobody_installed_is_read_all_the_same(self):
         # Opening such an array raises; what it names is learnt without opening it.
@@ -130,7 +175,7 @@ class ReadStoreCodecsTests(SimpleTestCase):
 
         self.commit(build)
 
-        codecs = read_store_codecs(self.storage)
+        codecs = codecs_of(self.storage)
 
         self.assertEqual(codecs["temperature_2m"], ("acme_wavelet",))
         self.assertFalse(can_decode("acme_wavelet"))
@@ -139,7 +184,7 @@ class ReadStoreCodecsTests(SimpleTestCase):
         self.commit(self.forecast)
 
         with mock.patch.object(icechunk.Repository, "open", wraps=icechunk.Repository.open) as opened:
-            read_store_codecs(self.storage)
+            read_store_arrays(self.storage)
 
         (call,) = opened.call_args_list
         self.assertEqual(call.args, (self.storage,))
@@ -174,7 +219,7 @@ class ReadStoreCodecsTests(SimpleTestCase):
             def list_dir(self, prefix):
                 return store.list_dir(prefix)
 
-        codecs = asyncio.run(upstream._array_codecs(Counting()))
+        codecs = {path: array.codecs for path, array in asyncio.run(upstream._array_metadata(Counting())).items()}
 
         self.assertEqual(len(codecs), 300)
         self.assertEqual([path for path, named in codecs.items() if "acme_wavelet" in named], ["field_123"])
@@ -184,7 +229,7 @@ class ReadStoreCodecsTests(SimpleTestCase):
     def test_an_empty_store_has_no_arrays(self):
         self.commit(lambda store: zarr.open_group(store, mode="a"))
 
-        self.assertEqual(read_store_codecs(self.storage), {})
+        self.assertEqual(codecs_of(self.storage), {})
 
 
 class ProbeStoreTests(SimpleTestCase):
@@ -192,14 +237,16 @@ class ProbeStoreTests(SimpleTestCase):
 
     def test_a_store_that_opens_is_readable_with_its_arrays_codecs(self):
         with (
-            mock.patch.object(upstream, "read_store_codecs", return_value={"t": ("bytes",)}) as read,
+            mock.patch.object(
+                upstream, "read_store_arrays", return_value={"t": StoreArrayMetadata(("bytes",))}
+            ) as read,
             mock.patch.object(icechunk, "http_storage", return_value="storage") as storage,
         ):
             probe = probe_store(STORE)
 
         self.assertTrue(probe.readable)
         self.assertEqual(probe.codecs, {"t": ("bytes",)})
-        read.assert_called_once_with("storage")
+        self.assertEqual(read.call_args.args, ("storage",))
         (call,) = storage.call_args_list
         self.assertEqual(call.args, (STORE,))
         self.assertIn("timeout", call.kwargs["opts"], "each request to the store has a limit of its own")
@@ -207,8 +254,9 @@ class ProbeStoreTests(SimpleTestCase):
     def test_a_store_that_raises_is_unreadable_in_words_an_operator_may_be_shown(self):
         failure = icechunk.IcechunkError("error fetching ref: chunk container s3://x; zarr codec missing")
         with (
-            mock.patch.object(upstream, "read_store_codecs", side_effect=failure),
+            mock.patch.object(upstream, "read_store_arrays", side_effect=failure),
             mock.patch.object(icechunk, "http_storage"),
+            mock.patch.object(upstream, "_plain_zarr_at", return_value=None),
             self.assertLogs("georiva.harvest.upstream", level="WARNING") as logged,
         ):
             probe = probe_store(STORE)
@@ -219,19 +267,39 @@ class ProbeStoreTests(SimpleTestCase):
         for jargon in ("chunk", "zarr", "codec", "Icechunk", "s3://"):
             self.assertNotIn(jargon, probe.problem)
         self.assertIn("chunk container", logged.output[0], "what the library said is kept for whoever reads the log")
+        self.assertIn("chunk container s3://x", probe.detail, "and for whoever reads the verdict's technical details")
 
     def test_a_store_that_does_not_answer_is_given_up_on(self):
         release = threading.Event()
         self.addCleanup(release.set)
         with (
-            mock.patch.object(upstream, "read_store_codecs", side_effect=lambda storage: release.wait(30)),
+            mock.patch.object(upstream, "read_store_arrays", side_effect=lambda storage, **_: release.wait(30)),
             mock.patch.object(icechunk, "http_storage"),
         ):
             probe = probe_store(STORE, timeout=0.2)
 
         self.assertFalse(probe.readable)
         self.assertTrue(probe.timed_out)
-        self.assertIn("did not answer", probe.problem)
+        self.assertIn("still being opened", probe.problem)
+
+    def test_a_store_slow_to_send_its_table_of_contents_says_so(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def opened_then_slow(storage, *, opened):
+            opened()
+            release.wait(30)
+
+        with (
+            mock.patch.object(upstream, "read_store_arrays", side_effect=opened_then_slow),
+            mock.patch.object(icechunk, "http_storage"),
+        ):
+            probe = probe_store(STORE, timeout=0.2)
+
+        self.assertTrue(probe.timed_out)
+        self.assertIn("still sending its table of contents", probe.problem)
+        self.assertIn("can take minutes", probe.problem)
+        self.assertIn(STORE, probe.detail)
 
     def test_the_real_client_probes_the_address_it_is_given(self):
         with mock.patch.object(upstream, "probe_store", return_value="probe") as probed:
@@ -239,3 +307,108 @@ class ProbeStoreTests(SimpleTestCase):
 
         self.assertEqual(answer, "probe")
         probed.assert_called_once_with(STORE)
+
+
+class PlainZarrProbeTests(SimpleTestCase):
+    """A plain Zarr store, not an Icechunk repository: read from its own
+    consolidated metadata, served here over this machine's loopback (ADR 0052 §1)."""
+
+    def setUp(self):
+        super().setUp()
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = folder.name
+        handler = functools.partial(QuietHandler, directory=self.folder)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.base = f"http://127.0.0.1:{server.server_port}"
+
+    def write(self, name, zarr_format):
+        group = zarr.open_group(f"{self.folder}/{name}", mode="w", zarr_format=zarr_format)
+        dimensions = ("time", "latitude", "longitude")
+        if zarr_format == 2:
+            array = group.create_array("t2m", shape=(744, 721, 1440), chunks=(372, 150, 150), dtype="f4")
+            array.attrs["_ARRAY_DIMENSIONS"] = list(dimensions)
+        else:
+            group.create_array(
+                "t2m", shape=(744, 721, 1440), chunks=(1, 721, 1440), dtype="f4", dimension_names=dimensions
+            )
+        zarr.consolidate_metadata(f"{self.folder}/{name}", zarr_format=zarr_format)
+        return f"{self.base}/{name}"
+
+    def read(self, href):
+        return read_plain_zarr(href, address="127.0.0.1", timeout=5)
+
+    def test_a_version_2_store_is_read_for_how_it_is_divided_up(self):
+        arrays = self.read(self.write("era5.zarr", 2))
+
+        self.assertEqual(
+            arrays["t2m"].chunking,
+            StoreChunking(("time", "latitude", "longitude"), (744, 721, 1440), (372, 150, 150)),
+        )
+
+    def test_a_version_3_store_is_read_for_how_it_is_divided_up(self):
+        arrays = self.read(self.write("arco.zarr", 3))
+
+        self.assertEqual(arrays["t2m"].chunking.chunks, (1, 721, 1440))
+        self.assertEqual(arrays["t2m"].chunking.dimensions, ("time", "latitude", "longitude"))
+
+    def test_an_address_with_neither_is_no_plain_zarr_store(self):
+        self.assertIsNone(self.read(f"{self.base}/nothing-here.zarr"))
+
+
+class ProbeStoreFormatTests(SimpleTestCase):
+    """Which kind of store a probe found, and where it may look for a plain Zarr one."""
+
+    def probe(self, href, *, addresses=("93.184.216.34",), plain=None):
+        resolved = [(0, 0, 0, "", (address, 443)) for address in addresses]
+        with (
+            mock.patch.object(upstream, "read_store_arrays", side_effect=icechunk.IcechunkError("no repository")),
+            mock.patch.object(icechunk, "http_storage"),
+            mock.patch.object(upstream.socket, "getaddrinfo", return_value=resolved),
+            mock.patch.object(upstream, "read_plain_zarr", return_value=plain) as read,
+            self.assertLogs("georiva.harvest.upstream", level="INFO"),
+        ):
+            return probe_store(href), read
+
+    def test_a_store_that_is_no_repository_but_says_how_it_is_divided_up_is_plain_zarr(self):
+        said = {"t2m": StoreArrayMetadata(("blosc",), StoreChunking(("time",), (744,), (372,)))}
+
+        probe, read = self.probe(STORE, plain=said)
+
+        self.assertTrue(probe.readable)
+        self.assertEqual(probe.store_format, StoreFormat.ZARR)
+        self.assertEqual(probe.chunking["t2m"].chunks, (372,))
+        self.assertEqual(read.call_args.kwargs["address"], "93.184.216.34", "from the address judged, and no other")
+
+    def test_a_store_that_is_neither_is_unreadable_for_the_reason_the_repository_gave(self):
+        probe, _read = self.probe(STORE)
+
+        self.assertFalse(probe.readable)
+        self.assertEqual(probe.problem, "it did not open for a reader with no account")
+
+    def test_a_host_that_resolves_anywhere_private_is_never_asked_for_plain_zarr(self):
+        probe, read = self.probe(STORE, addresses=("93.184.216.34", "10.0.0.7"))
+
+        self.assertFalse(probe.readable)
+        read.assert_not_called()
+
+    def test_a_plain_http_address_is_never_asked_for_plain_zarr(self):
+        probe, read = self.probe(STORE.replace("https://", "http://"))
+
+        self.assertFalse(probe.readable)
+        read.assert_not_called()
+
+    def test_an_icechunk_repository_is_called_icechunk(self):
+        with (
+            mock.patch.object(upstream, "read_store_arrays", return_value={}),
+            mock.patch.object(icechunk, "http_storage"),
+        ):
+            self.assertEqual(probe_store(STORE).store_format, StoreFormat.ICECHUNK)
+
+
+class QuietHandler(SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass

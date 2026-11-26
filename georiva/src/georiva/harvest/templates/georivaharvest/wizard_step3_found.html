@@ -60,6 +60,7 @@
             </div>
             <div class="hwiz-panel__body">
                 <p>{{ survey.reason }}</p>
+                {% include "georivaharvest/includes/technical_details.html" with details=survey.details %}
                 <p class="hwiz-note">{% trans "Nothing has been saved. You can choose another collection of this catalog, or try another catalog." %}</p>
             </div>
         </div>

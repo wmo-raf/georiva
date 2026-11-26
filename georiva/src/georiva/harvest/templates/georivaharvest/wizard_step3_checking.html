@@ -24,6 +24,7 @@
             </div>
             <div class="hwiz-panel__body">
                 <p>{% trans "Nothing was set up. You can ask the catalog again, or choose another collection." %}</p>
+                {% include "georivaharvest/includes/technical_details.html" with details=wait.details %}
             </div>
         </div>
         <form method="post" action="{% url 'harvest_wizard_step2' %}">

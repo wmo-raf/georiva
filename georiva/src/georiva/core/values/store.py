@@ -175,7 +175,9 @@ def repository_storage(href: str, *, allow_http: bool = False, timeout: str = RE
         if not allow_http:
             raise StoreAddressRefused("This upstream store is at a plain http address, which its feed does not allow.")
         options["allow_http"] = "true"
-    return icechunk.http_storage(href, opts=options)
+    # A closing slash, as some publishers spell a store's address, makes every key `…//repo`, which no
+    # object store answers (#825): the address is the same store without it.
+    return icechunk.http_storage(href.rstrip("/"), opts=options)
 
 
 # ---- what a session holds open ------------------------------------------------------
