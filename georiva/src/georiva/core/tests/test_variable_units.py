@@ -199,6 +199,8 @@ class SourceUnitLockTests(AdminFixture, TestCase):
             "source_unit": source_unit.pk,
             "unit": variable.unit_id,
             "transform_type": variable.transform_type,
+            "time_statistic": variable.time_statistic,
+            "statistic_window": variable.statistic_window,
             "sources": streamfield([("primary", {"source_name": "v", "vertical_dimension": "", "vertical_value": ""})]),
         }
         data = nested_form_data(

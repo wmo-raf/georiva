@@ -109,6 +109,11 @@ the store, and Titiler draws maps by reading the store itself.**
    on** (wmo-raf/georiva#681). That needs nothing more of the store than the listing already reads, works on a
    store's first run, and holds for any field that starts late, whatever kind it is.
 
+   *Amended by [ADR-0051](0051-a-variable-declares-its-time-statistic-a-non-instant-field-has-no-step-0.md):*
+   which steps a Variable is expected at is now its own declaration, not the steps the store holds. An array is
+   published at the run's expected steps, and a Variable whose time statistic is not `instant` has no lead-0 step.
+   The AIFS store holds its running totals at lead 0, as a field of zeros, which the inference above read as a step.
+
    **A Fixed field is expected at its first Held step only** (wmo-raf/georiva#782). A time-invariant field —
    orography, a land–sea mask — sits on the run's whole step axis like every other array, but the store writes its
    first step alone. Counted from its first Held step on, it is expected at all of them, and the run never closes.

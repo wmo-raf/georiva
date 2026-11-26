@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
+from georiva.core.time_statistic import Declared
 from georiva.ingestion.models import PushFeed
 from georiva.ingestion.upload_wizard_views import SAMPLE_MAX_BYTES, _thinned
 from georiva.organisations.testing import dial_org, join_org, make_organisation, org_host
@@ -1291,3 +1292,66 @@ class DataManagerWizardAccessTests(TestCase):
 
     def test_data_manager_can_reach_wizard_step1(self):
         self.assertEqual(self.client.get(STEP1_URL).status_code, 200)
+
+
+class TheFilesTimeStatisticTests(TestCase):
+    """A Variable made from a sample file takes the time statistic the file
+    declares of its field — GRIB's stepType, NetCDF's cell_methods — when it
+    is created (#818, ADR 0051)."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_ts", "t@s.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        make_organisation()
+        self.client.defaults["HTTP_HOST"] = org_host()
+
+    def test_the_scan_says_what_each_field_declares(self):
+        plugin = MagicMock()
+        plugin.list_variables.return_value = [
+            {
+                "name": "tp",
+                "long_name": "Total precipitation",
+                "units": "m",
+                "time_statistic": "sum",
+                "statistic_window": "run_start",
+            },
+            {"name": "2t", "long_name": "2m temp", "units": "K"},
+        ]
+        plugin.open_variable.return_value.__enter__.return_value = MagicMock(
+            data=xr.DataArray(np.array([[0.0, 1.0]]), dims=("y", "x"))
+        )
+        from io import BytesIO
+
+        sample = BytesIO(b"fake")
+        sample.name = "20250115.grib2"
+        with patch("georiva.ingestion.upload_wizard_views.format_registry") as registry:
+            registry.get_for_file.return_value = plugin
+            scanned = self.client.post(UPLOAD_SAMPLE_URL, {"sample_file": sample}).json()["variables"]
+
+        self.assertEqual(
+            [(v["time_statistic"], v["statistic_window"]) for v in scanned], [("sum", "run_start"), ("instant", "")]
+        )
+
+    def test_provision_creates_the_variable_as_its_field_declares(self):
+        session = _full_session()
+        session["variables"] = [
+            {
+                "name": "2t",
+                "long_name": "2m temperature",
+                "units": "K",
+                "time_statistic": "max",
+                "statistic_window": "preceding_interval",
+            }
+        ]
+        _seed_session(self.client, session)
+        self.client.post(PROVISION_URL)
+
+        variable = Variable.objects.get()
+        self.assertEqual(variable.declared, Declared("max", "preceding_interval"))
+
+    def test_a_field_that_declared_nothing_is_instant(self):
+        _seed_session(self.client, _full_session())
+        self.client.post(PROVISION_URL)
+
+        self.assertEqual(Variable.objects.get().time_statistic, "instant")

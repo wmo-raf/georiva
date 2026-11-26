@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from georiva.core.time_statistic import from_grib_step_type
 from georiva.utils.path import PathLike
 
 from .base import BaseFormatPlugin, VariableInfo
@@ -109,6 +110,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                     continue
                 seen.add(key)
 
+                declared = from_grib_step_type(attrs.get("GRIB_stepType"))
                 results.append(
                     {
                         "key": key,
@@ -118,6 +120,8 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                         "units": attrs.get("units", ""),
                         "dimensions": list(var.dims),
                         "shape": tuple(var.shape),
+                        # What the message declares of its time statistic (ADR 0051).
+                        **(declared.fields() if declared else {}),
                     }
                 )
 
@@ -225,6 +229,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 metadata={
                     "source_file": str(file_path),
                     "long_name": var.attrs.get("long_name", ""),
+                    "declared": from_grib_step_type(var.attrs.get("GRIB_stepType")),
                     "full_width": int(full_width),
                     "full_height": int(full_height),
                 },

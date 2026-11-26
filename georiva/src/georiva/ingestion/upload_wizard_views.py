@@ -16,6 +16,7 @@ from django.urls import reverse
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
+from georiva.core.time_statistic import INSTANT
 from georiva.core.unit_utils import Conversion, ConversionRefused, proposes_water
 from georiva.formats.registry import format_registry
 from georiva.ingestion.derived_variables import (
@@ -430,6 +431,8 @@ def upload_wizard_upload_sample(request):
                 "name": v.get("name", ""),
                 "long_name": v.get("long_name", ""),
                 "units": v.get("units", ""),
+                # What the file declares of the field's time statistic: its Variable's, when created (ADR 0051).
+                **_declared_fields(v),
             }
             entry.update(_scan_value_range(plugin, tmp_path, v))
             entry.update(_resolve_unit(entry["units"]))
@@ -936,6 +939,7 @@ def upload_wizard_provision(request):
                 expected_interval=timedelta(hours=hours) if hours else None,
             )
 
+            scanned = {v.get("name"): v for v in session.get("variables", [])}
             for assignment in session.get("assignments", []):
                 collection = created_collections[assignment["collection_idx"]]
                 variable_name = assignment["variable_name"]
@@ -971,6 +975,8 @@ def upload_wizard_provision(request):
                         "value_min": seeding.value_min,
                         "value_max": seeding.value_max,
                         "sources": sources,
+                        # A vector computed from two fields is instant, whatever they are.
+                        **(INSTANT.fields() if derived else _declared_fields(scanned.get(variable_name))),
                     },
                 )
 
@@ -990,3 +996,12 @@ def upload_wizard_provision(request):
         _("Push feed '%s' created with %d variable(s).") % (feed.name, feed.variables().count()),
     )
     return redirect("push_feed_list")
+
+
+def _declared_fields(scanned: dict | None) -> dict:
+    """The time statistic the sample file declared of a field, as Variable
+    fields: `instant` where it declared nothing (ADR 0051)."""
+    scanned = scanned or {}
+    statistic = scanned.get("time_statistic") or INSTANT.statistic
+    window = scanned.get("statistic_window") or ""
+    return {"time_statistic": statistic, "statistic_window": "" if statistic == INSTANT.statistic else window}

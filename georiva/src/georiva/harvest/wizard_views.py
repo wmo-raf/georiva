@@ -42,6 +42,7 @@ from django.utils.translation import gettext as _
 
 # The Push Feed Wizard's Sample File needs the same two things of a scanned
 # variable — a Unit for its unit string, and bounds rounded outward — and has them.
+from georiva.core.time_statistic import INSTANT
 from georiva.core.unit_utils import Conversion, ConversionRefused, proposes_water
 from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
 from georiva.organisations.access import require_active_org, scoped_queryset
@@ -772,6 +773,8 @@ def _read_samples(session: dict, ticked: list[dict], allowed: list[dict], places
                 "high": sample.value_max,
                 "places": sorted(following),
                 "steps": list(sample.held_steps),
+                # What the array declares of its time statistic: its Variable's, when created (ADR 0051).
+                **(sample.declared or INSTANT).fields(),
             }
             continue
         samples.pop(array["path"], None)
@@ -903,6 +906,7 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
     chosen, errors = [], []
     for array in ticked:
         index = array["index"]
+        sample = samples.get(array["path"]) or {}
         name = posted.get(f"name_{index}", "").strip() or array["label"]
         units, wrong = _settled_units(index, array["unit"], name, posted)
         errors += wrong
@@ -914,6 +918,8 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
                 **units,
                 "description": posted.get(f"about_{index}", "").strip(),
                 "fixed": "run" in array["axes"] and bool(posted.get(f"fixed_{index}")),
+                "time_statistic": sample.get("time_statistic", INSTANT.statistic),
+                "statistic_window": sample.get("statistic_window", INSTANT.window),
             }
         )
     return chosen, errors, False
@@ -1240,6 +1246,8 @@ def _store_plan(form: dict, session: dict, interval, catalog_id, start, end, day
                 value_max=field["value_max"],
                 description=field["description"],
                 fixed_field=field.get("fixed", False),
+                time_statistic=field.get("time_statistic", INSTANT.statistic),
+                statistic_window=field.get("statistic_window", INSTANT.window),
             )
             for field in session["chosen"]
         ]

@@ -795,3 +795,69 @@ class ParseCollectionDefsPaletteTests(TestCase):
         var = defs[0].variables[0]
         self.assertEqual(var.palette, "viridis")
         self.assertEqual(var.palette_stops, ((0.0, "#000000"), (500.0, "#ffffff")))
+
+
+class UpsertVariableTimeStatisticTests(TestCase):
+    """A plugin declares each Variable's time statistic; it seeds a new
+    Variable, and after that the operator's value wins (#818, ADR 0051)."""
+
+    def setUp(self):
+        self.collection = _collection()
+
+    def _tp(self, **declared):
+        return CollectionVariable(
+            key="tp", name="Total precipitation", source_units="m", source_variable=SourceKey(name="tp"), **declared
+        )
+
+    def provision(self, var_def):
+        return SourceSetupService()._upsert_variable(self.collection, var_def)
+
+    def test_a_declared_running_total_is_created_as_one(self):
+        variable = self.provision(self._tp(time_statistic="sum", statistic_window="run_start"))
+
+        self.assertEqual((variable.time_statistic, variable.statistic_window), ("sum", "run_start"))
+
+    def test_a_variable_declaring_nothing_is_instant(self):
+        self.assertEqual(self.provision(self._tp()).time_statistic, "instant")
+
+    def test_a_reprovision_leaves_the_operators_value_and_warns_where_it_disagrees(self):
+        variable = self.provision(self._tp())
+
+        with self.assertLogs("georiva.core.models.variable", "WARNING") as logged:
+            self.provision(self._tp(time_statistic="sum", statistic_window="run_start"))
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.time_statistic, "instant")
+        self.assertIn("col/tp", logged.output[0])
+
+    def test_a_plugin_declaring_nothing_does_not_warn_about_an_operators_value(self):
+        variable = self.provision(self._tp())
+        variable.time_statistic, variable.statistic_window = "sum", "run_start"
+        variable.save()
+
+        with self.assertNoLogs("georiva.core.models.variable", "WARNING"):
+            self.provision(self._tp())
+
+    def test_parsed_specs_carry_it(self):
+        definition = parse_collection_defs(
+            {
+                "ifs": {
+                    "name": "IFS",
+                    "time_resolution": "hourly",
+                    "variables": [
+                        {
+                            "key": "tp",
+                            "name": "Total precipitation",
+                            "source_units": "m",
+                            "source_variable": "tp",
+                            "time_statistic": "sum",
+                            "statistic_window": "run_start",
+                        }
+                    ],
+                }
+            }
+        )[0]
+
+        self.assertEqual(
+            (definition.variables[0].time_statistic, definition.variables[0].statistic_window), ("sum", "run_start")
+        )

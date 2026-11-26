@@ -46,6 +46,9 @@ class PlannedVariable:
     slug: str = ""
     #: Whether the store holds its array at a run's first step only (#782).
     fixed_field: bool = False
+    #: What its array declares of its time statistic (ADR 0051); `instant` when it says nothing.
+    time_statistic: str = "instant"
+    statistic_window: str = ""
 
 
 @dataclass(frozen=True)
@@ -118,6 +121,8 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                         "value_max": planned.value_max,
                         "description": planned.description,
                         "sort_order": position,
+                        "time_statistic": planned.time_statistic,
+                        "statistic_window": planned.statistic_window,
                         **_vector_fields(planned),
                     },
                 )

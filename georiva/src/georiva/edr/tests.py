@@ -396,3 +396,43 @@ class EDRBareSlugSubRouteTests(TestCase):
     def test_a_qualified_id_resolves_to_the_collection(self):
         resolved = self._resolve("/api/edr/collections/gfs.forecast/position/", "gfs.forecast")
         self.assertEqual(resolved, self.collection)
+
+
+class EDRParameterMeasurementTypeTests(TestCase):
+    """A Variable's time statistic is its parameter's measurementType (#818, ADR 0051)."""
+
+    def setUp(self):
+        dial_org(self.client)
+        from georiva.organisations.testing import make_org_tree
+
+        tree = make_org_tree(make_organisation())
+        self.variable = tree["variable"]
+        tree["collection"].visibility = Collection.Visibility.PUBLIC
+        tree["collection"].save()
+
+    def declare(self, statistic, window):
+        from georiva.core.models import Variable
+
+        Variable.objects.filter(pk=self.variable.pk).update(time_statistic=statistic, statistic_window=window)
+
+    def parameters(self):
+        detail = self.client.get(reverse("edr:collection-detail", args=[edr_collection_id(self.variable.collection)]))
+        listed = self.client.get(reverse("edr:collection-list")).json()["collections"][0]
+        return detail.json()["parameter_names"][self.variable.slug], listed["parameter_names"][self.variable.slug]
+
+    def test_a_running_total_is_a_sum_with_no_period(self):
+        self.declare("sum", "run_start")
+
+        for parameter in self.parameters():
+            self.assertEqual(parameter["measurementType"], {"method": "sum"})
+
+    def test_each_statistic_is_named_as_edr_names_it(self):
+        for statistic, method in (("mean", "mean"), ("max", "maximum"), ("min", "minimum")):
+            with self.subTest(statistic):
+                self.declare(statistic, "preceding_interval")
+                detail, _listed = self.parameters()
+                self.assertEqual(detail["measurementType"]["method"], method)
+
+    def test_an_instant_parameter_has_no_measurement_type(self):
+        for parameter in self.parameters():
+            self.assertNotIn("measurementType", parameter)

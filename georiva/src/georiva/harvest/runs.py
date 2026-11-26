@@ -7,10 +7,11 @@ itself, from the rows it holds:
 
 - a run opens on its first Held step;
 - it closes, as `store_held`, once every mapped Variable has a row for every
-  step its array is expected at — the run's expected steps from the array's
-  own first Held step on, since an average is never held at a run's first
-  step (#681). Which steps, not how many: a step held past the run's expected
-  length gets a row, and cannot stand in for a missing one (#672);
+  step of the run's expected steps it has: all of them for an `instant`
+  Variable, all but the first for a statistic, which has no lead-0 step
+  (`Variable.expected_leads`, ADR 0051). Which steps, not how many: a step
+  held past the run's expected length gets a row, and cannot stand in for a
+  missing one (#672);
 - a closed run that is complete for every Variable mapped now is *settled*:
   the next harvest does not ask the store about it, and its rows stand;
 - a run found no longer complete — a step gone upstream, found by a full

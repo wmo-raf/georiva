@@ -222,6 +222,18 @@ Forecast lead time in hours from the run hour; a step's valid time = run time + 
 non-uniform across the forecast range (e.g. ECMWF IFS: 3-hourly to 144h, 6-hourly beyond).
 _Avoid_: forecast_hour (in new code), timestep (for lead time)
 
+**Time statistic**:
+What one value of a Variable is over time, declared on the Variable as two fields (ADR 0051): the statistic —
+`instant` (the field at its time), or a `sum`, `mean`, `max` or `min` — and, for a statistic, its window: since the
+run started (`run_start`, a running total such as ECMWF `tp` or AIFS `*_run_total_*`) or over the interval before
+each step (`preceding_interval`, such as a GFS 1–6 h bucket or CHIRPS daily rainfall). A statistic's window is empty
+at its run's first step, so **a non-instant Variable has no lead-0 step**: it is never written, by a harvest or an
+ingestion, and is not expected for a run to close. The rule applies only to a step of a run. The source sets it when
+the Variable is created — a store array's `step_type`, GRIB's `stepType`, NetCDF's `cell_methods`, a plugin's
+collection definition — and after that the operator's value wins; a source that disagrees is logged, naming the
+Variable. Default `instant`.
+_Avoid_: step type, accumulation flag, cell method (for the Variable's own declaration)
+
 ### Pipeline records
 
 **FetchRun**:
@@ -312,9 +324,9 @@ the same key, bumping `revision`. Closed by whichever signal its arrival route h
 deliveries for the reference time have ingested — ADR 0034), `upload_session` (every feeding `UploadSession` is closed
 and all its accepted deliveries have ingested), `quiet_period` (the safety net for whatever does not add up, and
 sweeps), `store_held` (a harvest of an **Upstream store**, which writes no `FileIngestion` and so opens the run itself
-on its first **Held step**: every mapped Variable holds every step its array is expected at — the run's expected steps
-from the array's own first Held step on, since an average is never held at a run's first step; a **Fixed field** at
-its first Held step only. Which steps, not how
+on its first **Held step**: every mapped Variable holds every step of the run's expected steps it has — all of them
+for an `instant` one, all but the first for one whose **Time statistic** is a statistic (ADR 0051); a **Fixed field**
+at its first Held step only. Which steps, not how
 many: a step held past the run's expected length gets a row but cannot stand in for a missing one; a closed run is
 not asked about again until an operator's "Run now" re-checks the window, and reopens if a step has gone — ADR 0044
 §6). A store's run has no `last_file_at`, so quiet never closes one with holes. Exposes `version` = `ref_epoch_seconds × 100 + revision`. Emits `run_ingestion_closed` /
@@ -419,10 +431,12 @@ _Avoid_: time-optimised / map-optimised (the Upstream's words), store type, layo
 
 **Held step**:
 A step of a run for which an Upstream store actually holds data for a given array. A store allocates its
-coordinates ahead of its data, so a step can be listed and not yet held. Only a held step gets a row. An array
-need not be held at every step of a run: a field defined over the interval before each step (an average, an
-accumulation, a flux, an extreme) is never held at the run's first step, and a **Fixed field** is held at nothing
-but it.
+coordinates ahead of its data, so a step can be listed and not yet held. Only a held step gets a row — and only a
+step its Variable has: a Variable whose **Time statistic** is a statistic has no step at the run's start, so what a
+store holds there gets no row. Which steps an array is held at says nothing of its kind: a statistic over the
+interval before each step (a GFS average) is not held at the run's first step, while a running total since the
+run started (an AIFS `*_run_total_*` array) is held there as a field of zeros. A **Fixed field** is held at nothing
+but the first step.
 _Avoid_: available step, present timestep, filled chunk
 
 **Fixed field**:

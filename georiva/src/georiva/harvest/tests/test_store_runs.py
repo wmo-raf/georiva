@@ -13,7 +13,8 @@ from unittest import mock
 from django.test import TestCase
 from django.urls import reverse
 
-from georiva.core.models import Collection, Item
+from georiva.core.models import Collection, Item, Variable
+from georiva.core.time_statistic import Declared
 from georiva.harvest.models import HarvestFeed
 from georiva.ingestion.models import RunIngestion
 from georiva.ingestion.run_closers import close_quiet_runs
@@ -304,13 +305,17 @@ CLOUD = "total_cloud_cover_atmosphere"
 
 
 class AnArrayNotHeldAtARunsFirstStepTests(StoreRunsMixin, TestCase):
-    """A run closes once each mapped array holds every step it is published at (#681)."""
+    """A run closes once each mapped Variable holds every step it has: a
+    statistic over the preceding interval has none at its run's first step
+    (#681, ADR 0051)."""
 
     arrays = {**StoreFeedMixin.arrays, CLOUD: (RUN_STEP_GRID, WHOLE_FIELD)}
 
     def setUp(self):
         super().setUp()
         self.cloud = self.map_variable(CLOUD, "total-cloud-cover")
+        Variable.objects.filter(pk=self.cloud.pk).update(time_statistic="mean", statistic_window="preceding_interval")
+        self.upstream.declare(CLOUD, Declared("mean", "preceding_interval"))
 
     def hold_whole_runs(self, run=None):
         """Every step of `run` each array is published at: the averaged one has no first step."""
@@ -355,6 +360,98 @@ class AnArrayNotHeldAtARunsFirstStepTests(StoreRunsMixin, TestCase):
 
         response = self.client.get(reverse("run-list", args=["gfs", collection.slug]))
         self.assertEqual(response.json()["latest_complete"]["reference_time"], self.run.isoformat())
+
+    def test_declared_instant_the_same_run_stays_open(self):
+        # What the Variable declares decides, not the steps the store happens to hold.
+        Variable.objects.filter(pk=self.cloud.pk).update(time_statistic="instant", statistic_window="")
+        self.hold_whole_runs()
+
+        with self.assertLogs("georiva.core.models.variable", "WARNING"):
+            self.harvest()
+
+        self.assertTrue(self.record().is_open)
+
+
+#: A running total since the run started, held at its first step as a field of
+#: zeros — as AIFS holds its `*_run_total_*` arrays.
+RUN_TOTAL = "total_precipitation_run_total_surface"
+
+
+class ARunningTotalTests(StoreRunsMixin, TestCase):
+    """A running total has no lead-0 step: the store's field of zeros there gets
+    no row, and the run still closes (#818, ADR 0051)."""
+
+    arrays = {**StoreFeedMixin.arrays, RUN_TOTAL: (RUN_STEP_GRID, WHOLE_FIELD)}
+
+    def setUp(self):
+        super().setUp()
+        self.total = self.map_variable(RUN_TOTAL, "total-precipitation")
+        self.upstream.declare(RUN_TOTAL, Declared("sum", "run_start"))
+        self.declare_total("sum", "run_start")
+
+    def declare_total(self, statistic, window):
+        Variable.objects.filter(pk=self.total.pk).update(time_statistic=statistic, statistic_window=window)
+
+    def hold_whole_runs(self, run=None):
+        self.hold_run("temperature_2m", run=run)
+        self.hold_run(RUN_TOTAL, run=run)
+
+    def test_its_lead_zero_step_gets_no_row(self):
+        self.hold_whole_runs()
+
+        self.harvest()
+
+        self.assertEqual(self.steps(self.total), [(self.run, 3), (self.run, 6)])
+        self.assertEqual(self.steps(), [(self.run, 0), (self.run, 3), (self.run, 6)])
+
+    def test_the_run_closes_as_store_held(self):
+        self.hold_whole_runs()
+
+        self.harvest()
+
+        record = self.record()
+        self.assertTrue(record.is_complete)
+        self.assertEqual(record.closed_by, RunIngestion.Closer.STORE_HELD)
+
+    def test_a_run_missing_a_later_step_of_it_stays_open(self):
+        self.hold_run("temperature_2m")
+        self.hold(RUN_TOTAL, 0, 3)
+
+        self.harvest()
+
+        self.assertTrue(self.record().is_open)
+
+    def test_a_run_checked_again_drops_the_lead_zero_row_written_before_it_was_declared(self):
+        self.declare_total("instant", "")
+        self.hold_whole_runs()
+        with self.assertLogs("georiva.core.models.variable", "WARNING"):
+            self.harvest()
+        self.assertEqual(self.steps(self.total), [(self.run, 0), (self.run, 3), (self.run, 6)])
+
+        self.declare_total("sum", "run_start")
+        self.harvest(recheck=True)
+
+        self.assertEqual(self.steps(self.total), [(self.run, 3), (self.run, 6)])
+        self.assertTrue(self.record().is_complete)
+
+    def test_a_store_that_disagrees_is_logged_naming_the_variable_and_the_variable_is_left_as_it_is(self):
+        self.declare_total("instant", "")
+        self.hold_whole_runs()
+
+        with self.assertLogs("georiva.core.models.variable", "WARNING") as logged:
+            self.harvest()
+
+        self.assertEqual(len(logged.output), 1)
+        self.assertIn("total-precipitation", logged.output[0])
+        self.assertIn("sum (run start)", logged.output[0])
+        self.total.refresh_from_db()
+        self.assertEqual(self.total.time_statistic, "instant")
+
+    def test_a_store_that_agrees_is_not_logged(self):
+        self.hold_whole_runs()
+
+        with self.assertNoLogs("georiva.core.models.variable", "WARNING"):
+            self.harvest()
 
 
 #: Orography: time-invariant, so the store holds it at a run's first step only.

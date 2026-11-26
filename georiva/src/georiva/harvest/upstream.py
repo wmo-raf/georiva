@@ -24,6 +24,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import urllib3
 
+from georiva.core.time_statistic import Declared, from_store_array
 from georiva.core.values.store import refused_place, repository_storage, store_coordinate
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,8 @@ class FieldSample:
     #: orography, a land–sea mask — and evidence of a Fixed field (#782).
     #: Empty for an analysis store, or where nothing was read.
     held_steps: tuple[int, ...] = ()
+    #: What the field declares of its time statistic, where it declares one (ADR 0051).
+    declared: Declared | None = None
 
 
 @dataclass(frozen=True)
@@ -186,13 +189,16 @@ class HeldStep:
     #: past the store's own expected forecast length for it left out where it
     #: publishes one. `None` for an analysis store, which has no runs.
     run_steps: int | None = None
-    #: The lead times of its run each of `arrays` is expected at: the run's
-    #: expected lead times from the array's own first Held step on. An average,
-    #: accumulation, flux or extreme is never held at a run's first step, and
-    #: the store says so nowhere else. The steps themselves, not how many, so a
-    #: step held past the expected length cannot stand in for a missing one
-    #: (ADR 0044 §6). Empty for an analysis store.
+    #: The lead times of its run each of `arrays` is published at: the run's
+    #: expected lead times. Which of them a Variable mapped from it is expected
+    #: at is the Variable's to say — a statistic has no lead-0 step (ADR 0051).
+    #: The steps themselves, not how many, so a step held past the expected
+    #: length cannot stand in for a missing one (ADR 0044 §6). Empty for an
+    #: analysis store.
     array_steps: Mapping[str, frozenset[timedelta]] = field(default_factory=dict)
+    #: What each of `arrays` declares of its time statistic, where it declares
+    #: one: its `step_type` (ADR 0051). Compared with its Variable's, never taken.
+    declared: Mapping[str, Declared] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -828,7 +834,13 @@ def _sample(store, field: StoreField) -> FieldSample:
     low, high = display_range(array[tuple(at.get(part, slice(None)) for part in field.axes)])
     if low is None:
         return FieldSample(readable=False, problem="the map that was read holds no values")
-    return FieldSample(readable=True, value_min=low, value_max=high, held_steps=held_steps)
+    return FieldSample(
+        readable=True,
+        value_min=low,
+        value_max=high,
+        held_steps=held_steps,
+        declared=from_store_array(field.path, array.attrs),
+    )
 
 
 def read_field_samples(
@@ -958,15 +970,20 @@ def _duration(value) -> timedelta:
 
 
 def _field_steps(
-    store, field: StoreField, window: Window, known: dict, skip_runs: frozenset = frozenset()
-) -> list[tuple[datetime | None, datetime, tuple[timedelta, ...] | None, timedelta | None]]:
-    """`(run, valid time, lead times its run expects, its own lead time)` of
-    every step in `window` that the store holds for one field, of no run in
-    `skip_runs`. The last two are `None` for a store without runs."""
+    store, field: StoreField, window: Window, known: dict, skip_runs: frozenset = frozenset(), declared=None
+) -> list[tuple[datetime | None, datetime, tuple[timedelta, ...] | None]]:
+    """`(run, valid time, lead times its run expects)` of every step in
+    `window` that the store holds for one field, of no run in `skip_runs`. The
+    last is `None` for a store without runs. What the field declares of its
+    time statistic, where it does, goes into `declared`, by its path."""
     import numpy as np
     import zarr
 
     array = zarr.open_array(store, path=field.path, mode="r")
+    if declared is not None:
+        said = from_store_array(field.path, array.attrs)
+        if said is not None:
+            declared[field.path] = said
     names = getattr(array.metadata, "dimension_names", None)
     if len(field.axes) != array.ndim or not names or len(names) != array.ndim:
         raise _StoreMisdescribed(f"“{field.path}” is not laid out as its collection says")
@@ -990,9 +1007,7 @@ def _field_steps(
         if measured["time"].dtype.kind != "M":
             raise _StoreMisdescribed(f"“{field.path}” has time steps that are not dates")
         times = [(index, _moment(value)) for index, value in enumerate(measured["time"])]
-        asked = [
-            (index, None, when, None, None) for index, when in times if when is not None and in_window(when, window)
-        ]
+        asked = [(index, None, when, None) for index, when in times if when is not None and in_window(when, window)]
         cells = [cell(time=index) for index, *_rest in asked]
     else:
         runs, leads = measured.get("run"), measured.get("step")
@@ -1008,7 +1023,7 @@ def _field_steps(
             for step_index, lead in enumerate(leads):
                 when = None if np.isnat(lead) else _moment(run_value + lead)
                 if when is not None:
-                    asked.append((step_index, run, when, expected, _duration(lead)))
+                    asked.append((step_index, run, when, expected))
                     cells.append(cell(run=run_index, step=step_index))
     if not cells:
         return []
@@ -1035,28 +1050,22 @@ def read_held_steps(
     store = icechunk.Repository.open(storage).readonly_session(branch).store
     found: dict[tuple[datetime | None, datetime], set[str]] = {}
     expected: dict[datetime, tuple[timedelta, ...]] = {}
-    first_held: dict[tuple[datetime, str], timedelta] = {}
+    declared: dict[str, Declared] = {}
     known: dict = {}
     for field_ in fields:
-        for run, when, run_leads, step_lead in _field_steps(store, field_, window, known, frozenset(skip_runs)):
+        for run, when, run_leads in _field_steps(store, field_, window, known, frozenset(skip_runs), declared):
             found.setdefault((run, when), set()).add(field_.path)
             if run is not None:
                 # The first array to say speaks for the run: arrays beside one another share its lead times.
                 expected.setdefault(run, run_leads)
-                at = (run, field_.path)
-                first_held[at] = min(first_held.get(at, step_lead), step_lead)
-    # An array expects its run's lead times from its own first Held step on.
-    by_array = {
-        (run, path): frozenset(lead for lead in expected[run] if lead >= first)
-        for (run, path), first in first_held.items()
-    }
     return [
         HeldStep(
             time=when,
             reference_time=run,
             arrays=frozenset(paths),
             run_steps=len(expected[run]) if run is not None else None,
-            array_steps={path: by_array[(run, path)] for path in paths} if run is not None else {},
+            array_steps={path: frozenset(expected[run]) for path in paths} if run is not None else {},
+            declared={path: declared[path] for path in paths if path in declared},
         )
         for (run, when), paths in sorted(found.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
     ]

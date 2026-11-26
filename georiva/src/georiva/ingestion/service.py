@@ -21,6 +21,7 @@ from georiva.ingestion.handlers import (
 )
 from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.result import IngestionResult
+from georiva.ingestion.utils import ensure_utc
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,7 @@ class IngestionService:
 
             try:
                 sfm = self._source_file_manager
+                nothing_to_write = 0
                 with sfm.download_to_temp(origin, file_path) as local_path:
                     for collection in collections:
                         first_variable_name = self._get_first_variable_name(collection)
@@ -231,8 +233,13 @@ class IngestionService:
                         loop = progress.create_child(represents=70, total=max(1, len(timestamps)))
 
                         published_times = []
+                        active = [v for v in collection.variables.all() if v.is_active]
                         for ts in timestamps:
                             ts_slot = loop.create_child(represents=1, total=max(1, n_vars))
+                            if not self._has_a_step(active, reference_time, ts):
+                                # A statistic's lead-0 step does not exist (ADR 0051): nothing to write, not a failure.
+                                nothing_to_write += 1
+                                continue
                             try:
                                 item, assets, clip_info, failed_vars = handler.process_timestamp(
                                     collection=collection,
@@ -265,7 +272,9 @@ class IngestionService:
 
                         self._record_published(collection, f"{origin_bucket}:{file_path}", published_times)
 
-                result.success = len(result.items_created) > 0
+                # A file whose every step does not exist — a running total's
+                # lead 0 alone — wrote nothing and failed nothing.
+                result.success = len(result.items_created) > 0 or bool(nothing_to_write and not result.errors)
 
                 # Populate summary fields from the last collection processed
                 if timestamps:
@@ -368,6 +377,12 @@ class IngestionService:
                 return []
 
         return list(base_qs.filter(catalog=catalog, is_active=True))
+
+    @staticmethod
+    def _has_a_step(variables, reference_time, timestamp) -> bool:
+        """Whether any of `variables` has a step at `timestamp` of its run (ADR 0051)."""
+        run = ensure_utc(reference_time) if reference_time else None
+        return any(variable.has_step(run, ensure_utc(timestamp)) for variable in variables)
 
     def _get_first_variable_name(self, collection: Collection) -> str | None:
         for variable in collection.variables.all():

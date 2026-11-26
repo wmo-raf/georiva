@@ -179,7 +179,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
         if feed.is_store and described is None and undescribed:
             # The catalog was not reached: it was never asked what the store is (#685).
             raise RunStopped(f"source unavailable — {undescribed}")
-        listed, expected = _listed(feed, upstream, described, reach.window, list(by_array), settled)
+        listed, expected, declared = _listed(feed, upstream, described, reach.window, list(by_array), settled)
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable
     # An empty window is believed only of a collection something vouched for.
@@ -193,6 +193,12 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
 
     if described is not None:
         _describe(collection, described, feed)
+
+    # What the store declares of each array's time statistic is compared with
+    # its Variable's, and only logged where they disagree: the Variable's
+    # declaration is the one that decides which steps it has (ADR 0051).
+    for path, variable in by_array.items():
+        variable.agrees_with(declared.get(path), source=f"array {path!r} of the store harvest {feed.name!r} reads")
 
     # The Upstream is asked for the window and is not trusted to have kept to it.
     # Each asset is located before anything looks at it: the href that is judged,
@@ -231,7 +237,9 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
         admitted = []
         for key, variable in variables.items():
             asset = item.assets.get(key)
-            if asset is None:
+            # A statistic has no lead-0 step (ADR 0051): what the store holds
+            # there gets no row, and a row written there before is the Mirror's to remove.
+            if asset is None or not variable.has_step(item.reference_time, item.datetime):
                 continue
             place = (*at, variable.pk)
             upstream_places.add(place)
@@ -279,7 +287,14 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
             by_array.update(_fixed_steps(by_array, fixed))
             by_array.update(_vector_steps(by_array, vectors))
         expected = {
-            run: runs.Expected(steps, {variables[path].pk: n for path, n in by_array.items() if path in variables})
+            run: runs.Expected(
+                steps,
+                {
+                    variables[path].pk: variables[path].expected_leads(leads)
+                    for path, leads in by_array.items()
+                    if path in variables
+                },
+            )
             for run, (steps, by_array) in expected.items()
             if reach.covers_run(run)
         }
@@ -346,10 +361,11 @@ def _description(feed, upstream):
 
 def _listed(
     feed, upstream, described, window: Window, mapped: list[str], settled: set = frozenset()
-) -> tuple[list[UpstreamItem], dict]:
-    """What the Upstream has in `window`, as items with their assets, and how
-    many steps a store expects of each run it holds a step of: the one place a
-    harvest asks which shape its Upstream is (ADR 0044 §1).
+) -> tuple[list[UpstreamItem], dict, dict]:
+    """What the Upstream has in `window`, as items with their assets, how
+    many steps a store expects of each run it holds a step of, and what each
+    of its arrays declares of its time statistic: the one place a harvest asks
+    which shape its Upstream is (ADR 0044 §1).
 
     A store has no items. It is asked which steps it holds for the mapped
     arrays, of every run but the `settled` ones, and each Held step is an item:
@@ -359,7 +375,7 @@ def _listed(
     and gets no row (§6).
     """
     if not feed.is_store:
-        return list(upstream.list_items(feed.upstream_collection_id, window)), {}
+        return list(upstream.list_items(feed.upstream_collection_id, window)), {}, {}
 
     # Which of an array's axes is its run, its step or its time is the
     # collection's to say, so a store whose collection is not described cannot be listed.
@@ -393,7 +409,9 @@ def _listed(
         media_type = STORE_MEDIA_TYPE
     # Each run: the steps the store expects of it, and of each array it holds a step of.
     expected: dict = {}
+    declared: dict = {}
     for step in held:
+        declared.update(step.declared)
         if step.reference_time and step.run_steps:
             _steps, by_array = expected.setdefault(step.reference_time, (step.run_steps, {}))
             by_array.update(step.array_steps)
@@ -410,7 +428,7 @@ def _listed(
         )
         for step in held
     ]
-    return items, expected
+    return items, expected, declared
 
 
 @dataclass(frozen=True)
