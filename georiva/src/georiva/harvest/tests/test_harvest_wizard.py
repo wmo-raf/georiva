@@ -192,7 +192,7 @@ class WizardSetsUpAFeedTests(WizardMixin, TestCase):
 
         self.assertContains(page, 'data-settings="0"')
         self.assertContains(page, 'class="gr-map-settings-card__use"')
-        self.assertContains(page, '<label class="hwiz-units__label" for="low_0">Lowest value</label>', html=True)
+        self.assertContains(page, '<label class="w-field__label" for="low_0">Lowest value</label>', html=True)
 
     def test_the_operator_is_shown_names_units_and_a_range_they_did_not_type(self):
         self.reach_step(4)

@@ -1,51 +1,50 @@
 {% load i18n %}
 {% comment %}
-    One card's units (ADR 0046 §6, §9), as one row of its cells. The source unit
-    is the provider's: shown when it declares one, asked — as what its values
-    are in — when it does not. The operator chooses only what to show them in,
-    and confirms the water flag. The range beside this row is typed in the unit
-    named by `range_unit_<index>`.
+    One card's units (ADR 0046 §6, §9), a field to a row. The source unit is the
+    provider's: shown when it declares one, asked — as what its values are in —
+    when it does not. The operator chooses only what to show them in, and
+    confirms the water flag. The range below is typed in the unit named by
+    `range_unit_<index>`.
 {% endcomment %}
-<div class="hwiz-units">
-    <div class="hwiz-units__cell">
-        {% if row.source_unit %}
-            <span class="hwiz-units__label">{% trans "Provider's unit" %}</span>
-            <p class="hwiz-units__source">
-                {% blocktrans with symbol=row.source_unit.symbol %}The provider’s values are in <strong>{{ symbol }}</strong>.{% endblocktrans %}
-            </p>
-        {% else %}
-            <label class="hwiz-units__label" for="source_unit_{{ row.index }}">
-                {% if row.declared_unit %}
-                    {% blocktrans with declared=row.declared_unit %}The provider says its values are in “{{ declared }}”, which GeoRiva does not know. Which unit are they in?{% endblocktrans %}
-                {% else %}
-                    {% trans "The provider does not say what its values are in. Which unit are they in?" %}
-                {% endif %}
-            </label>
-            <select name="source_unit_{{ row.index }}" id="source_unit_{{ row.index }}" class="w-field__input hwiz-unit">
-                <option value="">— {% trans "Choose" %} —</option>
-                {% for unit in units %}
-                    <option value="{{ unit.pk }}" {% if unit.pk == row.source_unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
-                {% endfor %}
-            </select>
-        {% endif %}
+{% if row.source_unit %}
+    <div class="w-field__wrapper">
+        <span class="w-field__label">{% trans "Provider's unit" %}</span>
+        <p class="hwiz-units__source">
+            {% blocktrans with symbol=row.source_unit.symbol %}The provider’s values are in <strong>{{ symbol }}</strong>.{% endblocktrans %}
+        </p>
     </div>
-    <div class="hwiz-units__cell">
-        <label class="hwiz-units__label" for="unit_{{ row.index }}">{% trans "Show them in" %}</label>
-        <select name="unit_{{ row.index }}" id="unit_{{ row.index }}" class="w-field__input hwiz-unit">
+{% else %}
+    <div class="w-field__wrapper">
+        <label class="w-field__label" for="source_unit_{{ row.index }}">{% trans "Provider's unit" %}</label>
+        <select name="source_unit_{{ row.index }}" id="source_unit_{{ row.index }}" class="w-field__input">
             <option value="">— {% trans "Choose" %} —</option>
             {% for unit in units %}
-                <option value="{{ unit.pk }}" {% if unit.pk == row.unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
+                <option value="{{ unit.pk }}" {% if unit.pk == row.source_unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
             {% endfor %}
         </select>
-        <input type="hidden" name="range_unit_{{ row.index }}" value="{{ row.range_unit_id|default_if_none:'' }}">
+        <p class="w-field__help-text">
+            {% if row.declared_unit %}
+                {% blocktrans with declared=row.declared_unit %}The provider says its values are in “{{ declared }}”, which GeoRiva does not know. Which unit are they in?{% endblocktrans %}
+            {% else %}
+                {% trans "The provider does not say what its values are in. Which unit are they in?" %}
+            {% endif %}
+        </p>
     </div>
-    <div class="hwiz-units__cell">
-        <label class="hwiz-units__water" for="water_{{ row.index }}">
-            <input type="checkbox" name="water_{{ row.index }}" id="water_{{ row.index }}" {% if row.water %}checked{% endif %}>
-            <span>
-                {% trans "These values are water, so an amount per square metre may be shown as a depth in millimetres." %}
-                {% if row.water_proposed %}<span class="hwiz-units__hint">{% trans "Its name says it is precipitation or water: check this is right." %}</span>{% endif %}
-            </span>
-        </label>
-    </div>
+{% endif %}
+<div class="w-field__wrapper">
+    <label class="w-field__label" for="unit_{{ row.index }}">{% trans "Show them in" %}</label>
+    <select name="unit_{{ row.index }}" id="unit_{{ row.index }}" class="w-field__input">
+        <option value="">— {% trans "Choose" %} —</option>
+        {% for unit in units %}
+            <option value="{{ unit.pk }}" {% if unit.pk == row.unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
+        {% endfor %}
+    </select>
+    <input type="hidden" name="range_unit_{{ row.index }}" value="{{ row.range_unit_id|default_if_none:'' }}">
 </div>
+<label class="hwiz-check" for="water_{{ row.index }}">
+    <input type="checkbox" name="water_{{ row.index }}" id="water_{{ row.index }}" {% if row.water %}checked{% endif %}>
+    <span>
+        {% trans "These values are water, so an amount per square metre may be shown as a depth in millimetres." %}
+        {% if row.water_proposed %}<span class="hwiz-units__hint">{% trans "Its name says it is precipitation or water: check this is right." %}</span>{% endif %}
+    </span>
+</label>

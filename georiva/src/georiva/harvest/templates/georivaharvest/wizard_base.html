@@ -151,34 +151,21 @@
             overflow-wrap: anywhere;
         }
 
-        .gr-map-settings-card__row {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: flex-end;
-            gap: 0.75rem 1rem;
-        }
-
-        .gr-map-settings-card__field {
-            display: flex;
-            flex-direction: column;
-            gap: 0.3rem;
-            flex: 1 1 13rem;
-            min-width: 0;
-        }
-
-        .gr-map-settings-card__field--wide {
-            flex: 2 1 20rem;
-        }
-
-        .gr-map-settings-card__range {
-            flex: 1 1 100%;
-            margin: -0.4rem 0 0;
-            font-size: 0.875em;
-            color: var(--w-color-text-meta);
-        }
-
         .gr-map-settings-card .hwiz-check {
             margin-bottom: 0;
+        }
+
+        /* A field to a row, as Wagtail lays out its own forms; no input wider than it needs. */
+        .gr-map-settings-card .w-field__wrapper {
+            margin-bottom: 0;
+        }
+
+        .gr-map-settings-card .w-field__input {
+            max-width: 32rem;
+        }
+
+        .hwiz-units__source {
+            margin: 0;
         }
 
         .gr-map-badges {
@@ -241,44 +228,6 @@
         .hwiz-number {
             width: 7em;
             min-width: 7em;
-        }
-
-        .hwiz-unit {
-            width: 100%;
-            min-width: 0;
-        }
-
-        /* One card's units, as one row of it: the provider's, what to show them in, and the water flag. */
-        .hwiz-units {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-            gap: 0.75rem 1rem;
-            align-items: start;
-        }
-
-        .hwiz-units__cell {
-            display: flex;
-            flex-direction: column;
-            gap: 0.3rem;
-            min-width: 0;
-        }
-
-        .hwiz-units p {
-            margin: 0;
-        }
-
-        .hwiz-units__label {
-            color: var(--w-color-text-label);
-            font-size: 0.875em;
-            font-weight: 600;
-        }
-
-        .hwiz-units__water {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.4em;
-            font-size: 0.9em;
-            line-height: 1.4;
         }
 
         .hwiz-units__hint {

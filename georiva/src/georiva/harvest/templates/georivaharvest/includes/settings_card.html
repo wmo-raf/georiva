@@ -1,7 +1,7 @@
 {% load i18n l10n %}
 {% comment %}
-    How one map appears: its name, description, units, the range it is coloured
-    by and — for a forecast field — whether it is fixed. The same card for a
+    How one map appears, a field to a row: its name, description, units, the
+    range it is coloured by and — for a forecast field — whether it is fixed. The same card for a
     store's field (`row.path`; unticked from the list above, or by its Remove)
     and for a kind of image (`row.key`; shown or not by the box in its header).
     The page renders it, and so does the read that follows a tick.
@@ -22,35 +22,29 @@
     </div>
     {% if row.ident != row.label %}<span class="gr-map-settings-card__id">{{ row.ident }}</span>{% endif %}
     {% if row.warning %}<p class="hwiz-warning">{{ row.warning }}</p>{% endif %}
-    <div class="gr-map-settings-card__row">
-        <div class="gr-map-settings-card__field">
-            <label class="hwiz-units__label" for="name_{{ row.index }}">{% trans "Name" %}</label>
-            <input type="text" name="name_{{ row.index }}" id="name_{{ row.index }}" class="w-field__input"
-                   value="{{ row.name }}">
-        </div>
-        {% if row.path %}
-            <div class="gr-map-settings-card__field gr-map-settings-card__field--wide">
-                <label class="hwiz-units__label" for="about_{{ row.index }}">{% trans "Description (optional)" %}</label>
-                <input type="text" name="about_{{ row.index }}" id="about_{{ row.index }}" class="w-field__input"
-                       value="{{ row.about }}">
-            </div>
-        {% endif %}
+    <div class="w-field__wrapper">
+        <label class="w-field__label" for="name_{{ row.index }}">{% trans "Name" %}</label>
+        <input type="text" name="name_{{ row.index }}" id="name_{{ row.index }}" class="w-field__input" value="{{ row.name }}">
     </div>
+    {% if row.path %}
+        <div class="w-field__wrapper">
+            <label class="w-field__label" for="about_{{ row.index }}">{% trans "Description (optional)" %}</label>
+            <input type="text" name="about_{{ row.index }}" id="about_{{ row.index }}" class="w-field__input" value="{{ row.about }}">
+        </div>
+    {% endif %}
     {% include "georivaharvest/includes/wizard_units.html" %}
-    <div class="gr-map-settings-card__row">
-        <div class="gr-map-settings-card__field">
-            <label class="hwiz-units__label" for="low_{{ row.index }}">{% trans "Lowest value" %}</label>
-            <input type="number" step="any" name="low_{{ row.index }}" id="low_{{ row.index }}" class="w-field__input"
-                   value="{{ row.low|default_if_none:''|unlocalize }}">
-        </div>
-        <div class="gr-map-settings-card__field">
-            <label class="hwiz-units__label" for="high_{{ row.index }}">{% trans "Highest value" %}</label>
-            <input type="number" step="any" name="high_{{ row.index }}" id="high_{{ row.index }}" class="w-field__input"
-                   value="{{ row.high|default_if_none:''|unlocalize }}">
-        </div>
+    <div class="w-field__wrapper">
+        <label class="w-field__label" for="low_{{ row.index }}">{% trans "Lowest value" %}</label>
+        <input type="number" step="any" name="low_{{ row.index }}" id="low_{{ row.index }}" class="w-field__input"
+               value="{{ row.low|default_if_none:''|unlocalize }}">
+    </div>
+    <div class="w-field__wrapper">
+        <label class="w-field__label" for="high_{{ row.index }}">{% trans "Highest value" %}</label>
+        <input type="number" step="any" name="high_{{ row.index }}" id="high_{{ row.index }}" class="w-field__input"
+               value="{{ row.high|default_if_none:''|unlocalize }}">
         {% for unit in units %}
             {% if unit.pk == row.range_unit_id %}
-                <p class="gr-map-settings-card__range">{% blocktrans with symbol=unit.symbol %}Lowest and highest values in {{ symbol }}.{% endblocktrans %}</p>
+                <p class="w-field__help-text">{% blocktrans with symbol=unit.symbol %}Lowest and highest values in {{ symbol }}.{% endblocktrans %}</p>
             {% endif %}
         {% endfor %}
     </div>

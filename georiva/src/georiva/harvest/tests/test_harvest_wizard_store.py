@@ -1098,5 +1098,5 @@ class WizardReadsAFieldAsItIsTickedTests(StoreWizardMixin, TestCase):
 
         self.assertContains(page, 'data-pick="0"')
         self.assertContains(page, 'data-settings="0"')
-        self.assertContains(page, '<label class="hwiz-units__label" for="name_0">Name</label>', html=True)
+        self.assertContains(page, '<label class="w-field__label" for="name_0">Name</label>', html=True)
         self.assertContains(page, reverse("harvest_wizard_step4_read"))
