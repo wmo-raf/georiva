@@ -102,6 +102,12 @@ class VectorComponents:
 
         return split_field_key(self.u)[1]
 
+    def published(self) -> dict:
+        """What a reader outside GeoRiva is told of it — Titiler, STAC: the paths
+        of its two arrays and which quantity of them it is."""
+        u, v = self.paths
+        return {"u": u, "v": v, "transform": str(self.transform)}
+
     @property
     def one_selection(self) -> bool:
         """Whether its u and v are read at the same Selection, as one vector's parts are."""

@@ -58,6 +58,12 @@ def as_dict(selection: Selection) -> dict[str, Value]:
     return dict(selection)
 
 
+def chooses(selection: Mapping, axes: Mapping[str, list]) -> bool:
+    """Whether `selection` names one of the listed values of each of `axes` —
+    each extra axis by name, with its values — and nothing else."""
+    return selection.keys() == axes.keys() and all(selection[name] in values for name, values in axes.items())
+
+
 def field_key(path: str, selection: Selection) -> str:
     """What one field of a store is known by in a harvest: its array's path, and its Selection after it."""
     if not selection:

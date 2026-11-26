@@ -34,7 +34,7 @@ from enum import StrEnum
 from itertools import islice
 from urllib.parse import urlsplit
 
-from georiva.core.selection import split_field_key
+from georiva.core.selection import chooses, split_field_key
 
 from .asset_hosts import (
     AssetHostAllowlist,
@@ -922,8 +922,7 @@ def store_fields(cube: UpstreamCube, keys: Iterable[str]) -> list[StoreField]:
 
 def _selects(array: SurveyedArray, selection: dict) -> bool:
     """Whether `selection` chooses one of the listed values of each of `array`'s extra axes, and nothing else."""
-    axes = {axis["name"]: axis["values"] for axis in array.selectable}
-    return selection.keys() == axes.keys() and all(selection[name] in axes[name] for name in axes)
+    return chooses(selection, {axis["name"]: axis["values"] for axis in array.selectable})
 
 
 def store_media_type(described: UpstreamCollection) -> str:

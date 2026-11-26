@@ -126,8 +126,7 @@ class STACAssetSerializer(serializers.Serializer):
             if vector is None:
                 data["georiva:array"] = instance.store_array
             else:
-                u, v = vector.paths
-                data["georiva:vector"] = {"u": u, "v": v, "transform": str(vector.transform)}
+                data["georiva:vector"] = vector.published()
             if instance.store_selection:
                 data["georiva:selection"] = dict(instance.store_selection)
 

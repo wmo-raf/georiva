@@ -935,7 +935,7 @@ class StoreHarvestAtASelectionTests(StoreFeedMixin, TestCase):
         "statistic": CubeDimension("statistic", kind="other", size=3, values=("mean", "p10", "p90")),
     }
     arrays = {
-        "temperature_2m": (("init_time", "statistic", "lead_time", "latitude", "longitude"), (1, 1, *WHOLE_FIELD)),
+        "temperature_2m": (("init_time", "statistic", "lead_time", "latitude", "longitude"), (1, *WHOLE_FIELD)),
         "pressure_surface": (RUN_STEP_GRID, WHOLE_FIELD),
     }
 

@@ -514,11 +514,13 @@ def parse_cube(payload: dict) -> UpstreamCube | None:
         if size is None and isinstance(values, list):
             size = len(values)
         kind = str(dimension.get("type") or "").lower()
-        extra = kind not in ("temporal", "spatial")
+        axis = str(dimension.get("axis") or "").lower()
+        # Neither time nor the grid: a vertical axis is "spatial" too, but along "z" (#830).
+        extra = kind != "temporal" and axis not in ("x", "y") and str(name).lower() not in _GRID_NAMES
         found[str(name)] = CubeDimension(
             name=str(name),
             kind=kind,
-            axis=str(dimension.get("axis") or "").lower(),
+            axis=axis,
             size=size,
             reference_system=_reference_system(dimension.get("reference_system")),
             values=_axis_values(dimension, size) if extra else None,
@@ -540,6 +542,9 @@ def parse_cube(payload: dict) -> UpstreamCube | None:
         )
     return UpstreamCube(dimensions=found, arrays=arrays)
 
+
+#: Names a horizontal dimension goes by where the collection gives it no axis.
+_GRID_NAMES = frozenset({"x", "y", "lat", "lon", "latitude", "longitude"})
 
 #: The most values an extra axis is listed with: more is not an axis an operator picks one value of.
 MAX_AXIS_VALUES = 1000

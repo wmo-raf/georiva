@@ -523,6 +523,20 @@ class PlainFilesCatalogTests(SimpleTestCase):
         self.assertIsNone(cube.dimensions["member"].values)
         self.assertIsNone(cube.dimensions["latitude"].values)
 
+    def test_a_vertical_axis_typed_spatial_lists_its_values_too(self):
+        # The datacube extension types a vertical axis "spatial", axis "z" (#830).
+        cube = parse_collection(
+            {
+                "id": "x",
+                "cube:dimensions": {
+                    "pressure_level": {"type": "spatial", "axis": "z", "values": [500, 850], "unit": "hPa"},
+                },
+            }
+        ).cube
+
+        self.assertEqual(cube.dimensions["pressure_level"].values, (500, 850))
+        self.assertEqual(cube.dimensions["pressure_level"].unit, "hPa")
+
     def many(self, count):
         """A catalog of plain files linking to `count` collections, each with its own document."""
         hrefs = [f"https://stac.upstream.example/c{n}/collection.json" for n in range(count)]

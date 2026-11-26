@@ -169,7 +169,7 @@ class HarvestFeedForm(DataFeedForm):
     def _check_selection(self, row, row_cleaned):
         """A row of an array with extra axes names one value the survey saw of
         each, and a row of one with none names nothing (#830)."""
-        from georiva.core.selection import SelectionInvalid, described, selection_of
+        from georiva.core.selection import SelectionInvalid, chooses, described, selection_of
 
         surveyed = self.instance.surveyed_selectable.get(row_cleaned["asset_key"], [])
         axes = {axis["name"]: axis["values"] for axis in surveyed}
@@ -178,7 +178,7 @@ class HarvestFeedForm(DataFeedForm):
         except SelectionInvalid as invalid:
             row.add_error("selection", str(invalid))
             return
-        if selection.keys() == axes.keys() and all(selection[name] in values for name, values in axes.items()):
+        if chooses(selection, axes):
             return
         if not axes:
             row.add_error("selection", _("This array has no extra axis to choose a value of. Leave it empty."))

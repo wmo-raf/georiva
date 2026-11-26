@@ -47,7 +47,7 @@ from django.views.decorators.http import require_POST
 
 # The Push Feed Wizard's Sample File needs the same two things of a scanned
 # variable — a Unit for its unit string, and bounds rounded outward — and has them.
-from georiva.core.selection import described, field_key, selection_of
+from georiva.core.selection import chooses, described, field_key, selection_of
 from georiva.core.time_statistic import INSTANT
 from georiva.core.unit_utils import Conversion, ConversionRefused, proposes_water
 from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
@@ -1708,6 +1708,15 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
     offered = {array.path for array in store.offered}
     new_arrays = [array for array in store.offered if array.path not in surveyed]
     gone_arrays = sorted(surveyed - offered)
+    # An array still offered at other values of its extra axes (#830): offered again, and
+    # each mapping read at a value no longer among them named, for the operator to change.
+    selectable = feed.surveyed_selectable
+    changed_arrays = [
+        array
+        for array in store.offered
+        if array.path in surveyed and (array.selectable or []) != selectable.get(array.path, [])
+    ]
+    lost_selections = _lost_selections(feed, store)
     places = _chunk_places({"chunk_locations": store.chunk_locations, "chunk_regions": store.chunk_regions})
     new_places = [place for place in places if place["declared"] not in feed.pinned_chunk_locations]
     declared = {place["declared"] for place in places}
@@ -1755,7 +1764,7 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
                 feed.pinned_buckets = {**feed.pinned_buckets, **buckets}
                 feed.asset_hosts = sorted({*feed.asset_hosts, *hosts})
                 changed += ["pinned_buckets", "asset_hosts"]
-        if (new_arrays or gone_arrays) and posted.get("offer_arrays"):
+        if (new_arrays or gone_arrays or changed_arrays) and posted.get("offer_arrays"):
             feed.surveyed_assets = _seen_arrays(store.arrays)
             changed.append("surveyed_assets")
         if feed.upstream_refusal:
@@ -1787,6 +1796,8 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             "reason": reason,
             "new_arrays": new_arrays,
             "gone_arrays": gone_arrays,
+            "changed_arrays": changed_arrays,
+            "lost_selections": lost_selections,
             "unoffered": [array for array in store.arrays if not array.offered],
             "new_places": new_places,
             "gone_places": gone_places,
@@ -1797,6 +1808,21 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             **_recheck_chrome(feed),
         },
     )
+
+
+def _lost_selections(feed, store) -> list[str]:
+    """Each mapped Variable read at a Selection the store no longer offers, by
+    name: its harvests stop until its mapping is changed (#830)."""
+    offered = {array.path: {axis["name"]: axis["values"] for axis in array.selectable} for array in store.offered}
+    lost = []
+    for mapping in feed.variable_mappings.select_related("variable").exclude(selection={}):
+        axes = offered.get(mapping.asset_key)
+        selection = mapping.selection or {}
+        if axes is None:
+            continue  # a gone array is said so on its own
+        if not chooses(selection, axes):
+            lost.append(f"{mapping.variable.name} ({described(selection_of(selection))})")
+    return lost
 
 
 def _store_address_refusal(feed, href: str, own_to_pin) -> str:

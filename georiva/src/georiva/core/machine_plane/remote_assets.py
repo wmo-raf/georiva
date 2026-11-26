@@ -135,8 +135,7 @@ def store_entry(
     carries no such key, as every entry before it."""
     entry = {"store": href}
     if vector is not None:
-        u, v = vector.paths
-        entry["vector"] = {"u": u, "v": v, "transform": str(vector.transform)}
+        entry["vector"] = vector.published()
     else:
         entry["array"] = array
     if selection:
