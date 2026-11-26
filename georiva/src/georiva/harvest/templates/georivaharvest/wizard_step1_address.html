@@ -15,11 +15,11 @@
                 {% trans "The web address the provider gives for its catalog. It must be readable without an account. GeoRiva will look at what it holds and guide you from there." %}
             </p>
         </div>
-        <div class="hwiz-actions">
-            {% comment %}
-                Reading a catalog of plain files means reading each collection's own file, which takes a
-                few seconds: the button says so while it waits.
-            {% endcomment %}
+        {% comment %}
+            Reading a catalog of plain files means reading each collection's own file, which takes a
+            few seconds: the button says so while it waits.
+        {% endcomment %}
+        {% fragment as wizard_actions %}
             <button type="submit" class="button button-longrunning" data-controller="w-progress"
                     data-action="w-progress#activate"
                     data-w-progress-active-value="{% trans 'Reading the catalog… this can take up to half a minute' %}">
@@ -27,6 +27,7 @@
                 <em data-w-progress-target="label">{% if retry %}{% trans "Try again" %}{% else %}{% trans "Next: look at the catalog" %}{% endif %}</em>
             </button>
             <a href="{% url 'add_data' %}" class="button button-secondary">{% trans "Back" %}</a>
-        </div>
+        {% endfragment %}
+        {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions %}
     </form>
 {% endblock %}

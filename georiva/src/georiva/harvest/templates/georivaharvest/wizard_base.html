@@ -66,10 +66,14 @@
             margin-bottom: 1.25em;
         }
 
-        .hwiz-actions {
-            display: flex;
-            gap: 1em;
-            margin-top: 1.5em;
+        /* Room under the last of a page's content for Wagtail's footer, pinned over the window's foot. */
+        .hwiz-body {
+            padding-bottom: 4rem;
+        }
+
+        /* A secondary button on the footer's dark tab, as Wagtail's own bulk-actions footer draws one. */
+        .footer__container .button-secondary:not(:hover) {
+            background-color: var(--w-color-surface-page);
         }
 
         .hwiz-panel {
@@ -160,12 +164,6 @@
             display: block;
             color: var(--w-color-warning-100);
         }
-
-        /* A list that is open on the page is not a dropdown: no arrow over its first row. */
-        .hwiz-list {
-            background-image: none;
-            height: auto;
-        }
     </style>
 {% endblock %}
 
@@ -184,5 +182,7 @@
             {% endwith %}
         {% endfor %}
     </div>
-    {% block wizard_content %}{% endblock %}
+    <div class="hwiz-body">
+        {% block wizard_content %}{% endblock %}
+    </div>
 {% endblock %}

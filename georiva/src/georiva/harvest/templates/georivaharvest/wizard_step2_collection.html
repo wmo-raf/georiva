@@ -1,6 +1,205 @@
 {% extends "georivaharvest/wizard_base.html" %}
 {% load i18n wagtailadmin_tags %}
 {% block titletag %}{% trans "Show data from an online catalog — Collection" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .hwiz-collections {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75em;
+            max-width: 60rem;
+            margin: 0 0 1em;
+            padding: 0;
+            border: 0;
+        }
+
+        .gr-collection-card {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            column-gap: 0.85rem;
+            padding: 1rem 1.15rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 0.5rem;
+            background: var(--w-color-surface-page);
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        .gr-collection-card:hover {
+            border-color: color-mix(in srgb, var(--w-color-secondary) 50%, var(--w-color-border-furniture));
+        }
+
+        .gr-collection-card:has(.gr-collection-card__radio:checked) {
+            border-color: var(--w-color-secondary);
+            box-shadow: 0 0 0 1px var(--w-color-secondary);
+            background: color-mix(in srgb, var(--w-color-secondary) 5%, var(--w-color-surface-page));
+        }
+
+        .gr-collection-card:has(.gr-collection-card__radio:focus-visible) {
+            outline: 3px solid var(--w-color-focus);
+            outline-offset: 2px;
+        }
+
+        .gr-collection-card[hidden] {
+            display: none;
+        }
+
+        /* The label lays out nothing itself: its radio and text sit in the card's two columns. */
+        .gr-collection-card__pick {
+            display: contents;
+        }
+
+        .gr-collection-card__radio {
+            grid-column: 1;
+            margin-top: 0.2em;
+            accent-color: var(--w-color-secondary);
+            cursor: pointer;
+        }
+
+        .gr-collection-card__body {
+            grid-column: 2;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 0.45em;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .gr-collection-card__head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 0.4em 0.6em;
+        }
+
+        .gr-collection-card__title {
+            font-weight: 700;
+            font-size: 1.05em;
+            color: var(--w-color-text-label);
+        }
+
+        .gr-collection-card__badges {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 0.35em;
+        }
+
+        .gr-collection-card__id {
+            font-family: var(--w-font-mono);
+            font-size: 0.8em;
+            color: var(--w-color-text-meta);
+            overflow-wrap: anywhere;
+        }
+
+        .gr-collection-card__summary {
+            margin: 0;
+            color: var(--w-color-text-label);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            line-clamp: 3;
+            overflow: hidden;
+        }
+
+        .gr-collection-card__facts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3em 1.5em;
+            margin: 0;
+            font-size: 0.875em;
+        }
+
+        .gr-collection-card__fact {
+            display: flex;
+            gap: 0.4em;
+        }
+
+        .gr-collection-card__fact dt {
+            color: var(--w-color-text-meta);
+        }
+
+        .gr-collection-card__fact dd {
+            margin: 0;
+            color: var(--w-color-text-label);
+        }
+
+        .gr-collection-card__keywords {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35em;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .gr-collection-card__keyword {
+            padding: 0.1em 0.6em;
+            border-radius: 999px;
+            font-size: 0.8em;
+            color: var(--w-color-text-meta);
+            background: color-mix(in srgb, var(--w-color-text-meta) 15%, transparent);
+        }
+
+        .gr-collection-card__more {
+            grid-column: 2;
+            margin-top: 0.5rem;
+        }
+
+        .gr-collection-card__more summary {
+            font-size: 0.875rem;
+            cursor: pointer;
+            color: var(--w-color-secondary);
+            font-weight: 600;
+        }
+
+        .gr-collection-card__more p {
+            font-size: 0.875rem;
+            margin: 0.5em 0 0;
+            max-width: 46rem;
+            line-height: 1.5;
+            color: var(--w-color-text-label);
+            white-space: pre-line;
+        }
+
+        .gr-collection-card__more .gr-collection-card__facts {
+            margin-top: 0.6em;
+        }
+
+        .gr-collection-card__ongoing {
+            color: var(--w-color-positive-100);
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+        }
+
+        /* The footer's status tab: a label over the title, centred beside the buttons as
+           Wagtail's own message tab is, and no wider than a long title needs. */
+        .footer .hwiz-status:not(.footer__container--hidden) {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            max-width: 20rem;
+            line-height: 1.3;
+        }
+
+        .hwiz-status__label {
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+
+        .hwiz-status__title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .hwiz-collections__none {
+            color: var(--w-color-text-meta);
+        }
+    </style>
+{% endblock %}
+
 {% block wizard_content %}
     <p class="hwiz-lead">
         {% blocktrans count counter=collections|length with address=session.upstream_url %}The catalog at {{ address }} holds one collection.{% plural %}The catalog at {{ address }} holds {{ counter }} collections. Choose the one to show.{% endblocktrans %}
@@ -10,36 +209,133 @@
             {% trans "This catalog gives only the short names of its collections, so they are listed here without titles." %}
         </p>
     {% endif %}
+    <p class="hwiz-note">
+        {% trans "GeoRiva will look at a few of its entries to see how it is organised. For a large data store this can take a minute; the next page says what it is waiting on." %}
+    </p>
     <form method="post" action="">
         {% csrf_token %}
         {% if collections|length > 12 %}
             <div class="w-field__wrapper hwiz-field">
                 <label class="w-field__label" for="hwiz-filter">{% trans "Find a collection" %}</label>
                 <input type="search" id="hwiz-filter" class="w-field__input"
-                       placeholder="{% trans 'Type part of its name, e.g. rainfall' %}">
+                       placeholder="{% trans 'Type part of its name, who makes it, or a keyword, e.g. rainfall' %}">
             </div>
         {% endif %}
-        <div class="w-field__wrapper hwiz-field">
-            <label class="w-field__label" for="collection_id">{% trans "Collection" %} <sup>*</sup></label>
-            <select name="collection_id" id="collection_id" class="w-field__input hwiz-list" size="12" required>
-                {% for collection in collections %}
-                    <option value="{{ collection.id }}"
-                            {% if collection.id == session.collection_id or collections|length == 1 %}selected{% endif %}>
-                        {% if collection.title and collection.title != collection.id %}{{ collection.title }} ({{ collection.id }}){% else %}{{ collection.id }}{% endif %}
-                    </option>
-                {% endfor %}
-            </select>
-            <p class="w-field__help-text">
-                {% trans "GeoRiva will look at a few of its entries to see how it is organised. For a large data store this can take a minute; the next page says what it is waiting on." %}
-            </p>
-        </div>
-        <div class="hwiz-actions">
-            <button type="submit" class="button bicolor button--icon">
-                {% icon name="arrow-right" wrapped=1 %}
-                {% trans "Next: look at this collection" %}
+        <fieldset class="hwiz-collections">
+            <legend class="w-sr-only">{% trans "Collection" %}</legend>
+            {% for collection in collections %}
+                <div class="gr-collection-card"
+                     data-search="{% if collection.search %}{{ collection.search }}{% else %}{{ collection.title|lower }} {{ collection.id|lower }}{% endif %}">
+                    <label class="gr-collection-card__pick">
+                        <input type="radio" name="collection_id" value="{{ collection.id }}"
+                               data-title="{{ collection.title|default:collection.id }}"
+                               class="gr-collection-card__radio" required
+                               {% if collection.id == chosen.id %}checked{% endif %}>
+                        <span class="gr-collection-card__body">
+                            <span class="gr-collection-card__head">
+                                <span class="gr-collection-card__title">{{ collection.title|default:collection.id }}</span>
+                                <span class="gr-collection-card__badges">
+                                    {% if collection.store %}
+                                        {% if collection.variables %}
+                                            {% blocktrans asvar store_label count counter=collection.variables %}Data store · {{ counter }} variable{% plural %}Data store · {{ counter }} variables{% endblocktrans %}
+                                        {% else %}
+                                            {% trans "Data store" as store_label %}
+                                        {% endif %}
+                                        {% status label=store_label classname="w-status--primary" %}
+                                    {% endif %}
+                                    {% if collection.ongoing %}
+                                        {% trans "Ongoing" as ongoing_label %}
+                                        {% status label=ongoing_label classname="gr-collection-card__ongoing" %}
+                                    {% endif %}
+                                    {% if collection.license %}
+                                        {% status label=collection.license %}
+                                    {% endif %}
+                                </span>
+                            </span>
+                            {% if collection.title and collection.title != collection.id %}
+                                <span class="gr-collection-card__id">{{ collection.id }}</span>
+                            {% endif %}
+                            {% if collection.summary %}
+                                <span class="gr-collection-card__summary">{{ collection.summary }}</span>
+                            {% endif %}
+                            {% if collection.start or collection.end or collection.global or collection.bbox or collection.producer or collection.facts %}
+                                <dl class="gr-collection-card__facts">
+                                    {% if collection.start or collection.end %}
+                                        <div class="gr-collection-card__fact">
+                                            <dt>{% trans "Time span" %}</dt>
+                                            <dd>{{ collection.start|default:"…" }} → {% if collection.end %}{{ collection.end }}{% elif collection.ongoing %}{% trans "now" %}{% else %}…{% endif %}</dd>
+                                        </div>
+                                    {% endif %}
+                                    {% if collection.global %}
+                                        <div class="gr-collection-card__fact">
+                                            <dt>{% trans "Coverage" %}</dt>
+                                            <dd>{% trans "Global" %}</dd>
+                                        </div>
+                                    {% elif collection.bbox %}
+                                        <div class="gr-collection-card__fact">
+                                            <dt>{% trans "Coverage" %}</dt>
+                                            <dd>{{ collection.bbox.0 }}°, {{ collection.bbox.1 }}° → {{ collection.bbox.2 }}°, {{ collection.bbox.3 }}°</dd>
+                                        </div>
+                                    {% endif %}
+                                    {% if collection.producer %}
+                                        <div class="gr-collection-card__fact">
+                                            <dt>{% trans "Made by" %}</dt>
+                                            <dd>{{ collection.producer }}</dd>
+                                        </div>
+                                    {% endif %}
+                                    {% for label, value in collection.facts %}
+                                        <div class="gr-collection-card__fact">
+                                            <dt>{{ label }}</dt>
+                                            <dd>{{ value }}</dd>
+                                        </div>
+                                    {% endfor %}
+                                </dl>
+                            {% endif %}
+                            {% if collection.keywords %}
+                                <span class="gr-collection-card__keywords">
+                                    {% for keyword in collection.keywords %}
+                                        <span class="gr-collection-card__keyword">{{ keyword }}</span>
+                                    {% endfor %}
+                                </span>
+                            {% endif %}
+                        </span>
+                    </label>
+                    {% if collection.details or collection.more_facts %}
+                        <details class="gr-collection-card__more">
+                            <summary>{% trans "More" %}</summary>
+                            {% if collection.details %}<p>{{ collection.details }}</p>{% endif %}
+                            {% if collection.more_facts %}
+                                <dl class="gr-collection-card__facts">
+                                    {% for label, value in collection.more_facts %}
+                                        <div class="gr-collection-card__fact">
+                                            <dt>{{ label }}</dt>
+                                            <dd>{{ value }}</dd>
+                                        </div>
+                                    {% endfor %}
+                                </dl>
+                            {% endif %}
+                        </details>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <p class="hwiz-collections__none" id="hwiz-none" hidden>{% trans "No collection matches." %}</p>
+        </fieldset>
+        {% fragment stripped as chosen_line %}
+            {% if chosen %}
+                <span class="hwiz-status__label">{% trans "Chosen collection" %}</span>
+                <strong class="hwiz-status__title" title="{{ chosen.title|default:chosen.id }}">{{ chosen.title|default:chosen.id }}</strong>
+            {% endif %}
+        {% endfragment %}
+        {% fragment as wizard_actions %}
+            <button type="submit" class="button button-longrunning" data-controller="w-progress"
+                    data-action="w-progress#activate"
+                    data-w-progress-active-value="{% trans 'Starting the check…' %}">
+                {% icon name="spinner" %}
+                <em data-w-progress-target="label">{% trans "Next: look at this collection" %}</em>
             </button>
             <a href="{% url 'harvest_wizard_step1' %}" class="button button-secondary">{% trans "Back" %}</a>
-        </div>
+        {% endfragment %}
+        {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions with_status=True status=chosen_line %}
     </form>
 {% endblock %}
 
@@ -47,14 +343,37 @@
     {{ block.super }}
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            const status = document.getElementById('hwiz-status');
+            const chosenLabel = '{{ _("Chosen collection")|escapejs }}';
+            document.querySelectorAll('.gr-collection-card__radio').forEach(function (radio) {
+                radio.addEventListener('change', function () {
+                    const label = document.createElement('span');
+                    label.className = 'hwiz-status__label';
+                    label.textContent = chosenLabel;
+                    const name = document.createElement('strong');
+                    name.className = 'hwiz-status__title';
+                    name.textContent = radio.dataset.title;
+                    name.title = radio.dataset.title;
+                    status.replaceChildren(label, name);
+                    status.classList.remove('footer__container--hidden');
+                });
+            });
+        });
+
+        document.addEventListener('DOMContentLoaded', function () {
             const filter = document.getElementById('hwiz-filter');
-            const select = document.getElementById('collection_id');
-            if (!filter || !select) return;
+            if (!filter) return;
+            const cards = document.querySelectorAll('.gr-collection-card');
+            const none = document.getElementById('hwiz-none');
             filter.addEventListener('input', function () {
                 const wanted = this.value.trim().toLowerCase();
-                for (const option of select.options) {
-                    option.hidden = wanted !== '' && !option.textContent.toLowerCase().includes(wanted);
+                let shown = 0;
+                for (const card of cards) {
+                    const match = wanted === '' || card.dataset.search.includes(wanted);
+                    card.hidden = !match;
+                    if (match) shown += 1;
                 }
+                none.hidden = shown > 0;
             });
         });
     </script>

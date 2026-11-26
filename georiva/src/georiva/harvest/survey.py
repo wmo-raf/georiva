@@ -21,6 +21,7 @@ it reads one page of a listing and stops.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -282,6 +283,96 @@ def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
     except UpstreamUnreachable:
         # Its collections do not answer; its root still links to each of them.
         return CatalogSurvey(has_api=root.is_api, collections=list(root.children), described=False)
+
+
+#: How much of a collection's description its card keeps: the first paragraph
+#: on its face, and the rest, behind "More", up to this many characters.
+CARD_SUMMARY_CHARS = 300
+CARD_DETAILS_CHARS = 1500
+#: How many of the publisher's stated facts a card shows on its face, and how many keywords.
+CARD_FACTS = 2
+CARD_KEYWORDS = 4
+#: How short of the whole world, in degrees, an extent may fall and still be called global.
+GLOBAL_TOLERANCE = 1.0
+
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_TAG = re.compile(r"<[^>]+>")
+_MD_MARKS = re.compile(r"(\*\*|__|\*|`)")
+_MD_LINE_START = re.compile(r"^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+\.\s+)")
+
+
+def collection_card(collection: UpstreamCollection) -> dict:
+    """What step 2 shows of one collection, in a form the session can keep: only
+    what the collection itself says, trimmed. A collection known by id alone
+    gives a card with its id and title and nothing else."""
+    paragraphs = _plain_paragraphs(collection.description)
+    summary = _clip(paragraphs[0], CARD_SUMMARY_CHARS) if paragraphs else ""
+    details = _clip("\n\n".join(paragraphs[1:]), CARD_DETAILS_CHARS)
+    if paragraphs and len(paragraphs[0]) > CARD_SUMMARY_CHARS:
+        details = _clip("\n\n".join(paragraphs), CARD_DETAILS_CHARS)
+    facts = [[_label(key), value] for key, value in collection.stated.items()]
+    start, end = collection.interval or (None, None)
+    producer = next((p.name for p in collection.providers if "producer" in p.roles), "")
+    producer = producer or (collection.providers[0].name if collection.providers else "")
+    keywords = list(dict.fromkeys(collection.keywords))[:CARD_KEYWORDS]
+    stores = [asset for asset in collection.assets.values() if _is_store(asset)]
+    bbox = collection.bbox
+    title = collection.title or collection.id
+    return {
+        "id": collection.id,
+        "title": title,
+        "summary": summary,
+        "details": details,
+        "store": bool(stores),
+        "variables": len(collection.cube.arrays) if stores and collection.cube and collection.cube.arrays else None,
+        "license": collection.license,
+        "start": start.date().isoformat() if start else "",
+        "end": end.date().isoformat() if end else "",
+        "ongoing": bool(start) and end is None,
+        "global": _is_global(bbox),
+        "bbox": [round(v, 1) for v in bbox] if bbox and not _is_global(bbox) else None,
+        "producer": producer,
+        "facts": facts[:CARD_FACTS],
+        "more_facts": facts[CARD_FACTS:],
+        "keywords": keywords,
+        "search": " ".join([title, collection.id, summary, producer, *keywords]).lower(),
+    }
+
+
+def _plain_paragraphs(text: str) -> list[str]:
+    """A description's paragraphs as plain text: its markdown and markup gone,
+    and a paragraph that was only a heading or an image left out."""
+    paragraphs = []
+    for block in re.split(r"\n\s*\n", text.replace("\r\n", "\n")):
+        lines = [line for line in block.strip().splitlines() if line.strip()]
+        if not lines or all(line.lstrip().startswith("#") for line in lines):
+            continue
+        plain = " ".join(_MD_LINE_START.sub("", line).strip() for line in lines)
+        plain = _MD_MARKS.sub("", _MD_TAG.sub("", _MD_LINK.sub(r"\1", _MD_IMAGE.sub("", plain))))
+        plain = re.sub(r"\s+", " ", plain).strip()
+        if plain:
+            paragraphs.append(plain)
+    return paragraphs
+
+
+def _clip(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",.;:") + "…"
+
+
+def _label(key: str) -> str:
+    """A summary's key as a label: `spatial_resolution` → "Spatial resolution"."""
+    words = re.sub(r"[_\-]+", " ", key.rpartition(":")[2]).strip()
+    return words[:1].upper() + words[1:]
+
+
+def _is_global(bbox: list[float] | None) -> bool:
+    if not bbox:
+        return False
+    west, south, east, north = bbox
+    return east - west >= 360 - GLOBAL_TOLERANCE and north - south >= 180 - GLOBAL_TOLERANCE
 
 
 # ── One collection ──────────────────────────────────────────────────────────

@@ -79,12 +79,15 @@
             </div>
         {% endif %}
 
-        <div class="hwiz-actions">
-            <button type="submit" class="button bicolor button--icon">
-                {% icon name="arrow-right" wrapped=1 %}
-                {% trans "Next: schedule and save" %}
+        {% fragment as wizard_actions %}
+            <button type="submit" class="button button-longrunning" data-controller="w-progress"
+                    data-action="w-progress#activate"
+                    data-w-progress-active-value="{% trans 'Saving your choices…' %}">
+                {% icon name="spinner" %}
+                <em data-w-progress-target="label">{% trans "Next: schedule and save" %}</em>
             </button>
             <a href="{% url 'harvest_wizard_step3' %}" class="button button-secondary">{% trans "Back" %}</a>
-        </div>
+        {% endfragment %}
+        {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions %}
     </form>
 {% endblock %}
