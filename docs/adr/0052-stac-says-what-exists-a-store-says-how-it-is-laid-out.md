@@ -45,7 +45,18 @@ What both cases show:
 
   Items of COGs, the first shape ADR 0042 accepted, sit beside these as their own case.
 
+- **Why a value is accepted was never written down.** Harvesting exists to avoid duplicating an Upstream's data:
+  ADR 0042 copies the index and never the pixels, and ADR 0043 §7 has readers stream rather than download. But no
+  decision says which shapes that rules in. Each was judged on its own: COGs because they range-read, Map-shaped
+  stores because one chunk is one field, Series-shaped stores refused because a map costs gigabytes.
+
 ## Decision
+
+**An Upstream shape is accepted for a read plane only when it is Streamable there: answering one request on that
+plane reads upstream bytes in proportion to the request, not to the archive.** This is the admission test every
+axis value below is judged by; the lists in §4 and §5 are its results, not choices of their own. A collection is
+harvested only when it is Streamable for maps (§6); the other planes it is Streamable for are what it offers
+besides.
 
 **What exists, where and when comes from STAC. How a store is laid out — its arrays, their chunking and their
 codecs — comes from the store's own metadata. The datacube extension is a fallback, used only when the store cannot
@@ -73,7 +84,7 @@ be opened.**
    worth harvesting needs it, with the decision recorded, as ADR 0044 §11 already does for kinds of place. Sources
    that are not STAC at all (CDS, an FTP drop) stay source plugins, as now.
 
-5. **What is accepted today is unchanged:** Store placement per collection, Store format Icechunk, Map-shaped,
+5. **What is accepted today is unchanged**, and each refusal is the admission test failing or not yet tried: Store placement per collection, Store format Icechunk, Map-shaped,
    anonymous access. Every other value is recognised and refused by name, so an operator is told which axis stops
    the collection, in an operator's words:
 
@@ -87,14 +98,42 @@ be opened.**
    Where several axes stop a collection, the survey names the one an operator can do least about first: placement,
    then shape, then format, then access.
 
-6. **GeoRiva stays map-first.** A Series-shaped store is never drawn as a map, and a Published collection with no
+   Series-shaped fails the test for maps. A store per item, plain Zarr and credentialed access are not failures of
+   it: each may stream, but reading it is not built, and is added per §4 when an Upstream worth harvesting needs it.
+
+6. **GeoRiva stays map-first.** A collection must be Streamable for maps to be harvested at all. A Series-shaped
+   store is Streamable for a point time series and not for maps, so it is never drawn as a map, and a Published collection with no
    map is still deferred (ADR 0044 §5). The one form in which a Series-shaped store may come in later is as the
    **analysis companion** of a Map-shaped store of the same data, read by the time-series plane only. Earth Data
    Hub's Climate DT already publishes such twins (`*-hourly-high-maps` and `*-hourly-high-timeseries`). That is a
    decision of its own when an Upstream worth harvesting offers both openly.
 
+7. **Streamable is judged per read plane**, by the most one request may read upstream:
+
+   | Read plane | One request reads at most | COG | Map-shaped store | Series-shaped store |
+   |---|---|---|---|---|
+   | Map tile | the field at one step, by range; overviews welcome, not required | yes (tiles in view, from an overview) | yes (one chunk: the whole field at the step) | no (every chunk of the area, each spanning many steps) |
+   | Point time series | the chunks holding the point, over the requested steps | yes (one range per step) | yes (one chunk per step) | yes (one or two chunks) |
+   | Zonal statistics | the fields at the requested steps, by range (ADR 0043 §7) | yes | yes | no |
+
+   A lone NetCDF or GRIB file over `https` is usually read whole and is not Streamable. The same file indexed by a
+   virtual store, as dynamical.org's GRIB-backed stores are, is: the store's references are the ranges. So such a
+   file is accepted only through a store that indexes it (§3).
+
+8. **Pixels are held in two places only, each bounded, and neither is duplication:**
+
+   - the **materialization window** (ADR 0042 §8): Remote COGs copied inside the Jurisdiction on purpose, for a
+     window the operator sets, and removed as they leave it;
+   - Titiler's **decoded-field cache** (ADR 0044 §13): memory per worker, bounded by a setting, gone when the worker
+     is.
+
+   Anything else that would keep an Upstream's pixels — a byte cache, a mirror, a copy made to answer a plane a shape
+   is not Streamable for — is a decision of its own, against this one.
+
 ## Consequences
 
+- Every future "can GeoRiva harvest this?" is one question per read plane: what does one request read? A new axis
+  value is argued on that, not on the provider.
 - A store's shape is right even where the provider describes nothing, as on Earth Data Hub, and a provider's
   datacube metadata can no longer contradict its store.
 - The survey opens every candidate store at an allowed place, not only Map-shaped ones. Opening an Icechunk
@@ -126,5 +165,7 @@ be opened.**
   four axes, and two providers with the same layout would share nothing.
 - **Require the datacube extension to carry chunking.** Neither provider tried does, and the extension does not
   define it. Every refusal would be "the collection does not say".
+- **Admit by format name** ("COG and Zarr are cloud-native"). A Series-shaped Zarr store is as cloud-native as a
+  Map-shaped one and still costs a map hundreds of megabytes; the name says nothing about which requests are cheap.
 - **Accept Series-shaped stores for maps, slowly.** One daily map of Africa from Earth Data Hub's ERA5-Land reads
   15 to 24 chunks of 75 days each, 200–300 MB, to draw one day. That is not map-first.

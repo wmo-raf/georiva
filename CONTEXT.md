@@ -423,8 +423,16 @@ store (ADR 0044). A **virtual** upstream store holds no pixels of its own; its c
 producer's original files. Not our own Virtual Zarr, which is a manifest we build over our own assets.
 _Avoid_: dataset, cube, Zarr source, remote Zarr
 
+**Streamable**:
+An Upstream shape is Streamable for a read plane when one request on that plane reads upstream bytes in proportion
+to the request, not to the archive: a map tile at most the field at one step, a point time series at most the
+chunks holding the point. The admission test for every shape a harvest accepts; a collection is harvested only when
+it is Streamable for maps (ADR 0052).
+_Avoid_: cloud-native (names a format, not what a request costs), cheap, fast
+
 **Store shape**:
-What an Upstream store's chunking makes cheap. **Map-shaped**: a chunk is one whole field at one step.
+How an Upstream store's chunking divides its data, which decides the read planes it is **Streamable** for.
+**Map-shaped**: a chunk is one whole field at one step.
 **Series-shaped**: a chunk is a small area over many steps. The shape decides which read planes the collection
 offers; only map-shaped stores are harvested. Read from the store's own metadata; the collection's datacube
 description is a fallback for a store that cannot be opened (ADR 0052).
