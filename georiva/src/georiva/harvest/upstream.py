@@ -82,11 +82,28 @@ class UpstreamCube:
 
 
 @dataclass(frozen=True)
+class UpstreamProvider:
+    """One organisation a collection names as having a hand in it, and in what roles."""
+
+    name: str
+    roles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class UpstreamCollection:
     id: str
     title: str = ""
     description: str = ""
     bbox: list[float] | None = None
+    #: Its first temporal interval, as `(start, end)`; either is `None` where open or not given.
+    interval: tuple[datetime | None, datetime | None] | None = None
+    license: str = ""
+    providers: tuple[UpstreamProvider, ...] = ()
+    keywords: tuple[str, ...] = ()
+    #: Its `summaries` that are one sentence each, by key in the publisher's
+    #: order: a fact the publisher states in words ("0.25 degrees (~20km)").
+    #: Summaries of ranges or of several values are not kept.
+    stated: dict[str, str] = field(default_factory=dict)
     #: Assets the collection itself carries, beside its items': a whole-collection store, typically.
     assets: dict[str, UpstreamAsset] = field(default_factory=dict)
     #: The cube an Upstream store's collection describes; `None` when it describes none.
@@ -344,15 +361,69 @@ def _flat_bbox(bbox) -> list[float] | None:
 
 
 def parse_collection(payload: dict, *, base_url: str = "") -> UpstreamCollection:
-    bboxes = ((payload.get("extent") or {}).get("spatial") or {}).get("bbox") or []
+    extent = payload.get("extent") if isinstance(payload.get("extent"), dict) else {}
+    bboxes = (extent.get("spatial") or {}).get("bbox") or []
+    keywords = payload.get("keywords")
     return UpstreamCollection(
         id=str(payload.get("id", "")),
         title=str(payload.get("title") or ""),
         description=str(payload.get("description") or ""),
         bbox=_flat_bbox(bboxes[0]) if bboxes else None,
+        interval=_interval(extent.get("temporal")),
+        license=str(payload.get("license") or "").strip(),
+        providers=_providers(payload.get("providers")),
+        keywords=tuple(str(k).strip() for k in keywords if isinstance(k, str) and k.strip())
+        if isinstance(keywords, list)
+        else (),
+        stated=_stated(payload.get("summaries")),
         assets=_parse_assets(payload.get("assets"), base_url=base_url),
         cube=parse_cube(payload),
     )
+
+
+def _interval(temporal) -> tuple[datetime | None, datetime | None] | None:
+    """A collection's first temporal interval; `None` when it gives none."""
+    intervals = temporal.get("interval") if isinstance(temporal, dict) else None
+    first = intervals[0] if isinstance(intervals, list) and intervals else None
+    if not isinstance(first, list) or len(first) != 2:
+        return None
+    return _instant(first[0]), _instant(first[1])
+
+
+def _instant(value) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=UTC)
+
+
+def _providers(providers) -> tuple[UpstreamProvider, ...]:
+    if not isinstance(providers, list):
+        return ()
+    return tuple(
+        UpstreamProvider(
+            name=str(provider["name"]).strip(),
+            roles=tuple(str(r).lower() for r in provider.get("roles") or [] if isinstance(r, str)),
+        )
+        for provider in providers
+        if isinstance(provider, dict) and isinstance(provider.get("name"), str) and provider["name"].strip()
+    )
+
+
+def _stated(summaries) -> dict[str, str]:
+    """The summaries that are one string each: alone, or the only one of a list."""
+    if not isinstance(summaries, dict):
+        return {}
+    stated = {}
+    for key, value in summaries.items():
+        if isinstance(value, list) and len(value) == 1:
+            value = value[0]
+        if isinstance(value, str) and value.strip():
+            stated[str(key)] = value.strip()
+    return stated
 
 
 def _whole(value) -> int | None:

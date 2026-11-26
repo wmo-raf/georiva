@@ -16,10 +16,10 @@ from django.urls import reverse
 from django_celery_beat.models import PeriodicTask
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
-from georiva.harvest import background_survey, tasks
+from georiva.harvest import background_survey, tasks, wizard_views
 from georiva.harvest.models import HarvestFeed, VariableMapping
 from georiva.harvest.testing import FakeUpstream
-from georiva.harvest.upstream import AssetProbe, UpstreamAsset, UpstreamCollection
+from georiva.harvest.upstream import AssetProbe, UpstreamAsset, UpstreamCollection, parse_collection
 from georiva.ingestion.models import PushFeed
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.models import FetchRun
@@ -568,6 +568,161 @@ class WizardDoesNotWaitOnTheRequestTests(WizardMixin, TestCase):
         self.assertEqual(self.rows()[0], 0)
 
 
+#: A collection as stac.dynamical.org describes one, trimmed: a store of its
+#: own, a cube, and facts its publisher states in words in its `summaries`.
+DYNAMICAL_SHAPED = {
+    "type": "Collection",
+    "id": "noaa-gfs-forecast",
+    "title": "NOAA GFS forecast",
+    "description": (
+        "## About\n\nWeather **forecasts** from the [Global Forecast System](https://example.org/gfs) "
+        "operated by NOAA NWS NCEP.\n\nRuns four times a day."
+    ),
+    "license": "CC-BY-4.0",
+    "keywords": ["weather", "forecast", "GFS", "weather", "NOAA", "global"],
+    "providers": [
+        {"name": "dynamical.org", "roles": ["processor", "host"]},
+        {"name": "NOAA NWS NCEP", "roles": ["producer"]},
+    ],
+    "extent": {
+        "spatial": {"bbox": [[-180.0, -90.0, 179.75, 90.0]]},
+        "temporal": {"interval": [["2021-05-01T00:00:00Z", None]]},
+    },
+    "summaries": {
+        "spatial_resolution": ["0.25 degrees (~20km)"],
+        "time_resolution": ["Forecasts initialized every 6 hours"],
+        "forecast_domain": ["Forecast lead time 0-384 hours (0-16 days) ahead"],
+        "platform": ["one", "two"],
+        "gsd": {"minimum": 1, "maximum": 2},
+    },
+    "assets": {
+        "icechunk": {
+            "href": "s3://dynamical-noaa-gfs/noaa-gfs-forecast/v0.2.7.icechunk",
+            "type": "application/x-icechunk",
+        }
+    },
+    "cube:dimensions": {"latitude": {"type": "spatial", "axis": "y"}},
+    "cube:variables": {"temperature_2m": {"dimensions": ["latitude"]}, "wind_u_10m": {"dimensions": ["latitude"]}},
+}
+
+
+class WizardShowsEachCollectionAsACardTests(WizardMixin, TestCase):
+    """Step 2 lists each collection as a card of what the catalog says of it (#821)."""
+
+    def card(self, page, collection_id):
+        return next(c for c in page.context["collections"] if c["id"] == collection_id)
+
+    def test_a_described_collection_shows_what_its_catalog_says_of_it(self):
+        self.upstream.collections.append(parse_collection(DYNAMICAL_SHAPED))
+        self.give_address()
+
+        page = self.client.get(step(2))
+        card = self.card(page, "noaa-gfs-forecast")
+
+        self.assertContains(page, "Data store · 2 variables")
+        self.assertContains(page, "CC-BY-4.0")
+        self.assertContains(page, "Ongoing")
+        self.assertContains(page, "2021-05-01 → now")
+        self.assertContains(page, "Global")
+        self.assertEqual(card["producer"], "NOAA NWS NCEP")
+        self.assertEqual(
+            card["facts"],
+            [
+                ["Spatial resolution", "0.25 degrees (~20km)"],
+                ["Time resolution", "Forecasts initialized every 6 hours"],
+            ],
+        )
+        # The rest of what the publisher states waits behind "More"; ranges and lists are not stated facts.
+        self.assertEqual(card["more_facts"], [["Forecast domain", "Forecast lead time 0-384 hours (0-16 days) ahead"]])
+        self.assertEqual(card["keywords"], ["weather", "forecast", "GFS", "NOAA"])
+
+    def test_a_description_is_shown_as_plain_text(self):
+        self.upstream.collections.append(parse_collection(DYNAMICAL_SHAPED))
+        self.give_address()
+
+        page = self.client.get(step(2))
+        card = self.card(page, "noaa-gfs-forecast")
+
+        self.assertEqual(
+            card["summary"], "Weather forecasts from the Global Forecast System operated by NOAA NWS NCEP."
+        )
+        self.assertEqual(card["details"], "Runs four times a day.")
+        self.assertNotContains(page, "https://example.org/gfs")
+        self.assertNotContains(page, "**forecasts**")
+
+    def test_the_filter_finds_a_collection_by_who_makes_it_and_its_keywords(self):
+        self.upstream.collections.append(parse_collection(DYNAMICAL_SHAPED))
+        self.give_address()
+
+        card = self.card(self.client.get(step(2)), "noaa-gfs-forecast")
+
+        self.assertIn("noaa nws ncep", card["search"])
+        self.assertIn("forecast", card["search"])
+
+    def test_a_regional_collection_shows_its_extent_and_not_global(self):
+        extent = {"spatial": {"bbox": [[21.84, -11.76, 51.42, 23.16]]}}
+        regional = {**DYNAMICAL_SHAPED, "id": "east-africa", "extent": extent}
+        self.upstream.collections.append(parse_collection(regional))
+        self.give_address()
+
+        page = self.client.get(step(2))
+        card = self.card(page, "east-africa")
+
+        self.assertFalse(card["global"])
+        self.assertContains(page, "21.8°, -11.8° → 51.4°, 23.2°")
+        self.assertEqual((card["start"], card["ongoing"]), ("", False))
+
+    def test_a_collection_known_by_id_alone_shows_only_its_id(self):
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+        self.give_address()
+
+        page = self.client.get(step(2))
+        card = self.card(page, "rainfall_chirps_monthly")
+
+        self.assertEqual(card["title"], "rainfall_chirps_monthly")
+        self.assertFalse(card["store"] or card["facts"] or card["producer"] or card["summary"])
+        self.assertNotContains(page, '<dl class="gr-collection-card__facts"')
+
+    def test_a_wizard_begun_before_cards_still_shows_its_collections_and_can_pick_one(self):
+        self.give_address()
+        session = self.client.session
+        session[wizard_views._SESSION_KEY]["collections"] = [
+            {"id": "rainfall_chirps_monthly", "title": "CHIRPS monthly rainfall"}
+        ]
+        session.save()
+
+        page = self.client.get(step(2))
+
+        self.assertContains(page, "CHIRPS monthly rainfall")
+        self.assertContains(page, 'data-search="chirps monthly rainfall rainfall_chirps_monthly"')
+        self.assertRedirects(self.pick_collection(), step(3))
+
+    def test_the_footer_names_the_collection_chosen_once_there_is_one(self):
+        self.upstream.collections.append(parse_collection(DYNAMICAL_SHAPED))
+        self.give_address()
+
+        self.assertRegex(self.status(self.client.get(step(2))), r"footer__container--hidden")
+
+        self.pick_collection("noaa-gfs-forecast")
+        status = self.status(self.client.get(step(2)))
+
+        self.assertNotIn("footer__container--hidden", status)
+        self.assertIn("Chosen collection", status)
+        self.assertIn('<strong class="hwiz-status__title" title="NOAA GFS forecast">NOAA GFS forecast</strong>', status)
+
+    @staticmethod
+    def status(page):
+        """The footer's status tab, as the page renders it."""
+        return re.search(r'<div id="hwiz-status".*?</div>', page.content.decode(), re.S).group(0)
+
+    def test_the_only_collection_is_already_chosen(self):
+        self.give_address()
+
+        page = self.client.get(step(2)).content.decode()
+
+        self.assertRegex(page, r'value="rainfall_chirps_monthly"[^>]*\bchecked\b')
+
+
 STATIC = "https://stac.upstream.example/catalog.json"
 STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
 STORE_HOST = "dynamical-noaa-gfs.s3.us-west-2.amazonaws.com"
@@ -629,8 +784,10 @@ class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
 
         page = self.client.get(step(2))
         self.assertContains(page, "holds 2 collections")
-        self.assertContains(page, "NOAA GFS forecast (noaa-gfs-forecast-virtual)")
-        self.assertContains(page, "NOAA GFS forecast, by place (noaa-gfs-forecast)")
+        self.assertEqual(
+            [(c["title"], c["id"]) for c in page.context["collections"]],
+            [("NOAA GFS forecast", "noaa-gfs-forecast-virtual"), ("NOAA GFS forecast, by place", "noaa-gfs-forecast")],
+        )
 
     def test_a_map_shaped_store_that_decodes_gets_an_accepting_verdict(self):
         self.store()

@@ -1,0 +1,19 @@
+{% load i18n %}
+{% comment %}
+    The wizard's actions, in Wagtail's own page footer: pinned to the foot of the
+    window on a wide screen, in the page's flow on a narrow one, styled by Wagtail.
+
+    actions — the buttons, built with `{% fragment as … %}`; the first is the main one.
+    with_status — give the footer a second tab for a line about the page's state
+        (`status`). It is hidden while `status` is empty, and the page's script
+        fills it and shows it by `#hwiz-status`.
+{% endcomment %}
+<footer class="footer w-grid md:w-grid-flow-col">
+    <nav class="actions actions--primary footer__container" aria-label="{% trans 'Actions (footer)' %}">
+        {{ actions }}
+    </nav>
+    {% if with_status %}
+        <div id="hwiz-status" class="footer__container hwiz-status{% if not status %} footer__container--hidden{% endif %}"
+             aria-live="polite">{{ status }}</div>
+    {% endif %}
+</footer>

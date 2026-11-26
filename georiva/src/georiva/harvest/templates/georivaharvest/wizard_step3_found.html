@@ -23,13 +23,11 @@
                 </p>
             </div>
         </div>
-        <div class="hwiz-actions">
-            <a href="{% url 'harvest_wizard_step4' %}" class="button bicolor button--icon">
-                {% icon name="arrow-right" wrapped=1 %}
-                {% trans "Next: choose what to show" %}
-            </a>
+        {% fragment as wizard_actions %}
+            <a href="{% url 'harvest_wizard_step4' %}" class="button">{% trans "Next: choose what to show" %}</a>
             <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
-        </div>
+        {% endfragment %}
+        {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions %}
     {% elif survey.harvestable %}
         <div class="hwiz-panel">
             <div class="hwiz-panel__header">
@@ -50,13 +48,11 @@
                 </p>
             </div>
         </div>
-        <div class="hwiz-actions">
-            <a href="{% url 'harvest_wizard_step4' %}" class="button bicolor button--icon">
-                {% icon name="arrow-right" wrapped=1 %}
-                {% trans "Next: choose what to show" %}
-            </a>
+        {% fragment as wizard_actions %}
+            <a href="{% url 'harvest_wizard_step4' %}" class="button">{% trans "Next: choose what to show" %}</a>
             <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
-        </div>
+        {% endfragment %}
+        {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions %}
     {% else %}
         <div class="hwiz-panel">
             <div class="hwiz-panel__header">
@@ -67,9 +63,10 @@
                 <p class="hwiz-note">{% trans "Nothing has been saved. You can choose another collection of this catalog, or try another catalog." %}</p>
             </div>
         </div>
-        <div class="hwiz-actions">
+        {% fragment as wizard_actions %}
             <a href="{% url 'harvest_wizard_step2' %}" class="button">{% trans "Choose another collection" %}</a>
             <a href="{% url 'harvest_wizard_step1' %}" class="button button-secondary">{% trans "Try another catalog" %}</a>
-        </div>
+        {% endfragment %}
+        {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions %}
     {% endif %}
 {% endblock %}

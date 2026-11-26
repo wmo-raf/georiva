@@ -51,7 +51,7 @@ from . import background_survey
 from .asset_hosts import AssetHostAllowlist, chunk_place
 from .models import DEFAULT_ROLLING_WINDOW_DAYS, MAX_ROLLING_WINDOW_DAYS
 from .setup import FeedPlan, PlannedVariable, SetupRefused, provision_harvest_feed
-from .survey import Shape, reason_for, survey_catalog
+from .survey import Shape, collection_card, reason_for, survey_catalog
 from .upstream import StoreField, UpstreamTimedOut, UpstreamUnreachable
 
 _SESSION_KEY = "georiva_harvest_wizard"
@@ -164,7 +164,7 @@ def harvest_wizard_step1(request):
                 request,
                 {
                     "upstream_url": address,
-                    "collections": [{"id": c.id, "title": c.title} for c in found.collections],
+                    "collections": [collection_card(c) for c in found.collections],
                     "described": found.described,
                 },
             )
@@ -225,10 +225,17 @@ def harvest_wizard_step2(request):
             _save(request, session)
             return redirect("harvest_wizard_step3")
 
+    collections = session["collections"]
+    # The card already chosen: the one picked earlier in this session (still being
+    # looked at, or looked at already), or the only one there is.
+    picked = session.get("checking", {}).get("collection_id") or session.get("collection_id")
+    chosen = next((c for c in collections if c["id"] == picked), None)
+    if chosen is None and len(collections) == 1:
+        chosen = collections[0]
     return render(
         request,
         "georivaharvest/wizard_step2_collection.html",
-        {"session": session, "collections": session["collections"], **_chrome(2)},
+        {"session": session, "collections": collections, "chosen": chosen, **_chrome(2)},
     )
 
 

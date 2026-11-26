@@ -29,20 +29,24 @@
         <form method="post" action="{% url 'harvest_wizard_step2' %}">
             {% csrf_token %}
             <input type="hidden" name="collection_id" value="{{ checking.collection_id }}">
-            <div class="hwiz-actions">
-                <button type="submit" class="button bicolor button--icon">
-                    {% icon name="rotate" wrapped=1 %}
-                    {% trans "Try again" %}
+            {% fragment as wizard_actions %}
+                <button type="submit" class="button button-longrunning" data-controller="w-progress"
+                        data-action="w-progress#activate"
+                        data-w-progress-active-value="{% trans 'Starting the check…' %}">
+                    {% icon name="spinner" %}
+                    <em data-w-progress-target="label">{% trans "Try again" %}</em>
                 </button>
                 <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
-            </div>
+            {% endfragment %}
+            {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions %}
         </form>
     {% else %}
         {% blocktrans asvar heading with title=checking.collection_title %}GeoRiva is reading the catalog to see whether it can show “{{ title }}”{% endblocktrans %}
         {% include "georivaharvest/includes/survey_wait.html" with panel="hwiz-panel" heading=heading wait=wait %}
-        <div class="hwiz-actions">
-            <a href="{% url 'harvest_wizard_step3' %}" class="button button-secondary">{% trans "Check again now" %}</a>
+        {% fragment as wizard_actions %}
+            <a href="{% url 'harvest_wizard_step3' %}" class="button">{% trans "Check again now" %}</a>
             <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
-        </div>
+        {% endfragment %}
+        {% include "georivaharvest/includes/wizard_footer.html" with actions=wizard_actions %}
     {% endif %}
 {% endblock %}
