@@ -130,7 +130,10 @@ def chunk_place(prefix: str) -> ChunkPlace | None:
 
     A prefix ends in a slash: without one it would also match its longer-named
     neighbours, and a store's reader will not take it."""
-    if not prefix.endswith("/") or any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
+    if not prefix.endswith("/") or not prefix.isascii():
+        # Its reader escapes what is not ASCII before matching, so such a prefix would never match.
+        return None
+    if any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
         return None
     scheme, separator, rest = prefix.partition("://")
     if not separator:
@@ -142,6 +145,11 @@ def chunk_place(prefix: str) -> ChunkPlace | None:
     if bucket_name is None or not bucket_name.fullmatch(bucket):
         return None
     return ChunkPlace(kind=scheme, bucket=bucket)
+
+
+def web_places(chunk_locations: Iterable[str]) -> tuple[str, ...]:
+    """The web places among `chunk_locations`, in order (#828)."""
+    return tuple(prefix for prefix in chunk_locations if getattr(chunk_place(prefix), "kind", None) == WEB)
 
 
 def _web_place(rest: str) -> ChunkPlace | None:

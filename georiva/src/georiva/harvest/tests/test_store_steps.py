@@ -344,6 +344,74 @@ class AWebPlaceIsAskedAboutAtEveryListingTests(StoreFixture, SimpleTestCase):
         ):
             list_held_steps(STORE, [TEMPERATURE], EVERYTHING, web_places=(self.PLACE,), resolve=lambda host: [])
 
+    def test_a_web_place_only_older_runs_keep_their_data_in_is_asked_about_too(self):
+        # As ECMWF's store moved buckets: the newest run elsewhere, older ones still on the web host.
+        bucket = "s3://noaa-gfs-bdp-pds/"
+
+        def move(store):
+            for step in (0, 1):
+                store.set_virtual_ref(
+                    f"temperature_2m/c/2/{step}/0/0",
+                    f"{bucket}run-2/{step}",
+                    offset=0,
+                    length=256,
+                    validate_container=False,
+                )
+
+        self.commit(move)
+
+        self.listed()
+
+        self.assertEqual(self.asked, [self.file(0, 1)])
+
+    def test_runs_a_harvest_does_not_list_again_are_still_looked_into_for_a_file(self):
+        # A harvest that finds nothing new still asks: the tile server reads the settled runs.
+        held = read_held_steps(
+            self.storage,
+            [TEMPERATURE],
+            EVERYTHING,
+            skip_runs=frozenset(RUNS),
+            web=(self.PLACE,),
+            check_chunk=lambda address: self.asked.append(address),
+        )
+
+        self.assertEqual(held, [])
+        self.assertEqual(self.asked, [self.file(2, 1)])
+
+    def test_each_web_place_is_asked_about_once(self):
+        other = "https://wn2.dynamical.org/chunks/"
+
+        # A run is kept in one place: the oldest one in the other.
+        def split(store):
+            for step in (0, 1):
+                store.set_virtual_ref(
+                    f"temperature_2m/c/0/{step}/0/0",
+                    f"{other}run-0/step-{step}.bin",
+                    offset=0,
+                    length=256,
+                    validate_container=False,
+                )
+
+        self.commit(split)
+        asked = []
+
+        read_held_steps(self.storage, [TEMPERATURE], EVERYTHING, web=(self.PLACE, other), check_chunk=asked.append)
+
+        self.assertEqual(asked, [self.file(2, 1), f"{other}run-0/step-1.bin"])
+
+    def test_a_web_place_no_held_step_reads_from_is_not_asked_about(self):
+        unused = "https://unused.example.org/chunks/"
+
+        read_held_steps(
+            self.storage, [TEMPERATURE], EVERYTHING, web=(self.PLACE, unused), check_chunk=self.asked.append
+        )
+
+        self.assertEqual(self.asked, [self.file(2, 1)])
+
+    def test_a_web_place_is_never_listed_with_no_way_to_judge_its_host(self):
+        with self.assertRaises(ValueError):
+            list_held_steps(STORE, [TEMPERATURE], EVERYTHING, web_places=(self.PLACE,))
+
     def test_with_no_web_place_pinned_nothing_is_asked(self):
         read_held_steps(self.storage, [TEMPERATURE], EVERYTHING)
 

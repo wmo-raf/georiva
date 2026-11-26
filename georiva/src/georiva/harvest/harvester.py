@@ -46,7 +46,7 @@ from georiva.core.storage.asset_location import remote_q, store_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
 from . import runs
-from .asset_hosts import WEB, AssetHostAllowlist, PinnedBuckets, chunk_place
+from .asset_hosts import AssetHostAllowlist, PinnedBuckets, chunk_place
 from .materialize import enqueue_due as enqueue_materialization
 from .survey import store_fields, store_media_type
 from .upstream import (
@@ -149,12 +149,6 @@ def harvest(
     )
 
 
-def _web_places(feed) -> tuple[str, ...]:
-    """The web places among a store feed's Pinned locations (#828)."""
-    places = feed.pinned_chunk_locations if feed.is_store else {}
-    return tuple(place for place in places if getattr(chunk_place(place), "kind", None) == WEB)
-
-
 def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck: bool = False) -> None:
     if feed.upstream_refusal:
         # A re-check found the Upstream no longer usable; its rows stand until one finds it usable again.
@@ -171,7 +165,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
             logger.warning("Harvest %s: store address %s refused — %s", feed.name, feed.store_href, refusal)
             raise RunStopped(f"store address refused — {refusal}")
         # So is each web place its data is pinned in: whoever reads there resolves the host anew (#828).
-        for place in _web_places(feed):
+        for place in feed.web_places:
             judged = AssetHostAllowlist([chunk_place(place).host], allow_http=False, resolve=upstream.resolve_host)
             if why := judged.refusal(place):
                 logger.warning("Harvest %s: data place %s refused — %s", feed.name, place, why)
@@ -414,7 +408,7 @@ def _listed(
                 window,
                 skip_runs=frozenset(settled),
                 allow_http=feed.allow_http,
-                web_places=_web_places(feed),
+                web_places=feed.web_places,
             )
         )
         if fields

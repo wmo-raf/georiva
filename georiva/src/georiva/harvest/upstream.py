@@ -338,9 +338,9 @@ class UpstreamCatalogClient(Protocol):
         `skip_runs` are not asked about: a closed run is not asked again (ADR
         0044 §6). Nothing is decoded and no data is followed anywhere. A plain
         `http` store is opened only where `allow_http` says the feed allows it.
-        Where the newest steps' data is kept in one of `web_places`, a file of
-        it is asked for by a reader that follows no redirect, and a refusal
-        raises `UpstreamUnreachable` naming the place (#828)."""
+        One file of each of `web_places` a Held step in `window` reads from —
+        settled runs too — is asked for by a reader that follows no redirect,
+        and a refusal raises `UpstreamUnreachable` naming the place (#828)."""
 
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
@@ -1020,10 +1020,10 @@ def open_repository(storage, chunk_locations: Mapping[str, str]):
     import icechunk
 
     # As it stands first, with nowhere authorised: that reads its settings and none of its data.
-    return following(icechunk.Repository.open(storage), chunk_locations)
+    return follow_into(icechunk.Repository.open(storage), chunk_locations)
 
 
-def following(repository, chunk_locations: Mapping[str, str]):
+def follow_into(repository, chunk_locations: Mapping[str, str]):
     """`repository`, already open, reopened to follow its data into
     `chunk_locations` and nowhere else: `open_repository`'s rule, for a caller
     that reads one repository with more than one set of places."""
@@ -1147,6 +1147,9 @@ def _sample(store, field: StoreField, ask: Callable[[str, tuple], str | None] | 
     )
 
 
+#: Says why the file at an address in a web place may not be read, or `None` when it may (#828).
+ChunkCheck = Callable[[str], str | None]
+
 #: Seconds a web place's host has to answer for one file of it.
 CHUNK_TIMEOUT = 10
 
@@ -1191,27 +1194,30 @@ def _unchecked(_url: str) -> str:
     return "it could not be checked"
 
 
-def _web_file(withheld, web: tuple[str, ...], path: str, where: tuple) -> str | None:
-    """The file in one of the web places `web` that the field at `path`, at
-    the cell `where`, is read from; `None` when it is read from none of them.
-    It is read from `withheld`, a store that follows no web place, whose
-    refusal names the file it would have read: nothing is fetched."""
+def _file_of(unfollowed, path: str, where: tuple) -> str | None:
+    """The file the field at `path`, at the cell `where`, is read from; `None`
+    when it is no file elsewhere (the store's own data, or nothing). It is read
+    from `unfollowed`, a store that follows its data nowhere, whose refusal
+    names the file it would have read: nothing is fetched from there."""
     import zarr
 
     try:
-        zarr.open_array(withheld, path=path, mode="r")[where]
+        zarr.open_array(unfollowed, path=path, mode="r")[where]
     except Exception as exc:  # whatever else stops the read, the read itself will say
-        address = refused_place(str(exc))
-        if address and address.startswith(web):
-            return address
+        return refused_place(str(exc)) or None
     return None
 
 
-def _web_refusal(withheld, web: tuple[str, ...], check: Callable[[str], str | None], path: str, where: tuple):
+def _web_place_of(address: str | None, web: tuple[str, ...]) -> str | None:
+    """Which of the web places `web` the file at `address` is kept in, if any."""
+    return next((place for place in web if address and address.startswith(place)), None)
+
+
+def _web_refusal(unfollowed, web: tuple[str, ...], check: ChunkCheck, path: str, where: tuple):
     """Why the field at `path`, at the cell `where`, may not be read from a web
     place, or `None`: the file it is read from is asked about first (#828)."""
-    address = _web_file(withheld, web, path, where)
-    if address and (why := check(address)):
+    address = _file_of(unfollowed, path, where)
+    if _web_place_of(address, web) and (why := check(address)):
         return f"the web address its data is kept at was refused: {why}"
     return None
 
@@ -1222,7 +1228,7 @@ def read_field_samples(
     chunk_locations: Mapping[str, str],
     *,
     into: dict | None = None,
-    check_chunk: Callable[[str], str | None] = _unchecked,
+    check_chunk: ChunkCheck = _unchecked,
 ) -> dict[str, FieldSample]:
     """A sample of each of `fields` from the repository in `storage`, by path.
 
@@ -1235,17 +1241,17 @@ def read_field_samples(
     """
     import icechunk
 
-    from .asset_hosts import WEB, chunk_place
+    from .asset_hosts import web_places
 
     found = {} if into is None else into
     repository = icechunk.Repository.open(storage)
-    store = following(repository, chunk_locations).readonly_session("main").store
-    web = tuple(prefix for prefix in chunk_locations if getattr(chunk_place(prefix), "kind", None) == WEB)
+    store = follow_into(repository, chunk_locations).readonly_session("main").store
+    web = web_places(chunk_locations)
     ask = None
     if web:
-        others = {prefix: region for prefix, region in chunk_locations.items() if prefix not in web}
-        withheld = following(repository, others).readonly_session("main").store
-        ask = partial(_web_refusal, withheld, web, check_chunk)
+        # Following its data nowhere, it names a field's file and fetches nothing.
+        unfollowed = follow_into(repository, {}).readonly_session("main").store
+        ask = partial(_web_refusal, unfollowed, web, check_chunk)
     for field_ in fields:
         try:
             found[field_.path] = _sample(store, field_, ask)
@@ -1266,7 +1272,7 @@ def sample_store(
     chunk_locations: Mapping[str, str],
     *,
     timeout: float = SAMPLE_TIMEOUT,
-    check_chunk: Callable[[str], str | None] = _unchecked,
+    check_chunk: ChunkCheck = _unchecked,
 ) -> dict[str, FieldSample]:
     """Read a sample of each of `fields` from the store at `href`, following
     its data into `chunk_locations` only. Whatever goes wrong is an answer, in
@@ -1373,13 +1379,16 @@ def _field_steps(
     known: dict,
     skip_runs: frozenset = frozenset(),
     declared=None,
-    newest=None,
+    files=None,
 ) -> list[tuple[datetime | None, datetime, tuple[timedelta, ...] | None]]:
     """`(run, valid time, lead times its run expects)` of every step in
     `window` that the store holds for one field, of no run in `skip_runs`. The
     last is `None` for a store without runs. What the field declares of its
-    time statistic, where it does, goes into `declared`, by its path; the cell
-    of its newest Held step into `newest`, by its path."""
+    time statistic, where it does, goes into `declared`, by its path.
+
+    Given `files`, the cells a file of the field may be looked for in go into
+    it, by its path, newest first: a Held step of each run in `window`, the
+    runs in `skip_runs` too — or the newest Held times of a store without runs."""
     import numpy as np
     import zarr
 
@@ -1413,39 +1422,71 @@ def _field_steps(
         times = [(index, _moment(value)) for index, value in enumerate(measured["time"])]
         asked = [(index, None, when, None) for index, when in times if when is not None and in_window(when, window)]
         cells = [cell(time=index) for index, *_rest in asked]
+        settled = []
     else:
         runs, leads = measured.get("run"), measured.get("step")
         if runs is None or leads is None or runs.dtype.kind != "M" or leads.dtype.kind != "m":
             raise _StoreMisdescribed(f"“{field.path}” is not a forecast of runs and steps ahead")
         lengths = _run_lengths(store, field.path, runs, known)
-        asked, cells = [], []
+        asked, cells, settled = [], [], []
         for run_index, run_value in enumerate(runs):
             run = _moment(run_value)
-            if run is None or not in_window(run, window) or run in skip_runs:
+            if run is None or not in_window(run, window) or (run in skip_runs and files is None):
                 continue
             expected = _expected_leads(leads, None if lengths is None else lengths[run_index])
             for step_index, lead in enumerate(leads):
                 when = None if np.isnat(lead) else _moment(run_value + lead)
-                if when is not None:
+                if when is None:
+                    continue
+                if run in skip_runs:
+                    # Not listed again; asked about only to find a file in it.
+                    settled.append(cell(run=run_index, step=step_index))
+                else:
                     asked.append((step_index, run, when, expected))
                     cells.append(cell(run=run_index, step=step_index))
-    if not cells:
-        return []
-    held = _held(store, array, field.path, cells)
-    if newest is not None and any(held):
-        # Cells are asked in order of run, then step: the last held is the newest.
-        newest[field.path] = next(cell for cell, there in zip(reversed(cells), reversed(held), strict=True) if there)
+    held = _held(store, array, field.path, cells) if cells else []
+    if files is not None:
+        found = [there for there, is_held in zip(cells, held, strict=True) if is_held]
+        if settled:
+            settled_held = _held(store, array, field.path, settled)
+            found += [there for there, is_held in zip(settled, settled_held, strict=True) if is_held]
+        files[field.path] = _newest_first(found, field.axes)
     return [step for (_index, *step), there in zip(asked, held, strict=True) if there]
 
 
-def _ask_about_web_places(withheld, web: tuple[str, ...], check: Callable[[str], str | None], newest: dict):
-    """Raise `UpstreamUnreachable` where the file of a field's newest Held step,
-    kept in a web place, is refused by `check` (#828)."""
-    for path, cell in newest.items():
-        address = _web_file(withheld, web, path, cell)
-        if address and (why := check(address)):
-            place = next(prefix for prefix in web if address.startswith(prefix))
-            raise UpstreamUnreachable(f"upstream data at {place} was refused: {why}")
+#: How many cells of one field are looked into for a file of each web place, at most.
+FILES_IN_REACH = 64
+
+
+def _newest_first(cells: list[tuple[int, ...]], axes: tuple[str, ...]) -> list[tuple[int, ...]]:
+    """`cells`, newest first: one of each run — its newest step — or, for a
+    store without runs, each time. At most `FILES_IN_REACH` of them."""
+    if "run" not in axes:
+        return sorted(cells, reverse=True)[:FILES_IN_REACH]
+    run = axes.index("run")
+    newest: dict[int, tuple[int, ...]] = {}
+    for there in cells:
+        newest[there[run]] = max(newest.get(there[run], there), there)
+    return [newest[index] for index in sorted(newest, reverse=True)][:FILES_IN_REACH]
+
+
+def _ask_about_web_places(unfollowed, web: tuple[str, ...], check: ChunkCheck, files: dict) -> None:
+    """Ask `check` about one file of each web place in `web` that a Held step
+    reads from, found among the cells in `files`, newest first; raise
+    `UpstreamUnreachable` naming the place it refuses (#828). A web place no
+    Held step reads from has no file to ask about, and nothing to serve."""
+    unasked = set(web)
+    for path, cells in files.items():
+        for where in cells:
+            if not unasked:
+                return
+            address = _file_of(unfollowed, path, where)
+            place = _web_place_of(address, tuple(unasked))
+            if place is None:
+                continue
+            unasked.discard(place)
+            if why := check(address):
+                raise UpstreamUnreachable(f"upstream data at {place} was refused: {why}")
 
 
 def read_held_steps(
@@ -1456,16 +1497,16 @@ def read_held_steps(
     skip_runs: frozenset = frozenset(),
     branch: str = "main",
     web: tuple[str, ...] = (),
-    check_chunk: Callable[[str], str | None] = _unchecked,
+    check_chunk: ChunkCheck = _unchecked,
 ) -> list[HeldStep]:
     """The Held steps of `fields` in `window`, of no run in `skip_runs`, from
     the repository in `storage`.
 
     The repository is opened as it stands, with nowhere authorised: whether a
-    step is held is asked of the store by key, and a key is not data. Where the
-    newest Held step of a field is kept in one of the web places `web`, its
-    file is asked about by `check_chunk`, and a refusal raises
-    `UpstreamUnreachable` naming the place (#828).
+    step is held is asked of the store by key, and a key is not data. One file
+    of each of the web places `web` that a Held step in `window` reads from —
+    of any run there, settled ones too — is asked about by `check_chunk`, and
+    a refusal raises `UpstreamUnreachable` naming the place (#828).
     """
     import icechunk
 
@@ -1475,16 +1516,16 @@ def read_held_steps(
     expected: dict[datetime, tuple[timedelta, ...]] = {}
     declared: dict[str, Declared] = {}
     known: dict = {}
-    newest: dict[str, tuple] | None = {} if web else None
+    files: dict[str, list[tuple]] | None = {} if web else None
     for field_ in fields:
-        steps = _field_steps(store, field_, window, known, frozenset(skip_runs), declared, newest)
+        steps = _field_steps(store, field_, window, known, frozenset(skip_runs), declared, files)
         for run, when, run_leads in steps:
             found.setdefault((run, when), set()).add(field_.path)
             if run is not None:
                 # The first array to say speaks for the run: arrays beside one another share its lead times.
                 expected.setdefault(run, run_leads)
-    if newest:
-        _ask_about_web_places(following(repository, {}).readonly_session(branch).store, web, check_chunk, newest)
+    if files:
+        _ask_about_web_places(follow_into(repository, {}).readonly_session(branch).store, web, check_chunk, files)
     return [
         HeldStep(
             time=when,
@@ -1523,9 +1564,15 @@ def list_held_steps(
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as TimedOut
 
+    if web_places and resolve is None:
+        raise ValueError("a web place's file is asked for at an address its host resolves to: give `resolve`")
+
     def read():
         storage = repository_storage(href, allow_http=allow_http)
-        check = (lambda url: chunk_refusal(url, resolve=resolve)) if resolve is not None else _unchecked
+
+        def check(url: str) -> str | None:
+            return chunk_refusal(url, resolve=resolve)
+
         return read_held_steps(storage, fields, window, skip_runs=skip_runs, web=tuple(web_places), check_chunk=check)
 
     # Its own thread, so a store that stops answering costs the wait and no more.

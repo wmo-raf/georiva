@@ -52,7 +52,7 @@ from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
 from georiva.organisations.access import require_active_org, scoped_queryset
 
 from . import background_survey
-from .asset_hosts import AssetHostAllowlist, chunk_place
+from .asset_hosts import WEB, AssetHostAllowlist, chunk_place
 from .models import DEFAULT_ROLLING_WINDOW_DAYS, MAX_ROLLING_WINDOW_DAYS
 from .setup import FeedPlan, PlannedVariable, SetupRefused, provision_harvest_feed
 from .survey import Shape, collection_card, reason_for, survey_catalog
@@ -667,7 +667,7 @@ def _chunk_places(store: dict) -> list[dict]:
     clouds = {
         "s3": _("Amazon's cloud storage"),
         "gs": _("Google's cloud storage"),
-        "https": _("the provider's own web server"),
+        WEB: _("the provider's own web server"),
     }
     places = []
     for index, declared in enumerate(store["chunk_locations"]):

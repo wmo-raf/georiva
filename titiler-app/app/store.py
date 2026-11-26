@@ -306,7 +306,9 @@ def place_kind(prefix: str) -> str | None:
     """``"s3"`` or ``"gs"`` for a prefix naming a bucket of that kind, or a
     folder of one, and ``"https"`` for a folder of a web host spelled as the
     reader matches it; ending in a slash; ``None`` for anything else (ADR 0044 §11)."""
-    if not prefix.endswith("/") or any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
+    if not prefix.endswith("/") or not prefix.isascii():
+        return None
+    if any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
         return None
     scheme, separator, rest = prefix.partition("://")
     if not separator:

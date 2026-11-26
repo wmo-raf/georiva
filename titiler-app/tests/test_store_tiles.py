@@ -450,6 +450,7 @@ class TestOnlyPinnedPlacesAreFollowed:
             ("https://wn.dynamical.org//chunks/", None),
             ("https://wn.dynamical.org/%2e%2e/", None),
             ("https://wn.dynamical.org/chunks", None),
+            ("https://wn.dynamical.org/données/", None),  # escaped before matching: it would never match
         ],
     )
     def test_the_kinds_of_place_are_djangos_closed_list(self, pinned, kind):

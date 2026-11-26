@@ -85,6 +85,7 @@ class ChunkPlaceTests(SimpleTestCase):
             "https://wn.dynamical.org/chunks/?a=b/",
             "https://wn.dynamical.org/chunks/#a/",
             "https://wn.dynamical.org/chunks",  # no closing slash
+            "https://wn.dynamical.org/données/",  # escaped before matching: it would never match
             "https://wn.dynamical.org",
             "https:///chunks/",
         ):

@@ -193,9 +193,12 @@ the store, and Titiler draws maps by reading the store itself.**
     is bounded as the store's own are; no limit on size is set, since a chunk's length is the store's reference.
 
     **The store's reader follows redirects, so we ask first.** Icechunk's HTTP reader follows a redirect to any
-    host, and nothing turns that off. So before a field is read from a web place — by the sample read, and by
-    every harvest for each mapped field's newest held step — the one file it is read from is asked for (one byte)
-    by our own reader, which connects only at an address it judged and follows no redirect. A host that answers
+    host, and nothing turns that off. So a file of a web place is asked for (one byte) by our own reader, which
+    connects only at an address it judged and follows no redirect: by the sample read, the file each chosen field
+    is read from; and by every harvest, one file of each pinned web place, found among the newest step of each run
+    in the window — settled runs too, which a harvest does not list again but the tile server still reads. A web
+    place no run in the window reads from has nothing to serve, and is not asked about. The file is found by a
+    read that follows the store's data nowhere, whose refusal names it, so nothing is fetched to find it. A host that answers
     with a redirect, does not have the file or does not answer is refused, naming why: the sample fails the field;
     a harvest stops (a re-check's harvest too). Between those asks, the tile server's reader can still follow a
     redirect a host starts answering with, and resolves the host itself; as for a Remote asset read by GDAL
