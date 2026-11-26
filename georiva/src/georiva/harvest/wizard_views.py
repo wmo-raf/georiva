@@ -35,10 +35,13 @@ from urllib.parse import urlsplit
 
 from django.contrib import messages
 from django.db import IntegrityError, transaction
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
+from django.views.decorators.http import require_POST
 
 # The Push Feed Wizard's Sample File needs the same two things of a scanned
 # variable — a Unit for its unit string, and bounds rounded outward — and has them.
@@ -416,6 +419,14 @@ def _image_rows(survey: dict, chosen, posted) -> list[dict]:
             "index": index,
             "use": asset["readable"] and (not earlier or asset["key"] in earlier),
             "name": asset["title"] or asset["key"],
+            # Its card is the one a store's field has (`settings_card.html`): what only a field has, it has empty.
+            "label": asset["title"] or asset["key"],
+            "ident": asset["key"],
+            "path": "",
+            "about": "",
+            "forecast": False,
+            "component": False,
+            "fixed": False,
             **_unit_row(asset["unit"], asset["key"], asset["title"]),
             "low": low,
             "high": high,
@@ -628,6 +639,10 @@ def _offered(store: dict) -> list[dict]:
     for array in offered:
         title = array["title"]
         array["label"] = title if title and titles[title] == 1 else _spelt(array["path"]) or array["path"]
+        array["forecast"] = "run" in array["axes"]
+        array["component"] = _is_component(array)
+        # Its card is the one an image's is (`settings_card.html`): what only an image has, it has empty.
+        array.update(key="", ident=array["path"], warning="")
     return offered
 
 
@@ -717,17 +732,12 @@ def _step4_store(request, session):
             _save(request, session)
             return redirect("harvest_wizard_step5")
 
-    earlier = {field["key"]: field for field in session.get("chosen") or []}
-    rows = _field_rows(offered, earlier, session.get("samples", {}), posted)
-    details = [row for row in rows if row["detailed"]]
     return render(
         request,
         "georivaharvest/wizard_step4_fields.html",
         {
             "session": session,
-            "rows": rows,
-            "details": details,
-            "pairs": _offered_vectors(_vector_pairs(details), session.get("vectors") or [], posted),
+            **_store_fields(session, offered, posted),
             "unoffered": [array for array in store["arrays"] if not array["offered"]],
             "own": {
                 **own,
@@ -748,10 +758,76 @@ def _step4_store(request, session):
     )
 
 
-def _read_samples(session: dict, ticked: list[dict], allowed: list[dict], places: list[dict]) -> list[str]:
+def _store_fields(session: dict, offered: list[dict], posted) -> dict:
+    """Each field on offer, the ticked and read ones with how each appears, and
+    the winds over them: what the page shows, and what a read sends back."""
+    earlier = {field["key"]: field for field in session.get("chosen") or []}
+    rows = _field_rows(offered, earlier, session.get("samples", {}), posted)
+    details = [row for row in rows if row["detailed"]]
+    pairs = _offered_vectors(_vector_pairs(details), session.get("vectors") or [], posted)
+    return {"rows": rows, "details": details, "pairs": pairs}
+
+
+@require_POST
+def harvest_wizard_step4_read(request):
+    """Read one map of each field ticked on step 4 that has none yet, as the
+    operator ticks it, and send back how the asked-for ones appear.
+
+    Posted: the whole step 4 form, and `want` for each field whose card the
+    page lacks. Answered with JSON: `cards` (each field's settings card, by
+    its index), `winds` (the wind cards over every pair now ticked and read)
+    and `problems` (why a ticked field was not read, by its index). What is
+    read is kept in the session, as Continue would keep it: it reads the same
+    way, through `_read_samples`, and is the path without a script.
+    """
+    from georiva.core.models import Unit
+
+    require_active_org(request)
+    session = _session(request)
+    survey = session.get("survey")
+    if not survey or not survey["harvestable"] or not survey["store"]:
+        return JsonResponse({"error": _("This wizard has no data store to read from.")}, status=409)
+    store, own = survey["store"], survey["locations"][0]
+    places, offered, posted = _chunk_places(store), _offered(store), request.POST
+    ticked = [array for array in offered if posted.get(f"use_{array['index']}")]
+    wanted = {index for index in (_whole(value) for value in posted.getlist("want")) if index is not None}
+
+    problems: dict[str, str] = {}
+    if own["proposed"] and not posted.get("allow_store"):
+        for array in ticked:
+            problems[array["path"]] = _("Allow reading from “%(host)s” above first.") % {"host": own["host"]}
+    else:
+        allowed = [place for place in places if place["usable"] and posted.get(f"allow_{place['index']}")]
+        _read_samples(session, ticked, allowed, places, problems)
+        _save(request, session)
+
+    shown = _store_fields(session, offered, posted)
+    units = Unit.objects.order_by("name")
+    return JsonResponse(
+        {
+            "cards": {
+                row["index"]: render_to_string(
+                    "georivaharvest/includes/settings_card.html", {"row": row, "units": units}, request
+                )
+                for row in shown["details"]
+                if row["index"] in wanted
+            },
+            "winds": [
+                render_to_string("georivaharvest/includes/wind_card.html", {"pair": pair}, request)
+                for pair in shown["pairs"]
+            ],
+            "problems": {array["index"]: problems[array["path"]] for array in ticked if array["path"] in problems},
+        }
+    )
+
+
+def _read_samples(
+    session: dict, ticked: list[dict], allowed: list[dict], places: list[dict], problems: dict | None = None
+) -> list[str]:
     """Read one map of each ticked field that has no sample yet, following the
     store's data into the places allowed and nowhere else, and keep what was
-    read in the session. Returns what went wrong, for the operator.
+    read in the session. Returns what went wrong, for the operator; and, given
+    `problems`, says there why each field that was not read was not, by its path.
 
     A sample stands for as long as every place it was read with is still
     allowed: taking a place away reads again without it (ADR 0044 §11).
@@ -771,7 +847,9 @@ def _read_samples(session: dict, ticked: list[dict], allowed: list[dict], places
         store["href"], [StoreField(array["path"], tuple(array["axes"])) for array in wanted], following
     )
     elsewhere: dict[str, list[str]] = {}
+    kept_at: dict[str, str] = {}
     errors = []
+    problems = {} if problems is None else problems
     for array in wanted:
         sample, name = read.get(array["path"]), array["label"]
         if sample is not None and sample.readable:
@@ -786,11 +864,26 @@ def _read_samples(session: dict, ticked: list[dict], allowed: list[dict], places
             continue
         samples.pop(array["path"], None)
         if sample is not None and sample.elsewhere:
-            elsewhere.setdefault(_where(sample.elsewhere, places), []).append(name)
+            kept_at[array["path"]] = _where(sample.elsewhere, places)
+            elsewhere.setdefault(kept_at[array["path"]], []).append(name)
         else:
             why = sample.problem if sample is not None else _("it was not read")
             errors.append(_("“%(name)s” could not be read: %(why)s.") % {"name": name, "why": why})
+            problems[array["path"]] = _("It could not be read: %(why)s.") % {"why": why}
     by_name = {place["declared"]: place for place in places}
+    for path, where in kept_at.items():
+        place = by_name.get(where)
+        said = {"place": place["name"] if place else where}
+        if place is None:
+            problems[path] = (
+                _("Its data is kept somewhere this collection does not mention (%(place)s). Untick it.") % said
+            )
+        elif place["usable"]:
+            problems[path] = (
+                _("Its data is kept at “%(place)s”, which you have not allowed. Allow it above, or untick it.") % said
+            )
+        else:
+            problems[path] = _("Its data is kept at “%(place)s”, which GeoRiva could not find. Untick it.") % said
     for where, names in elsewhere.items():
         said = {"names": _named(names), "place": by_name[where]["name"] if where in by_name else where}
         if where not in by_name:
@@ -973,7 +1066,18 @@ def _vector_pairs(fields: list[dict]) -> list[dict]:
                 kind: "".join([*parts[:at], "_".join(filter(None, [before, kind, after])), *parts[at + 1 :]])
                 for kind, _transform in _vector_kinds()
             }
-            pairs.append({"index": field["index"], "u": field["path"], "v": v_path, "named": named})
+            v_index = by_path[v_path]["index"]
+            pairs.append(
+                {
+                    "index": field["index"],
+                    "v_index": v_index,
+                    # Its card follows the later of its two parts' cards.
+                    "after": max(field["index"], v_index),
+                    "u": field["path"],
+                    "v": v_path,
+                    "named": named,
+                }
+            )
             break
     return pairs
 

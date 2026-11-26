@@ -11,10 +11,12 @@ from unittest import mock
 from urllib.parse import urlsplit
 
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from georiva.core.models import Asset, Catalog, Collection, Unit, Variable
 from georiva.core.time_statistic import Declared
+from georiva.harvest import wizard_views
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import StoreField, UpstreamCollection
@@ -999,3 +1001,102 @@ class WizardSetsTheTimeStatisticTests(StoreWizardMixin, TestCase):
         self.save_store()
 
         self.assertEqual(set(Variable.objects.values_list("time_statistic", flat=True)), {"instant"})
+
+
+class WizardReadsAFieldAsItIsTickedTests(StoreWizardMixin, TestCase):
+    """Step 4 reads a field as it is ticked and sends back how it appears, so
+    Continue only saves (#823). The read is the one Continue makes without a script."""
+
+    def setUp(self):
+        super().setUp()
+        self.arrays["wind_v_10m"] = (RUN_STEP_GRID, WHOLE_FIELD)
+        self.store()
+        self.reach_fields()
+
+    def index(self, path):
+        return next(row["index"] for row in self.client.get(step(4)).context["rows"] if row["path"] == path)
+
+    def read(self, *indexes, want=None, places=(0,), store=True, **typed):
+        """Tick the fields at `indexes`, and ask for the cards of those at `want` (all of them, unsaid)."""
+        data = {f"use_{index}": "on" for index in indexes}
+        data.update({f"allow_{index}": "on" for index in places})
+        if store:
+            data["allow_store"] = "on"
+        data["want"] = [str(index) for index in (indexes if want is None else want)]
+        data.update(typed)
+        return self.client.post(reverse("harvest_wizard_step4_read"), data)
+
+    def test_ticking_a_field_reads_one_map_of_it_and_sends_its_card(self):
+        answer = self.read(0).json()
+
+        self.assertEqual(list(answer["cards"]), ["0"])
+        self.assertIn('name="name_0"', answer["cards"]["0"])
+        self.assertIn('value="2 metre temperature"', answer["cards"]["0"])
+        self.assertIn('name="low_0"', answer["cards"]["0"])
+        self.assertEqual(answer["problems"], {})
+        self.assertEqual(len(self.upstream.samples_asked), 1)
+
+    def test_a_field_read_already_is_not_read_again(self):
+        self.read(0)
+        self.read(0)
+
+        self.assertEqual(len(self.upstream.samples_asked), 1)
+
+    def test_what_is_typed_on_a_card_comes_back_on_it(self):
+        self.read(0)
+
+        answer = self.read(0, name_0="Air temperature", unit_0=self.celsius.pk, low_0="-30", high_0="45").json()
+
+        self.assertIn('value="Air temperature"', answer["cards"]["0"])
+        self.assertIn('value="-30"', answer["cards"]["0"])
+
+    def test_a_field_kept_where_the_feed_may_not_read_says_so_on_its_card(self):
+        answer = self.read(0, places=()).json()
+
+        self.assertEqual(answer["cards"], {})
+        self.assertIn("which you have not allowed. Allow it above, or untick it.", answer["problems"]["0"])
+
+    def test_nothing_is_read_before_the_store_itself_is_allowed(self):
+        answer = self.read(0, store=False).json()
+
+        self.assertIn(f"Allow reading from “{STORE_HOST}” above first.", answer["problems"]["0"])
+        self.assertEqual(self.upstream.samples_asked, [])
+
+    def test_a_wind_card_comes_back_once_both_its_parts_are_read(self):
+        u, v = self.index("wind_u_10m"), self.index("wind_v_10m")
+
+        self.assertEqual(self.read(u).json()["winds"], [])
+        answer = self.read(u, v, want=[v]).json()
+
+        (wind,) = answer["winds"]
+        self.assertIn(f'data-parts="{u} {v}"', wind)
+        self.assertIn(f'data-after="{max(u, v)}"', wind)
+        self.assertIn("Also show", wind)
+
+    def test_the_read_is_a_post(self):
+        self.assertEqual(self.client.get(reverse("harvest_wizard_step4_read")).status_code, 405)
+
+    def test_a_wizard_with_no_store_has_nothing_to_read(self):
+        session = self.client.session
+        session[wizard_views._SESSION_KEY]["survey"]["store"] = None
+        session.save()
+
+        self.assertEqual(self.read(0).status_code, 409)
+
+    def test_a_field_unticked_after_its_read_is_left_out(self):
+        u = self.index("wind_u_10m")
+        self.read(0, u)
+
+        typed = {"name_0": "Temperature", "unit_0": self.celsius.pk, "low_0": "-40", "high_0": "50", "about_0": ""}
+        self.assertRedirects(self.tick(0, **typed), step(5))
+
+        chosen = self.client.session[wizard_views._SESSION_KEY]["chosen"]
+        self.assertEqual([field["key"] for field in chosen], ["temperature_2m"])
+
+    def test_the_page_shows_each_field_as_a_card_and_each_read_one_as_a_settings_card(self):
+        page = self.tick(0)
+
+        self.assertContains(page, 'data-pick="0"')
+        self.assertContains(page, 'data-settings="0"')
+        self.assertContains(page, '<label class="w-field__label" for="name_0">Name</label>', html=True)
+        self.assertContains(page, reverse("harvest_wizard_step4_read"))

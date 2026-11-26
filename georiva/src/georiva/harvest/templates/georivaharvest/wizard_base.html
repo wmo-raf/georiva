@@ -87,6 +87,93 @@
             margin-bottom: 1.25em;
         }
 
+        /* How each map appears (step 4): one card per map, its inputs in labelled rows. */
+        .gr-map-settings {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .gr-map-settings-card {
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+            padding: 1rem 1.15rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 0.5rem;
+            background: var(--w-color-surface-page);
+        }
+
+        .gr-map-settings-card[hidden] {
+            display: none;
+        }
+
+        /* An image left unticked keeps its card, quieter. */
+        .gr-map-settings-card:has(.gr-map-settings-card__use:not(:checked)) {
+            opacity: 0.6;
+        }
+
+        .gr-map-settings-card--wind {
+            gap: 0.25rem;
+            border-style: dashed;
+        }
+
+        .gr-map-settings-card--wind .hwiz-check {
+            margin-bottom: 0.25em;
+        }
+
+        .gr-map-settings-card__head {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.4rem 0.6rem;
+            margin-bottom: -0.6rem;
+        }
+
+        .gr-map-settings-card__use {
+            accent-color: var(--w-color-secondary);
+        }
+
+        .gr-map-settings-card__title {
+            font-weight: 700;
+            font-size: 1.05em;
+            color: var(--w-color-text-label);
+        }
+
+        .gr-map-settings-card__remove {
+            margin-inline-start: auto;
+        }
+
+        .gr-map-settings-card__id {
+            font-family: var(--w-font-mono);
+            font-size: 0.8em;
+            color: var(--w-color-text-meta);
+            overflow-wrap: anywhere;
+        }
+
+        .gr-map-settings-card .hwiz-check {
+            margin-bottom: 0;
+        }
+
+        /* A field to a row, as Wagtail lays out its own forms; no input wider than it needs. */
+        .gr-map-settings-card .w-field__wrapper {
+            margin-bottom: 0;
+        }
+
+        .gr-map-settings-card .w-field__input {
+            max-width: 32rem;
+        }
+
+        .hwiz-units__source {
+            margin: 0;
+        }
+
+        .gr-map-badges {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+        }
+
         /* Room under the last of a page's content for Wagtail's footer, pinned over the window's foot. */
         .hwiz-body {
             padding-bottom: 4rem;
@@ -138,47 +225,9 @@
             color: var(--w-color-critical-200);
         }
 
-        /* Fixed widths: in a table of form fields the browser otherwise gives the
-           select all the room and squeezes the rest. */
         .hwiz-number {
             width: 7em;
             min-width: 7em;
-        }
-
-        .hwiz-name {
-            width: 14em;
-            min-width: 10em;
-        }
-
-        .hwiz-unit {
-            width: 13em;
-            min-width: 0;
-        }
-
-        /* One row's units: the provider's, what to show them in, and the water flag. */
-        .hwiz-units {
-            display: flex;
-            flex-direction: column;
-            gap: 0.35em;
-            max-width: 16em;
-        }
-
-        .hwiz-units p {
-            margin: 0;
-        }
-
-        .hwiz-units__label,
-        .hwiz-units__range {
-            color: var(--w-color-text-meta);
-            font-size: 0.9em;
-        }
-
-        .hwiz-units__water {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.4em;
-            font-size: 0.9em;
-            line-height: 1.4;
         }
 
         .hwiz-units__hint {
