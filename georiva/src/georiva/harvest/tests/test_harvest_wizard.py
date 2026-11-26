@@ -103,6 +103,12 @@ class WizardMixin:
 
     # The steps, each as an operator takes it.
 
+    def forget_the_wizard(self):
+        """Start the wizard afresh: what it surveyed in this session is otherwise reused."""
+        session = self.client.session
+        session.pop(wizard_views._SESSION_KEY, None)
+        session.save()
+
     def give_address(self, address=ADDRESS):
         return self.client.post(step(1), {"upstream_url": address})
 
@@ -882,20 +888,23 @@ class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
         self.assertContains(page, "how “temperature_2m” is divided up")
 
     def test_no_page_about_a_store_uses_its_makers_words(self):
+        # Each with words only its own verdict says, so a page reused from another is caught.
         verdicts = {
-            "accepted": {},
-            "series-shaped": {"chunks": (1, 105, 121, 121)},
-            "undecodable": {"codecs": {"temperature_2m": ("acme_wavelet",)}},
-            "undescribed layout": {"chunks": None},
-            "no cube": {"described": False},
+            "accepted": ({}, "GeoRiva can draw maps"),
+            "series-shaped": ({"chunks": (1, 105, 121, 121)}, "charting one place over time"),
+            "undecodable": ({"codecs": {"temperature_2m": ("acme_wavelet",)}}, "cannot unpack"),
+            "undescribed layout": ({"chunks": None}, "divided up"),
+            "no cube": ({"described": False}, "does not describe what the store holds"),
         }
-        for verdict, shape in verdicts.items():
+        for verdict, (shape, says) in verdicts.items():
             with self.subTest(verdict=verdict):
+                self.forget_the_wizard()
                 self.store(**shape)
                 self.give_address(STATIC)
                 pages = [self.client.get(step(2))]
                 self.pick_collection("noaa-gfs-forecast-virtual")
                 pages.append(self.client.get(step(3)))
+                self.assertContains(pages[-1], says)
 
                 for page in pages:
                     body = wizard_copy(page).replace("acme_wavelet", "")
