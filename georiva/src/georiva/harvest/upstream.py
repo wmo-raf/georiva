@@ -18,6 +18,7 @@ import socket
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, unquote, urljoin, urlsplit
@@ -142,6 +143,37 @@ class AssetProbe:
     value_max: float | None = None
 
 
+class StoreFormat(StrEnum):
+    """What kind of store an Upstream store is (ADR 0052). Only an Icechunk
+    repository's data is read; a plain Zarr store is judged and refused."""
+
+    ICECHUNK = "icechunk"
+    ZARR = "zarr"
+
+
+@dataclass(frozen=True)
+class StoreChunking:
+    """How one array of an Upstream store is divided up, as the store itself
+    says (ADR 0052 §1): what the Store shape is read from."""
+
+    #: The array's dimensions by name, in its own order; empty when the store names none.
+    dimensions: tuple[str, ...] = ()
+    #: How many steps it has along each dimension.
+    shape: tuple[int, ...] = ()
+    #: How many steps of each dimension one piece read spans: within a shard, its inner piece.
+    chunks: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class StoreArrayMetadata:
+    """What an Upstream store's own metadata says of one array. No data is read."""
+
+    #: The codecs it names, in the order it names them.
+    codecs: tuple[str, ...] = ()
+    #: How it is divided up; `None` when its metadata does not say in a form we read.
+    chunking: StoreChunking | None = None
+
+
 @dataclass(frozen=True)
 class StoreProbe:
     """What opening an Upstream store showed of its arrays. Only their metadata
@@ -152,6 +184,9 @@ class StoreProbe:
     problem: str = ""
     #: The codecs each array names, by the array's path in the store, in the order it names them.
     codecs: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: How each array is divided up, by its path, where its metadata says.
+    chunking: dict[str, StoreChunking] = field(default_factory=dict)
+    store_format: StoreFormat = StoreFormat.ICECHUNK
     #: Whether it was given up on for not answering in time: worth asking again, not a refusal.
     timed_out: bool = False
 
@@ -320,7 +355,8 @@ class UpstreamCatalogClient(Protocol):
         """Open the file at `href` by range and say what it is. Never raises."""
 
     def describe_store(self, href: str) -> StoreProbe:
-        """Open the Upstream store at `href` and say which codecs its arrays name. Never raises."""
+        """Open the Upstream store at `href` and say what its own metadata says of
+        each array: its codecs and how it is divided up (ADR 0052 §1). Never raises."""
 
     def sample_store(
         self, href: str, fields: list[StoreField], chunk_locations: dict[str, str]
@@ -701,8 +737,33 @@ def can_decode(codec: str) -> bool:
     return True
 
 
-async def _array_codecs(store) -> dict[str, tuple[str, ...]]:
-    """The codecs of every array under a store's root, by path.
+def _chunking(node: dict) -> StoreChunking | None:
+    """How a Zarr array is divided up, from its own metadata document; `None`
+    when it does not say in a form we read. A sharded array is read a piece of
+    its shard at a time, so its inner piece is the one that counts."""
+    grid = node.get("chunk_grid")
+    configuration = grid.get("configuration") if isinstance(grid, dict) else None
+    chunks = configuration.get("chunk_shape") if isinstance(configuration, dict) else None
+    for codec in node.get("codecs") or []:
+        if isinstance(codec, dict) and codec.get("name") == "sharding_indexed":
+            inner = (codec.get("configuration") or {}).get("chunk_shape")
+            chunks = inner if isinstance(inner, list) else chunks
+    shape, named = node.get("shape"), node.get("dimension_names")
+    if not isinstance(chunks, list) or not isinstance(shape, list) or len(chunks) != len(shape):
+        return None
+    if not all(_whole(n) is not None for n in (*chunks, *shape)):
+        return None
+    names = tuple(str(n) for n in named) if isinstance(named, list) and None not in named else ()
+    return StoreChunking(names if len(names) == len(shape) else (), tuple(shape), tuple(chunks))
+
+
+def _array_said(node: dict) -> StoreArrayMetadata:
+    """What one array's version 3 metadata document says of it."""
+    return StoreArrayMetadata(codec_names(node.get("codecs")), _chunking(node))
+
+
+async def _array_metadata(store) -> dict[str, StoreArrayMetadata]:
+    """What every array under a store's root says of itself, by path.
 
     Read from each node's own metadata document, never by opening the array:
     opening one whose codec is not installed raises, and what it names is the
@@ -715,7 +776,7 @@ async def _array_codecs(store) -> dict[str, tuple[str, ...]]:
 
     prototype = default_buffer_prototype()
     gate = asyncio.Semaphore(STORE_CONCURRENCY)
-    found: dict[str, tuple[str, ...]] = {}
+    found: dict[str, StoreArrayMetadata] = {}
 
     async def visit(path: str):
         async with gate:
@@ -726,7 +787,7 @@ async def _array_codecs(store) -> dict[str, tuple[str, ...]]:
             if not isinstance(node, dict):
                 return
             if node.get("node_type") == "array":
-                found[path] = codec_names(node.get("codecs"))
+                found[path] = _array_said(node)
                 return
             children = [name async for name in store.list_dir(f"{path}/" if path else "")]
         await asyncio.gather(
@@ -737,8 +798,9 @@ async def _array_codecs(store) -> dict[str, tuple[str, ...]]:
     return found
 
 
-def read_store_codecs(storage, *, branch: str = "main") -> dict[str, tuple[str, ...]]:
-    """Open the repository in `storage` read-only and name its arrays' codecs.
+def read_store_arrays(storage, *, branch: str = "main") -> dict[str, StoreArrayMetadata]:
+    """Open the repository in `storage` read-only and say what each array's
+    own metadata says of it: its codecs and how it is divided up.
 
     No virtual chunk access is authorised: metadata needs none, and where a
     store's chunks may be read from is an operator's to confirm (ADR 0044 §11).
@@ -748,24 +810,135 @@ def read_store_codecs(storage, *, branch: str = "main") -> dict[str, tuple[str, 
     import icechunk
 
     repository = icechunk.Repository.open(storage)
-    return asyncio.run(_array_codecs(repository.readonly_session(branch).store))
+    return asyncio.run(_array_metadata(repository.readonly_session(branch).store))
+
+
+def read_plain_zarr(href: str, *, address: str, timeout: float) -> dict[str, StoreArrayMetadata] | None:
+    """What each array of the plain Zarr store at `href` says of itself, read
+    from `address` alone — one the caller judged — from its consolidated
+    metadata: a version 3 store's `zarr.json`, else a version 2 store's
+    `.zmetadata`. `None` when there is neither: a store that does not
+    consolidate its metadata cannot be listed over the web. No data is read,
+    and no redirect is followed. Never raises."""
+    base = href.rstrip("/")
+    root = _json_at(f"{base}/zarr.json", address, timeout)
+    consolidated = root.get("consolidated_metadata") if isinstance(root, dict) else None
+    nodes = consolidated.get("metadata") if isinstance(consolidated, dict) else None
+    if isinstance(nodes, dict):
+        return {
+            str(path): _array_said(node)
+            for path, node in nodes.items()
+            if isinstance(node, dict) and node.get("node_type") == "array"
+        }
+    listed = _json_at(f"{base}/.zmetadata", address, timeout)
+    documents = listed.get("metadata") if isinstance(listed, dict) else None
+    if not isinstance(documents, dict):
+        return None
+    found = {}
+    for key, node in documents.items():
+        if not key.endswith(".zarray") or not isinstance(node, dict):
+            continue
+        path = key.removesuffix(".zarray").rstrip("/")
+        attributes = documents.get(f"{path}/.zattrs" if path else ".zattrs")
+        named = attributes.get("_ARRAY_DIMENSIONS") if isinstance(attributes, dict) else None
+        codecs = [node.get("compressor"), *(node.get("filters") or [])]
+        found[path] = StoreArrayMetadata(
+            tuple(str(codec["id"]) for codec in codecs if isinstance(codec, dict) and codec.get("id")),
+            # Said as version 3 says it, so one reading serves both.
+            _chunking(
+                {
+                    "shape": node.get("shape"),
+                    "chunk_grid": {"configuration": {"chunk_shape": node.get("chunks")}},
+                    "dimension_names": named,
+                }
+            ),
+        )
+    return found
+
+
+#: The most a plain Zarr store's consolidated metadata may weigh: ERA5's 277 arrays take under 1 MB.
+PLAIN_ZARR_METADATA_BYTES = 32 * 1024 * 1024
+
+
+def _json_at(url: str, address: str, timeout: float):
+    """The JSON document at `url`, fetched from `address` alone, or `None` for
+    anything else: an answer other than 200, a redirect, a body that is not
+    JSON or is too large, or no answer at all."""
+    import json
+
+    try:
+        response = pinned_open(url, address, timeout=timeout)
+        try:
+            if response.status != 200:
+                return None
+            body = response.read(PLAIN_ZARR_METADATA_BYTES + 1)
+        finally:
+            response.release_conn()
+        if len(body) > PLAIN_ZARR_METADATA_BYTES:
+            return None
+        # Some publishers' documents open with a byte-order mark.
+        return json.loads(body.decode("utf-8-sig"))
+    except (urllib3.exceptions.HTTPError, OSError, ValueError):
+        return None
+
+
+def _public_addresses(host: str) -> list[str]:
+    """The addresses `host` resolves to, if every one is public; else none:
+    a host that resolves anywhere private is not connected to at all (ADR 0042 §9)."""
+    from .asset_hosts import is_public_address
+
+    try:
+        found = sorted({info[4][0] for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)})
+    except OSError:
+        return []
+    return found if found and all(is_public_address(address) for address in found) else []
+
+
+def _plain_zarr_at(href: str, *, timeout: float) -> dict[str, StoreArrayMetadata] | None:
+    """`read_plain_zarr` for an `https` store, from the first of its host's
+    public addresses that answers; `None` for any other address."""
+    parts = urlsplit(href)
+    if parts.scheme != "https" or not parts.hostname:
+        return None
+    for address in _public_addresses(parts.hostname):
+        if (found := read_plain_zarr(href, address=address, timeout=timeout)) is not None:
+            return found
+    return None
 
 
 def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
-    """Open the store at `href` over `https` and say which codecs its arrays
-    name. Whatever goes wrong is the probe's answer, not an error, and it is
-    said in words an operator may be shown; the library's own are logged."""
+    """Open the store at `href` over `https` and say what its own metadata
+    says of each array: the codecs it names and how it is divided up (ADR 0052
+    §1). An Icechunk repository is tried first; failing that, a plain Zarr
+    store's consolidated metadata, which says how its arrays are divided up though we read none of
+    its data. Whatever goes wrong is the probe's answer, not an error, and it
+    is said in words an operator may be shown; the library's own are logged."""
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as TimedOut
 
     def read():
-        each = f"{max(1, int(min(timeout, 20)))}s"
-        return read_store_codecs(repository_storage(href, timeout=each))
+        each = max(1, int(min(timeout, 20)))
+        # Refused before anything is opened, as a plain `http` address is: no other reader may try it either.
+        storage = repository_storage(href, timeout=f"{each}s")
+        try:
+            return StoreFormat.ICECHUNK, read_store_arrays(storage)
+        except Exception as exc:
+            plain = _plain_zarr_at(href, timeout=each)
+            if plain is None:
+                raise
+            logger.info("Upstream store at %s is no Icechunk repository (%s); read as plain Zarr", href, exc)
+            return StoreFormat.ZARR, plain
 
     # Its own thread, so a store that stops answering costs the wait and no more.
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-probe")
     try:
-        return StoreProbe(readable=True, codecs=pool.submit(read).result(timeout=timeout))
+        kind, arrays = pool.submit(read).result(timeout=timeout)
+        return StoreProbe(
+            readable=True,
+            codecs={path: array.codecs for path, array in arrays.items()},
+            chunking={path: array.chunking for path, array in arrays.items() if array.chunking is not None},
+            store_format=kind,
+        )
     except TimedOut:
         return StoreProbe(readable=False, problem=f"it did not answer within {int(timeout)} seconds", timed_out=True)
     except Exception as exc:  # whatever the store or its library raises is an answer, never a crash

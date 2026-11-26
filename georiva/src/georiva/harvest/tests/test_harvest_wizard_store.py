@@ -619,7 +619,7 @@ class WizardConfirmsWhereAStoresDataIsTests(StoreWizardMixin, TestCase):
         self.assertContains(verdict, "Microsoft Azure storage")
         self.assertNotContains(verdict, step(4))
         self.assertRedirects(self.client.get(step(4)), step(3))
-        self.assertEqual(self.upstream.stores_opened, [])
+        self.assertEqual(self.upstream.samples_asked, [], "its own description was read, and none of its data")
 
 
 class WizardJudgesTheStoresAddressTests(StoreWizardMixin, TestCase):

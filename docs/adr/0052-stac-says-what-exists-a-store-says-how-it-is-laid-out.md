@@ -2,7 +2,7 @@
 
 ## Status
 
-proposed — see wmo-raf/georiva#825. Amends [ADR-0044](0044-an-upstream-store-is-harvested-step-by-step-and-titiler-reads-the-store.md) §5 (where
+accepted — see wmo-raf/georiva#825. Amends [ADR-0044](0044-an-upstream-store-is-harvested-step-by-step-and-titiler-reads-the-store.md) §5 (where
 the survey reads a store's shape from) and §12 (when the survey opens a store). Reaffirms ADR 0044's refusal of
 Series-shaped stores. Nothing else is reversed.
 
@@ -92,7 +92,7 @@ be opened.**
      collection."
    - per item per variable: "Each item of this collection keeps a store of its own for each variable. GeoRiva reads
      one store per collection."
-   - plain Zarr: "This collection's data is a Zarr store of a kind GeoRiva cannot read yet."
+   - plain Zarr: "This collection's data is kept in a kind of data store GeoRiva cannot read yet."
    - Series-shaped and needing an account: the existing reasons.
 
    Where several axes stop a collection, the survey names the one an operator can do least about first: placement,

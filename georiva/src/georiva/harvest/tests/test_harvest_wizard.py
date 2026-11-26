@@ -821,7 +821,7 @@ class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
         self.assertNotContains(page, "GeoRiva can draw maps")
         self.assert_no_way_on(page)
         self.assert_nothing_was_made()
-        self.assertEqual(self.upstream.stores_opened, [])
+        self.assertEqual(self.upstream.samples_asked, [], "its own description was read, and none of its data")
 
     def test_a_store_naming_an_unknown_codec_is_refused_and_the_codec_is_named(self):
         self.store(codecs={"temperature_2m": ("scale_offset", "acme_wavelet")})
