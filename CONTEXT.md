@@ -528,14 +528,23 @@ _Avoid_: virtual asset, external asset, linked asset
 
 **Store asset**:
 A Remote asset whose `href` is an Upstream store. Every asset of the collection carries the same href; which slice
-one means is its Item's reference time and valid time, and the array it was mapped from (ADR 0044).
+one means is its Item's reference time and valid time, the array it was mapped from, and that array's **Selection**
+where it has one (ADR 0044).
 _Avoid_: Zarr asset (that is a format), slice asset, chunk asset
+
+**Selection**:
+The value of each extra axis — an ensemble member, a statistic, a pressure level — at which a store array with such
+axes is read, e.g. `{"statistic": "mean"}`. Each selected map is one Variable, and one array may be mapped more than
+once at different Selections. It names the value, not an index: every reader finds the value among the store's own
+coordinate when it opens the store, and a value that is gone is a misdescribed store, never a blank map. A
+**Vector Variable**'s u and v share one (ADR 0044 §8).
+_Avoid_: slice (that is a step), level (one kind of axis), member index, filter
 
 **Vector Variable** (of a store collection):
 A Variable computed when read from two of its store's mapped arrays — a wind's eastward (`u`) and northward (`v`)
 parts — as their magnitude (speed) or the bearing the wind blows from (direction). Declared by `transform_type` and
-`u_component` / `v_component` sources naming array paths; it has a Store asset, naming no array, wherever both parts
-are held. Nothing computed is stored (ADR 0048).
+`u_component` / `v_component` sources naming array paths — with their **Selection** after them, where they have one; it
+has a Store asset, naming no array, wherever both parts are held. Nothing computed is stored (ADR 0048).
 _Avoid_: derived Variable (that is a recipe's output), wind Variable (it need not be wind)
 
 **Drawable asset**:

@@ -441,3 +441,53 @@ class EditStoreFeedWithWindTests(StoreFeedFormMixin, TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Wind speed 10m", self.errors(response))
+
+
+class EditStoreFeedSelectionTests(StoreFeedFormMixin, TestCase):
+    """A mapping row of an array with an extra axis names the value it is read at (#830)."""
+
+    def setUp(self):
+        super().setUp()
+        statistic = {"name": "statistic", "values": ["mean", "p90"], "unit": ""}
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(
+            surveyed_assets=[{"key": "temperature_2m", "selectable": [statistic]}, {"key": "wind_u_10m"}]
+        )
+        self.feed.refresh_from_db()
+        collection = self.feed.ensure_collection()
+        self.mean = self.make_variable(collection, slug="t2m-mean")
+        self.p90 = self.make_variable(collection, slug="t2m-p90")
+
+    def test_one_array_is_mapped_at_two_values_as_two_variables(self):
+        response = self.edit(
+            [
+                {"asset_key": "temperature_2m", "selection": '{"statistic": "mean"}', "variable": self.mean.pk},
+                {"asset_key": "temperature_2m", "selection": '{"statistic": "p90"}', "variable": self.p90.pk},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 302, self.errors(response) if response.status_code == 200 else "")
+        self.assertEqual(
+            self.feed.mapped_variables(self.feed.collection),
+            {'temperature_2m{"statistic":"mean"}': self.mean, 'temperature_2m{"statistic":"p90"}': self.p90},
+        )
+
+    def test_a_value_the_survey_did_not_see_is_refused(self):
+        response = self.edit(
+            [{"asset_key": "temperature_2m", "selection": '{"statistic": "p95"}', "variable": self.mean.pk}]
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("statistic", self.errors(response))
+        self.assertFalse(VariableMapping.objects.exists())
+
+    def test_an_array_with_an_extra_axis_needs_a_value_of_it(self):
+        response = self.edit([{"asset_key": "temperature_2m", "variable": self.mean.pk}])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("statistic", self.errors(response))
+
+    def test_an_array_with_none_is_mapped_with_none(self):
+        response = self.edit([{"asset_key": "wind_u_10m", "variable": self.mean.pk}])
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(VariableMapping.objects.get().selection, {})

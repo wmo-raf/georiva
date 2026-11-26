@@ -120,12 +120,15 @@ class STACAssetSerializer(serializers.Serializer):
         # so a consumer's tools can open the same field (ADR 0044 §3).
         # A vector Store asset names no array: the two it is computed from are
         # named in its place, with which quantity of them it is (ADR 0048).
+        # An array with extra axes is read at one value of each, named too (#830).
         if instance.location.is_store:
             vector = instance.store_vector
             if vector is None:
                 data["georiva:array"] = instance.store_array
             else:
-                data["georiva:vector"] = {"u": vector.u, "v": vector.v, "transform": str(vector.transform)}
+                data["georiva:vector"] = vector.published()
+            if instance.store_selection:
+                data["georiva:selection"] = dict(instance.store_selection)
 
         # Raster extension for data assets. The bytes hold the source unit;
         # `scale` and `offset` turn them into the served `unit` (ADR 0046 §18),

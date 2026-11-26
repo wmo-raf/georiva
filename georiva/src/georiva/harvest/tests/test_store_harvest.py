@@ -30,6 +30,7 @@ from georiva.harvest.harvester import harvest
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
 from georiva.harvest.tasks import run_harvest
 from georiva.harvest.testing import FakeUpstream
+from georiva.harvest.upstream import CubeDimension
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.models import FetchRun
 from georiva.virtual_zarr.models import VirtualZarrManifest
@@ -89,7 +90,7 @@ class StoreFeedMixin:
         #: A run that began a day ago, on the hour.
         self.run = timezone.now().replace(minute=0, second=0, microsecond=0) - timedelta(days=1)
 
-    def map_variable(self, path, slug, *, fixed_field=False):
+    def map_variable(self, path, slug, *, fixed_field=False, selection=None):
         unit, _ = Unit.objects.get_or_create(name="Degree Celsius", symbol="°C")
         variable = Variable.objects.create(
             collection=self.feed.ensure_collection(),
@@ -100,7 +101,9 @@ class StoreFeedMixin:
             value_min=-40,
             value_max=45,
         )
-        VariableMapping.objects.create(feed=self.feed, asset_key=path, variable=variable, fixed_field=fixed_field)
+        VariableMapping.objects.create(
+            feed=self.feed, asset_key=path, variable=variable, fixed_field=fixed_field, selection=selection or {}
+        )
         return variable
 
     def harvest(self, **kwargs):
@@ -922,3 +925,85 @@ class StoresChannelTests(SimpleTestCase):
     def test_the_channel_is_the_one_titiler_listens_on(self):
         # Spelled to match STORES_CHANNEL in titiler-app/app/config.py (#706).
         self.assertEqual(remote_assets.STORES_CHANNEL, "georiva:stores-published")
+
+
+class StoreHarvestAtASelectionTests(StoreFeedMixin, TestCase):
+    """An array with an extra axis is mapped once per value chosen of it: each a Variable (#830)."""
+
+    dimensions = {
+        **FORECAST,
+        "statistic": CubeDimension("statistic", kind="other", size=3, values=("mean", "p10", "p90")),
+    }
+    arrays = {
+        "temperature_2m": (("init_time", "statistic", "lead_time", "latitude", "longitude"), (1, *WHOLE_FIELD)),
+        "pressure_surface": (RUN_STEP_GRID, WHOLE_FIELD),
+    }
+
+    def setUp(self):
+        super().setUp()
+        VariableMapping.objects.filter(variable=self.temperature).update(selection={"statistic": "mean"})
+        self.p90 = self.map_variable("temperature_2m", "temperature-2m-p90", selection={"statistic": "p90"})
+
+    def test_two_selections_of_one_array_are_two_store_assets_on_one_item_each_with_its_selection(self):
+        self.hold(MEAN_KEY, 0, 3)
+        self.hold(P90_KEY, 0)
+
+        result = self.harvest()
+
+        self.assertEqual(FetchRun.objects.get().status, FetchRun.Status.COMPLETED, result.errors)
+        self.assertEqual(self.steps(), [(self.run, 0), (self.run, 3)])
+        # A value not held at a step is that step not held, for its Variable.
+        self.assertEqual(self.steps(self.p90), [(self.run, 0)])
+        first = Item.objects.get(time=self.run)
+        self.assertEqual(
+            {(a.variable_id, a.store_array, json.dumps(a.store_selection)) for a in first.assets.all()},
+            {
+                (self.temperature.pk, "temperature_2m", '{"statistic": "mean"}'),
+                (self.p90.pk, "temperature_2m", '{"statistic": "p90"}'),
+            },
+        )
+
+    def test_titiler_is_told_each_assets_selection_and_an_array_with_none_is_told_none(self):
+        self.hold(MEAN_KEY, 0)
+        self.hold(P90_KEY, 0)
+        pressure = self.map_variable("pressure_surface", "pressure-surface")
+        self.hold("pressure_surface", 0)
+        self.harvest()
+
+        entry = remote_assets.remote_source(self.p90, self.run, self.run)
+        published = get_redis_connection("default").hget(variable_key(self.p90), timestep_field(self.run, self.run))
+
+        self.assertEqual((entry["array"], entry["selection"]), ("temperature_2m", {"statistic": "p90"}))
+        self.assertEqual(json.loads(published)["selection"], {"statistic": "p90"})
+        self.assertNotIn("selection", remote_assets.remote_source(pressure, self.run, self.run))
+
+    def test_each_selection_is_asked_of_the_store_with_its_value(self):
+        self.hold(MEAN_KEY, 0)
+
+        self.harvest()
+
+        _href, asked, _window = self.upstream.steps_asked[0]
+        self.assertEqual(sorted(asked), sorted([MEAN_KEY, P90_KEY]))
+
+    def test_a_harvest_again_rewrites_nothing(self):
+        self.hold(MEAN_KEY, 0)
+        self.hold(P90_KEY, 0)
+        self.harvest()
+
+        again = self.harvest()
+
+        self.assertEqual((again.indexed, again.updated, again.removed), (0, 0, 0))
+
+    def test_a_value_the_collection_no_longer_offers_stops_the_harvest(self):
+        VariableMapping.objects.filter(variable=self.p90).update(selection={"statistic": "p95"})
+        self.hold(MEAN_KEY, 0)
+
+        result = self.harvest()
+
+        self.assertIn("source unavailable", result.stop_reason)
+        self.assertIn("p95", result.stop_reason)
+        self.assertFalse(Asset.objects.exists())
+
+
+MEAN_KEY = 'temperature_2m{"statistic":"mean"}'
+P90_KEY = 'temperature_2m{"statistic":"p90"}'

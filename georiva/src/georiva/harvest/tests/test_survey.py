@@ -546,6 +546,60 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
             self.assert_plain(reason)
         self.assertTrue(all(array.axes == [] for array in store.arrays if not array.offered))
 
+    def test_an_array_whose_extra_axes_have_known_values_is_offered_with_them(self):
+        # As dynamical.org describes them: statistics listed, members by extent and size,
+        # levels by an extent their size does not divide evenly (#830).
+        dimensions = {
+            **FORECAST,
+            "statistic": CubeDimension("statistic", kind="other", size=3, values=("mean", "p10", "p90"), unit="1"),
+            "ensemble_member": CubeDimension("ensemble_member", kind="other", size=51, values=tuple(range(51))),
+            "pressure_level": CubeDimension("pressure_level", kind="other", size=14, unit="hPa"),
+        }
+
+        def beyond(*names, chunk=1):
+            spans = tuple(chunk for _name in names)
+            return (("init_time", *names, "lead_time", "latitude", "longitude"), (1, *spans, 1, 721, 1440))
+
+        self.upstream.become_store(
+            STORE,
+            dimensions,
+            {
+                "temperature_2m": beyond("statistic"),
+                "temperature_2m_members": beyond("ensemble_member"),
+                "pressure_level/temperature": beyond("ensemble_member", "pressure_level"),
+                "temperature_2m_lumped": beyond("statistic", chunk=3),
+            },
+        )
+
+        store = self.survey().store
+        found = {array.path: array for array in store.arrays}
+
+        self.assertEqual(found["temperature_2m"].axes, ["run", "statistic", "step", "y", "x"])
+        self.assertEqual(
+            found["temperature_2m"].selectable, [{"name": "statistic", "values": ["mean", "p10", "p90"], "unit": ""}]
+        )
+        self.assertEqual(found["temperature_2m_members"].selectable[0]["values"], list(range(51)))
+        self.assertTrue(store.has_runs)
+        self.assertEqual(found["pressure_level/temperature"].reason, "It has levels.")
+        self.assertFalse(found["temperature_2m_lumped"].offered)
+        self.assert_plain(found["temperature_2m_lumped"].reason)
+        self.assertIn("statistic", found["temperature_2m_lumped"].reason)
+
+    def test_a_grid_named_x_and_y_measured_in_degrees_is_latitude_and_longitude(self):
+        # As dynamical.org describes Google's WeatherNext 3: no reference system, units in degrees (#830).
+        self.upstream.become_store(
+            STORE,
+            {
+                "init_time": None,
+                "lead_time": 48,
+                "x": CubeDimension("x", kind="spatial", axis="x", size=3600, unit="degree_east"),
+                "y": CubeDimension("y", kind="spatial", axis="y", size=1801, unit="degree_north"),
+            },
+            {"temperature_2m": (("init_time", "lead_time", "y", "x"), (1, 1, 1801, 3600))},
+        )
+
+        self.assertEqual(self.survey().store.offered[0].axes, ["run", "step", "y", "x"])
+
     def test_an_analysis_stores_fields_have_one_time_and_no_runs(self):
         self.upstream.become_store(
             STORE,

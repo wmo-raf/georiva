@@ -26,6 +26,7 @@ What an operator reads here is in their words: no "STAC", "S3" or "COG", and
 of a store no "Zarr", "chunk" or "codec".
 """
 
+import itertools
 import re
 import time
 from collections import Counter
@@ -46,6 +47,7 @@ from django.views.decorators.http import require_POST
 
 # The Push Feed Wizard's Sample File needs the same two things of a scanned
 # variable — a Unit for its unit string, and bounds rounded outward — and has them.
+from georiva.core.selection import chooses, described, field_key, selection_of
 from georiva.core.time_statistic import INSTANT
 from georiva.core.unit_utils import Conversion, ConversionRefused, proposes_water
 from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
@@ -645,9 +647,103 @@ def _offered(store: dict) -> list[dict]:
         array["label"] = title if title and titles[title] == 1 else _spelt(array["path"]) or array["path"]
         array["forecast"] = "run" in array["axes"]
         array["component"] = _is_component(array)
+        # Each extra axis, with its values, for the operator to tick one or more of (#830).
+        array["choices"] = [
+            {
+                "position": position,
+                "name": axis["name"],
+                "label": axis["name"].replace("_", " "),
+                "values": [
+                    {"position": at, "value": value, "shown": f"{value} {axis['unit']}".strip()}
+                    for at, value in enumerate(axis["values"])
+                ],
+            }
+            for position, axis in enumerate(array.get("selectable") or [])
+        ]
         # Its card is the one an image's is (`settings_card.html`): what only an image has, it has empty.
         array.update(key="", ident=array["path"], warning="")
     return offered
+
+
+#: How far apart two arrays' fields stand in the page's order: room for every combination of one's values.
+_PLACES = 10**9
+
+
+def _fields_of(array: dict, picked: list[list[int]]) -> list[dict]:
+    """The fields an offered array becomes: itself, for an array with no extra
+    axis; else one per combination of the values `picked` of each axis — each
+    read at its Selection, and known by its field key (#830).
+
+    A field is indexed on the page by its array's index, and for one with a
+    Selection by where that combination stands among every combination of the
+    axes' values (`3-0`, `3-2`): the same field has the same index whatever
+    else is ticked."""
+    if not array["choices"]:
+        whole = {"index": str(array["index"]), "field": array["path"], "selection": {}}
+        return [{**array, **whole, "order": array["index"] * _PLACES}]
+    sizes = [len(axis["values"]) for axis in array["choices"]]
+    fields = []
+    for combination in itertools.product(*picked):
+        ordinal = 0
+        for size, at in zip(sizes, combination, strict=True):
+            ordinal = ordinal * size + at
+        selection = selection_of(
+            {axis["name"]: axis["values"][at]["value"] for axis, at in zip(array["choices"], combination, strict=True)}
+        )
+        units = {axis["name"]: (array["selectable"][axis["position"]].get("unit") or "") for axis in array["choices"]}
+        said = described(selection, units=units)
+        fields.append(
+            {
+                **array,
+                "index": f"{array['index']}-{ordinal}",
+                "order": array["index"] * _PLACES + ordinal + 1,
+                "field": field_key(array["path"], selection),
+                "selection": dict(selection),
+                "label": f"{array['label']} ({said})",
+                "ident": f"{array['path']} · {said}",
+            }
+        )
+    return fields
+
+
+def _picked(array: dict, posted, earlier: dict) -> list[list[int]]:
+    """Which values of each of `array`'s extra axes are ticked: as posted, else as chosen on an earlier visit."""
+    if posted is not None:
+        return [
+            [
+                value["position"]
+                for value in axis["values"]
+                if posted.get(f"pick_{array['index']}_{axis['position']}_{value['position']}")
+            ]
+            for axis in array["choices"]
+        ]
+    chosen = [field.get("selection") or {} for field in earlier.values() if field.get("path") == array["path"]]
+    return [
+        [
+            value["position"]
+            for value in axis["values"]
+            if any(said.get(axis["name"]) == value["value"] for said in chosen)
+        ]
+        for axis in array["choices"]
+    ]
+
+
+def _ticked_fields(offered: list[dict], posted) -> tuple[list[dict], list[str]]:
+    """The fields of every array ticked on step 4, and what is wrong: an array
+    with an extra axis ticked at none of its values."""
+    fields, errors = [], []
+    for array in offered:
+        if not posted.get(f"use_{array['index']}"):
+            continue
+        picked = _picked(array, posted, {})
+        for axis, values in zip(array["choices"], picked, strict=True):
+            if not values:
+                errors.append(
+                    _("Choose at least one %(axis)s of “%(name)s”, or untick it.")
+                    % {"axis": axis["label"], "name": array["label"]}
+                )
+        fields += _fields_of(array, picked)
+    return fields, errors
 
 
 def _spelt(path: str) -> str:
@@ -698,10 +794,10 @@ def _step4_store(request, session):
     posted = request.POST if request.method == "POST" else None
 
     if posted is not None:
-        ticked = [array for array in offered if posted.get(f"use_{array['index']}")]
+        ticked, errors = _ticked_fields(offered, posted)
         allowed = [place for place in places if place["usable"] and posted.get(f"allow_{place['index']}")]
-        errors, unseen = [], False
-        if not ticked:
+        unseen = False
+        if not ticked and not errors:
             errors.append(_("Choose at least one kind of map to show."))
         if own["proposed"] and not posted.get("allow_store"):
             errors.append(
@@ -770,8 +866,7 @@ def _store_fields(session: dict, offered: list[dict], posted) -> dict:
     """Each field on offer, the ticked and read ones with how each appears, and
     the winds over them: what the page shows, and what a read sends back."""
     earlier = {field["key"]: field for field in session.get("chosen") or []}
-    rows = _field_rows(offered, earlier, session.get("samples", {}), posted)
-    details = [row for row in rows if row["detailed"]]
+    rows, details = _field_rows(offered, earlier, session.get("samples", {}), posted)
     pairs = _offered_vectors(_vector_pairs(details), session.get("vectors") or [], posted)
     return {"rows": rows, "details": details, "pairs": pairs}
 
@@ -797,13 +892,13 @@ def harvest_wizard_step4_read(request):
         return JsonResponse({"error": _("This wizard has no data store to read from.")}, status=409)
     store, own = survey["store"], survey["locations"][0]
     places, offered, posted = _chunk_places(store), _offered(store), request.POST
-    ticked = [array for array in offered if posted.get(f"use_{array['index']}")]
-    wanted = {index for index in (_whole(value) for value in posted.getlist("want")) if index is not None}
+    ticked, _errors = _ticked_fields(offered, posted)
+    wanted = set(posted.getlist("want"))
 
     problems: dict[str, str] = {}
     if own["proposed"] and not posted.get("allow_store"):
-        for array in ticked:
-            problems[array["path"]] = _("Allow reading from “%(host)s” above first.") % {"host": own["host"]}
+        for field in ticked:
+            problems[field["field"]] = _("Allow reading from “%(host)s” above first.") % {"host": own["host"]}
     else:
         allowed = [place for place in places if place["usable"] and posted.get(f"allow_{place['index']}")]
         _read_samples(session, ticked, allowed, places, problems)
@@ -824,7 +919,7 @@ def harvest_wizard_step4_read(request):
                 render_to_string("georivaharvest/includes/wind_card.html", {"pair": pair}, request)
                 for pair in shown["pairs"]
             ],
-            "problems": {array["index"]: problems[array["path"]] for array in ticked if array["path"] in problems},
+            "problems": {field["index"]: problems[field["field"]] for field in ticked if field["field"] in problems},
         }
     )
 
@@ -844,24 +939,27 @@ def _read_samples(
     following = {place["declared"]: place["region"] for place in allowed}
     samples = session.setdefault("samples", {})
     wanted = [
-        array
-        for array in ticked
-        if array["path"] not in samples or not set(samples[array["path"]]["places"]) <= set(following)
+        field
+        for field in ticked
+        if field["field"] not in samples or not set(samples[field["field"]]["places"]) <= set(following)
     ]
     if not wanted:
         return []
 
     read = _client(session["upstream_url"]).sample_store(
-        store["href"], [StoreField(array["path"], tuple(array["axes"])) for array in wanted], following
+        store["href"],
+        [StoreField(field["path"], tuple(field["axes"]), selection_of(field["selection"])) for field in wanted],
+        following,
     )
     elsewhere: dict[str, list[str]] = {}
     kept_at: dict[str, str] = {}
     errors = []
     problems = {} if problems is None else problems
     for array in wanted:
-        sample, name = read.get(array["path"]), array["label"]
+        key = array["field"]
+        sample, name = read.get(key), array["label"]
         if sample is not None and sample.readable:
-            samples[array["path"]] = {
+            samples[key] = {
                 "low": sample.value_min,
                 "high": sample.value_max,
                 "places": sorted(following),
@@ -870,28 +968,28 @@ def _read_samples(
                 **(sample.declared or INSTANT).fields(),
             }
             continue
-        samples.pop(array["path"], None)
+        samples.pop(key, None)
         if sample is not None and sample.elsewhere:
-            kept_at[array["path"]] = _where(sample.elsewhere, places)
-            elsewhere.setdefault(kept_at[array["path"]], []).append(name)
+            kept_at[key] = _where(sample.elsewhere, places)
+            elsewhere.setdefault(kept_at[key], []).append(name)
         else:
             why = sample.problem if sample is not None else _("it was not read")
             errors.append(_("“%(name)s” could not be read: %(why)s.") % {"name": name, "why": why})
-            problems[array["path"]] = _("It could not be read: %(why)s.") % {"why": why}
+            problems[key] = _("It could not be read: %(why)s.") % {"why": why}
     by_name = {place["declared"]: place for place in places}
-    for path, where in kept_at.items():
+    for key, where in kept_at.items():
         place = by_name.get(where)
         said = {"place": place["name"] if place else where}
         if place is None:
-            problems[path] = (
+            problems[key] = (
                 _("Its data is kept somewhere this collection does not mention (%(place)s). Untick it.") % said
             )
         elif place["usable"]:
-            problems[path] = (
+            problems[key] = (
                 _("Its data is kept at “%(place)s”, which you have not allowed. Allow it above, or untick it.") % said
             )
         else:
-            problems[path] = _("Its data is kept at “%(place)s”, which GeoRiva could not find. Untick it.") % said
+            problems[key] = _("Its data is kept at “%(place)s”, which GeoRiva could not find. Untick it.") % said
     for where, names in elsewhere.items():
         said = {"names": _named(names), "place": by_name[where]["name"] if where in by_name else where}
         if where not in by_name:
@@ -934,47 +1032,72 @@ def _named(names: list[str]) -> str:
     return said if more <= 0 else _("%(names)s and %(count)d more") % {"names": said, "count": more}
 
 
-def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> list[dict]:
-    """One row per field on offer. A field that is chosen and has been read
-    also carries what its Variable will be — name, unit, description and value
+def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> tuple[list[dict], list[dict]]:
+    """`(one row per array on offer, one per field ticked and read)`.
+
+    An array's row says whether it is ticked and, for one with extra axes,
+    which of their values are (#830). Each of its fields that has been read
+    carries what its Variable will be — name, unit, description and value
     range: what was posted wins, then what was chosen on an earlier visit,
     then what the collection says of it and the map that was read shows."""
-    rows = []
+    rows, details = [], []
     proposed = _proposed_fixed_fields(samples)
     for array in offered:
-        index = array["index"]
-        use = bool(posted.get(f"use_{index}")) if posted is not None else array["path"] in earlier
-        row = {**array, "use": use, "detailed": False}
-        sample = samples.get(array["path"])
-        if use and sample:
-            low, high = _field_bounds(array, sample["low"], sample["high"])
+        use = (
+            bool(posted.get(f"use_{array['index']}"))
+            if posted is not None
+            else any(field.get("path", key) == array["path"] for key, field in earlier.items())
+        )
+        picked = _picked(array, posted, earlier)
+        rows.append(
+            {
+                **array,
+                "use": use,
+                "choices": [
+                    {**axis, "values": [{**value, "picked": value["position"] in at} for value in axis["values"]]}
+                    for axis, at in zip(array["choices"], picked, strict=True)
+                ],
+            }
+        )
+        if use:
+            rows_read = (_field_row(field, earlier, samples, posted, proposed) for field in _fields_of(array, picked))
+            details += [row for row in rows_read if row]
+    return rows, details
+
+
+def _field_row(array: dict, earlier: dict, samples: dict, posted, proposed: set) -> dict | None:
+    """How one ticked field will appear, once it has been read; `None` before."""
+    index, key = array["index"], array["field"]
+    row = {**array, "use": True, "detailed": False}
+    sample = samples.get(key)
+    if sample:
+        low, high = _field_bounds(array, sample["low"], sample["high"])
+        row.update(
+            detailed=True,
+            name=row["label"],
+            **_unit_row(array["unit"], array["path"], array["title"]),
+            low=low,
+            high=high,
+            about=array["description"],
+            forecast="run" in array["axes"],
+            fixed=key in proposed,
+        )
+        if key in earlier:
+            field = earlier[key]
             row.update(
-                detailed=True,
-                name=row["label"],
-                **_unit_row(array["unit"], array["path"], array["title"]),
-                low=low,
-                high=high,
-                about=array["description"],
-                forecast="run" in array["axes"],
-                fixed=array["path"] in proposed,
+                name=field["name"],
+                about=field["description"],
+                fixed=field.get("fixed", False),
+                **_units_chosen_earlier(field),
             )
-            if array["path"] in earlier:
-                field = earlier[array["path"]]
-                row.update(
-                    name=field["name"],
-                    about=field["description"],
-                    fixed=field.get("fixed", False),
-                    **_units_chosen_earlier(field),
-                )
-            if posted is not None and f"name_{index}" in posted:
-                row.update(
-                    name=posted.get(f"name_{index}", ""),
-                    about=posted.get(f"about_{index}", ""),
-                    fixed=bool(posted.get(f"fixed_{index}")),
-                    **_units_posted(row, index, posted),
-                )
-        rows.append(row)
-    return rows
+        if posted is not None and f"name_{index}" in posted:
+            row.update(
+                name=posted.get(f"name_{index}", ""),
+                about=posted.get(f"about_{index}", ""),
+                fixed=bool(posted.get(f"fixed_{index}")),
+                **_units_posted(row, index, posted),
+            )
+    return row if row["detailed"] else None
 
 
 def _proposed_fixed_fields(samples: dict) -> set[str]:
@@ -1014,13 +1137,16 @@ def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict
     chosen, errors = [], []
     for array in ticked:
         index = array["index"]
-        sample = samples.get(array["path"]) or {}
+        sample = samples.get(array["field"]) or {}
         name = posted.get(f"name_{index}", "").strip() or array["label"]
         units, wrong = _settled_units(index, array["unit"], name, posted)
         errors += wrong
         chosen.append(
             {
-                "key": array["path"],
+                # Its field key: its path, with its Selection after it where it has one (#830).
+                "key": array["field"],
+                "path": array["path"],
+                "selection": array["selection"],
                 "title": array["title"],
                 "name": name,
                 **units,
@@ -1056,9 +1182,10 @@ _SEPARATORS = re.compile(r"([_/.\-]+)")
 def _vector_pairs(fields: list[dict]) -> list[dict]:
     """Each two of `fields` that are one vector's eastward and northward parts:
     paths alike word for word but one, `u` in the first where the second has
-    `v` (`wind_u_10m` and `wind_v_10m`). With the path each of its quantities
-    is named by — the `u` read as the quantity's word (`wind_speed_10m`)."""
-    by_path = {field["path"]: field for field in fields}
+    `v` (`wind_u_10m` and `wind_v_10m`), read at the same Selection (#830).
+    With the path each of its quantities is named by — the `u` read as the
+    quantity's word (`wind_speed_10m`) — and the Selection's values after it."""
+    by_key = {field["field"]: field for field in fields}
     pairs = []
     for field in fields:
         parts = _SEPARATORS.split(field["path"])
@@ -1067,22 +1194,31 @@ def _vector_pairs(fields: list[dict]) -> list[dict]:
             if not found:
                 continue
             v_path = "".join([*parts[:at], word.replace("u", "v").replace("U", "V"), *parts[at + 1 :]])
-            if v_path not in by_path:
+            selection = selection_of(field["selection"])
+            v_field = by_key.get(field_key(v_path, selection))
+            if v_field is None:
                 continue
             before, _part, after = found.groups()
+            values = [str(value) if isinstance(value, str) else f"{name}_{value}" for name, value in selection]
             named = {
-                kind: "".join([*parts[:at], "_".join(filter(None, [before, kind, after])), *parts[at + 1 :]])
+                kind: "_".join(
+                    [
+                        "".join([*parts[:at], "_".join(filter(None, [before, kind, after])), *parts[at + 1 :]]),
+                        *values,
+                    ]
+                )
                 for kind, _transform in _vector_kinds()
             }
-            v_index = by_path[v_path]["index"]
             pairs.append(
                 {
                     "index": field["index"],
-                    "v_index": v_index,
+                    "v_index": v_field["index"],
                     # Its card follows the later of its two parts' cards.
-                    "after": max(field["index"], v_index),
-                    "u": field["path"],
-                    "v": v_path,
+                    "after": max((field, v_field), key=lambda part: part["order"])["index"],
+                    "u": field["field"],
+                    "v": v_field["field"],
+                    "u_label": field["ident"],
+                    "v_label": v_field["ident"],
                     "named": named,
                 }
             )
@@ -1356,7 +1492,10 @@ def _store_plan(form: dict, session: dict, interval, catalog_id, start, end, day
         upstream_collection_id=session["collection_id"],
         variables=[
             PlannedVariable(
-                asset_key=field["key"],
+                # By its array's path, at its Selection (#830); a field chosen before either was kept is its path.
+                asset_key=field.get("path", field["key"]),
+                selection=field.get("selection") or {},
+                slug=_selection_slug(field.get("path", field["key"]), field.get("selection") or {}),
                 name=field["name"],
                 unit_id=field["unit_id"],
                 source_unit_id=field["source_unit_id"],
@@ -1386,14 +1525,26 @@ def _store_plan(form: dict, session: dict, interval, catalog_id, start, end, day
     )
 
 
+def _selection_slug(path: str, selection: dict) -> str:
+    """The short name a field read at `selection` is given: its path's, with the
+    values chosen after it; empty — its path's alone — for a field with none."""
+    if not selection:
+        return ""
+    words = [str(value) if isinstance(value, str) else f"{name} {value}" for name, value in sorted(selection.items())]
+    return slugify(" ".join([path, *words]))
+
+
 def _seen_arrays(arrays) -> list[dict]:
     """The arrays of a store a survey offered, as a feed remembers them: by
-    path, where an items feed remembers asset keys."""
+    path, where an items feed remembers asset keys, with the values of each
+    extra axis it offered them at (#830)."""
     seen = []
     for array in arrays:
         array = array if isinstance(array, dict) else {**asdict(array), "offered": array.offered}
         if array["offered"]:
             seen.append({"key": array["path"], "title": array["title"]})
+            if array.get("selectable"):
+                seen[-1]["selectable"] = array["selectable"]
     return seen
 
 
@@ -1557,6 +1708,15 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
     offered = {array.path for array in store.offered}
     new_arrays = [array for array in store.offered if array.path not in surveyed]
     gone_arrays = sorted(surveyed - offered)
+    # An array still offered at other values of its extra axes (#830): offered again, and
+    # each mapping read at a value no longer among them named, for the operator to change.
+    selectable = feed.surveyed_selectable
+    changed_arrays = [
+        array
+        for array in store.offered
+        if array.path in surveyed and (array.selectable or []) != selectable.get(array.path, [])
+    ]
+    lost_selections = _lost_selections(feed, store)
     places = _chunk_places({"chunk_locations": store.chunk_locations, "chunk_regions": store.chunk_regions})
     new_places = [place for place in places if place["declared"] not in feed.pinned_chunk_locations]
     declared = {place["declared"] for place in places}
@@ -1604,7 +1764,7 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
                 feed.pinned_buckets = {**feed.pinned_buckets, **buckets}
                 feed.asset_hosts = sorted({*feed.asset_hosts, *hosts})
                 changed += ["pinned_buckets", "asset_hosts"]
-        if (new_arrays or gone_arrays) and posted.get("offer_arrays"):
+        if (new_arrays or gone_arrays or changed_arrays) and posted.get("offer_arrays"):
             feed.surveyed_assets = _seen_arrays(store.arrays)
             changed.append("surveyed_assets")
         if feed.upstream_refusal:
@@ -1636,6 +1796,8 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             "reason": reason,
             "new_arrays": new_arrays,
             "gone_arrays": gone_arrays,
+            "changed_arrays": changed_arrays,
+            "lost_selections": lost_selections,
             "unoffered": [array for array in store.arrays if not array.offered],
             "new_places": new_places,
             "gone_places": gone_places,
@@ -1646,6 +1808,21 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             **_recheck_chrome(feed),
         },
     )
+
+
+def _lost_selections(feed, store) -> list[str]:
+    """Each mapped Variable read at a Selection the store no longer offers, by
+    name: its harvests stop until its mapping is changed (#830)."""
+    offered = {array.path: {axis["name"]: axis["values"] for axis in array.selectable} for array in store.offered}
+    lost = []
+    for mapping in feed.variable_mappings.select_related("variable").exclude(selection={}):
+        axes = offered.get(mapping.asset_key)
+        selection = mapping.selection or {}
+        if axes is None:
+            continue  # a gone array is said so on its own
+        if not chooses(selection, axes):
+            lost.append(f"{mapping.variable.name} ({described(selection_of(selection))})")
+    return lost
 
 
 def _store_address_refusal(feed, href: str, own_to_pin) -> str:

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import itertools
 import os
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from georiva.core.selection import split_field_key
 
 from .upstream import (
     STORE_TIMEOUT,
@@ -264,7 +268,8 @@ class FakeUpstream:
         return item
 
     def hold(self, path: str, when: datetime, *, run: datetime | None = None) -> None:
-        """The store holds data for the array at `path` at valid time `when`, of `run` where it has runs."""
+        """The store holds data for the array at `path` at valid time `when`, of `run` where it has runs.
+        For an array read at a Selection, `path` is its field key (#830)."""
         self.held.setdefault(path, set()).add((run, when))
 
     def declare(self, path: str, declared) -> None:
@@ -321,7 +326,7 @@ class FakeUpstream:
         if href.lower().startswith("http://") and not allow_http:
             # As the real one: a plain http store is opened only where the feed allows it.
             raise UpstreamUnreachable("upstream store is at a plain http address its feed does not allow")
-        self.steps_asked.append((href, [field.path for field in fields], window))
+        self.steps_asked.append((href, [field.key for field in fields], window))
         if self.store_unreachable:
             raise UpstreamUnreachable(self.store_unreachable)
         if href not in self.stores:
@@ -329,12 +334,12 @@ class FakeUpstream:
         steps: dict[tuple[datetime | None, datetime], set[str]] = {}
         looked_into = set()
         for field in fields:
-            for run, when in self.held.get(field.path, ()):
+            for run, when in self.held.get(field.key, ()):
                 if run in skip_runs:
                     continue
                 # On run time where there are runs, as the real one: a run inside keeps every step.
                 if self.ignores_window or in_window(run or when, window):
-                    steps.setdefault((run, when), set()).add(field.path)
+                    steps.setdefault((run, when), set()).add(field.key)
                     if run is not None:
                         looked_into.add(run)
         self.runs_asked.append(looked_into)
@@ -505,15 +510,15 @@ class FakeUpstream:
         for field in fields:
             place = self.field_places.get(field.path)
             if field.path in self.field_problems:
-                samples[field.path] = FieldSample(readable=False, problem=self.field_problems[field.path])
+                samples[field.key] = FieldSample(readable=False, problem=self.field_problems[field.path])
             elif place and place not in chunk_locations:
                 # As the real reader finds it: by being refused the address of one file there.
                 problem = "it could not be read by a reader with no account"
-                samples[field.path] = FieldSample(readable=False, problem=problem, elsewhere=f"{place}a/file.grib2")
+                samples[field.key] = FieldSample(readable=False, problem=problem, elsewhere=f"{place}a/file.grib2")
             else:
                 low, high = self.field_ranges.get(field.path, (0.0, 100.0))
                 steps = self.field_steps.get(field.path, ())
-                samples[field.path] = FieldSample(
+                samples[field.key] = FieldSample(
                     readable=True,
                     value_min=low,
                     value_max=high,
@@ -628,9 +633,15 @@ class StoreArray:
     path: str
     values: Callable | None = None
     held: Callable[[int, int], bool] | None = None
+    #: The extra axes it has, by name, after its lead time: each one of the
+    #: store's `axes` (#830). For an array with any, `values` and `held` are
+    #: also given `at`, the index of each extra axis by its name.
+    extra: tuple[str, ...] = ()
 
-    def holds(self, run: int, step: int) -> bool:
-        return self.held is None or bool(self.held(run, step))
+    def holds(self, run: int, step: int, at: dict | None = None) -> bool:
+        if self.held is None:
+            return True
+        return bool(self.held(run, step, at) if self.extra else self.held(run, step))
 
 
 @dataclass(frozen=True)
@@ -648,6 +659,8 @@ class StoreVariable:
     #: Its time statistic and window (ADR 0051): a non-instant one gets no row at a run's first step.
     time_statistic: str = "instant"
     statistic_window: str = ""
+    #: The value of each extra axis its array is read at, for an array with any (#830).
+    selection: dict = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -699,6 +712,7 @@ class LocalStore:
         latitudes: list[float] | None = None,
         longitudes: list[float] | None = None,
         arrays: list[StoreArray] | None = None,
+        axes: dict[str, list] | None = None,
         build: bool = True,
     ):
         import tempfile
@@ -714,6 +728,8 @@ class LocalStore:
         self.latitudes = list(latitudes or [-15.0, -5.0, 5.0, 15.0])
         self.longitudes = list(longitudes or [5.0, 15.0, 25.0, 35.0, 45.0, 55.0, 65.0, 75.0])
         self.arrays = list(arrays or [StoreArray("temperature_2m")])
+        #: Each extra axis an array may have, with its values: its coordinate in the store (#830).
+        self.axes = dict(axes or {})
         #: Whether the last opening of the store was allowed plain HTTP.
         self.opened_allowing_http: bool | None = None
 
@@ -761,8 +777,10 @@ class LocalStore:
         build(session.store)
         session.commit("build")
 
-    def field(self, array: StoreArray, run: int, step: int):
-        """The field `array` holds at `run` and `step`, north-up, as written."""
+    def field(self, array: StoreArray, run: int, step: int, at: dict | None = None):
+        """The field `array` holds at `run` and `step` — and at `at` of its extra axes — north-up, as written."""
+        if array.extra:
+            return (array.values or (lambda r, s, _at: ramp(r, s, self.shape)))(run, step, at)
         return (array.values or (lambda r, s: ramp(r, s, self.shape)))(run, step)
 
     def write_forecast(self, store) -> None:
@@ -786,26 +804,43 @@ class LocalStore:
         zarr.create_array(store, name="longitude", shape=(nx,), dtype="f8", dimension_names=["longitude"])[:] = (
             self.longitudes
         )
+        for name, values in self.axes.items():
+            coordinate = zarr.create_array(
+                store, name=name, shape=(len(values),), dtype=np.asarray(values).dtype, dimension_names=[name]
+            )
+            coordinate[:] = np.asarray(values)
         for spec in self.arrays:
+            extra = [len(self.axes[name]) for name in spec.extra]
             array = zarr.create_array(
                 store,
                 name=spec.path,
-                shape=(runs, leads, ny, nx),
-                chunks=(1, 1, ny, nx),
+                shape=(runs, leads, *extra, ny, nx),
+                chunks=(1, 1, *(1 for _ in extra), ny, nx),
                 dtype="f8",
                 fill_value=np.nan,
-                dimension_names=["init_time", "lead_time", "latitude", "longitude"],
+                dimension_names=["init_time", "lead_time", *spec.extra, "latitude", "longitude"],
             )
             for run in range(runs):
                 for step in range(leads):
-                    if spec.holds(run, step):
-                        array[run, step] = np.flipud(self.field(spec, run, step))  # south first, as written
+                    for cell in itertools.product(*(range(size) for size in extra)):
+                        at = dict(zip(spec.extra, cell, strict=True))
+                        if spec.holds(run, step, at):
+                            # South first, as written.
+                            array[(run, step, *cell)] = np.flipud(self.field(spec, run, step, at))
 
-    def _array(self, path: str) -> StoreArray:
+    def _array(self, key: str) -> StoreArray:
+
+        path, _selection = split_field_key(key)
         for spec in self.arrays:
             if spec.path == path:
                 return spec
         raise KeyError(f"The store has no array {path!r}.")
+
+    def _holds(self, key: str, run: int, step: int) -> bool:
+        """Whether the store holds the field `key` names at `run` and `step`: at its Selection, for one with one."""
+        spec, (_path, selection) = self._array(key), split_field_key(key)
+        at = {name: list(self.axes[name]).index(value) for name, value in selection}
+        return spec.holds(run, step, at)
 
     def at(self, array: str, run: int, step: int, *, places: dict[str, str] | None = None, allow_http=False):
         """The ``values.StoreSlice`` naming `array` at `run` and `step` (indexes), with pinned `places`."""
@@ -838,6 +873,9 @@ class LocalStore:
         any of those arrays holds; and on it a Store asset per array holding that step.
         Each of `vectors` is a vector Variable over two of those arrays, with a
         Store asset on every item where both are held.
+
+        An array with extra axes is mapped at a Selection: its key in
+        `variables` is its field key, and its `StoreVariable` says the Selection (#830).
         """
         from urllib.parse import urlsplit
 
@@ -880,7 +918,9 @@ class LocalStore:
                 time_statistic=wanted.time_statistic,
                 statistic_window=wanted.statistic_window,
             )
-            VariableMapping.objects.create(feed=feed, asset_key=path, variable=made[path])
+            VariableMapping.objects.create(
+                feed=feed, asset_key=split_field_key(path)[0], selection=wanted.selection, variable=made[path]
+            )
         vector_variables = []
         for wanted in vectors:
             vector_variables.append(
@@ -904,7 +944,7 @@ class LocalStore:
                 holding = [
                     path
                     for path in made
-                    if self._array(path).holds(run, step) and made[path].has_step(reference_time, reference_time + lead)
+                    if self._holds(path, run, step) and made[path].has_step(reference_time, reference_time + lead)
                 ]
                 if not holding:
                     continue
@@ -916,12 +956,14 @@ class LocalStore:
                     harvested_by=feed,
                 )
                 for path in holding:
+                    array_path, selection = split_field_key(path)
                     Asset.objects.create(
                         item=item,
                         variable=made[path],
                         format=Asset.Format.ZARR,
                         href=self.href,
-                        store_array=path,
+                        store_array=array_path,
+                        store_selection=dict(selection),
                         roles=[Asset.Role.DATA],
                         harvested_by=feed,
                     )
@@ -932,6 +974,7 @@ class LocalStore:
                             variable=variable,
                             format=Asset.Format.ZARR,
                             href=self.href,
+                            store_selection=dict(split_field_key(wanted.u)[1]),
                             roles=[Asset.Role.DATA],
                             harvested_by=feed,
                         )

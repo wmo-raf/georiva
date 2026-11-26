@@ -34,6 +34,8 @@ from enum import StrEnum
 from itertools import islice
 from urllib.parse import urlsplit
 
+from georiva.core.selection import chooses, split_field_key
+
 from .asset_hosts import (
     AssetHostAllowlist,
     PinnedBuckets,
@@ -352,10 +354,15 @@ class SurveyedArray:
     unit: str = ""
     description: str = ""
     #: Each of its axes' part, in its own order — "run" and "step", or "time",
-    #: then "y" and "x"; empty for an array that is not offered.
+    #: then "y" and "x", and each extra axis by its own name; empty for an
+    #: array that is not offered.
     axes: list[str] = field(default_factory=list)
     #: Why it cannot become a Variable, for an operator; empty when it can.
     reason: str = ""
+    #: Each extra axis it is read at one value of — an ensemble member, a
+    #: statistic, a level — as `{"name", "values", "unit"}`, in its own order.
+    #: A Variable mapped from it names one of `values` for each: its Selection (#830).
+    selectable: list[dict] = field(default_factory=list)
 
     @property
     def offered(self) -> bool:
@@ -847,6 +854,8 @@ def _chunk_regions(upstream: UpstreamCatalogClient, declared: list[str]) -> dict
 # ── Which of a store's arrays can become Variables ──────────────────────────
 
 _GEOGRAPHIC_NAMES = frozenset({"lat", "latitude", "lon", "longitude"})
+#: The CF units a horizontal dimension measured in latitude or longitude is given.
+_GEOGRAPHIC_UNITS = frozenset({"degree_east", "degrees_east", "degree_north", "degrees_north"})
 _GEOGRAPHIC_SYSTEMS = ("4326", "crs84", "wgs84", "wgs 84")
 #: Names the dimension that says which run a forecast field is of.
 _RUN_NAMES = frozenset({"init_time", "reference_time", "forecast_reference_time", "run", "run_time"})
@@ -856,6 +865,10 @@ _OTHER_DIMENSIONS = (
     (("ensemble", "member", "realization", "realisation"), "It has ensemble members."),
     (("statistic", "quantile", "percentile"), "It holds statistics, not one map per time step."),
 )
+
+
+#: The parts an axis can play beside an extra axis, which is named for itself: no extra axis may take one's name.
+_PARTS = frozenset({"run", "step", "time", "x", "y"})
 
 
 def _store_arrays(cube: UpstreamCube) -> list[SurveyedArray]:
@@ -868,7 +881,7 @@ def _store_arrays(cube: UpstreamCube) -> list[SurveyedArray]:
     for array in cube.arrays.values():
         if len(horizontal.keys() & set(array.dimensions)) != 2:
             continue
-        axes, reason = _axes(array, cube, horizontal)
+        axes, reason, selectable = _axes(array, cube, horizontal)
         found.append(
             SurveyedArray(
                 path=array.path,
@@ -877,6 +890,7 @@ def _store_arrays(cube: UpstreamCube) -> list[SurveyedArray]:
                 description=array.description,
                 axes=[] if reason else axes,
                 reason=reason,
+                selectable=[] if reason else selectable,
             )
         )
     # One store, one window: where a forecast's fields and plain time steps sit together, the forecast's are offered.
@@ -892,12 +906,25 @@ def _store_arrays(cube: UpstreamCube) -> list[SurveyedArray]:
     return found
 
 
-def store_fields(cube: UpstreamCube, paths: Iterable[str]) -> list[StoreField]:
-    """Each of `paths` that is still a field a Variable can be mapped from, with
-    which of its axes is which: what a harvest asks a store about. A path the
-    cube no longer offers is left out."""
+def store_fields(cube: UpstreamCube, keys: Iterable[str]) -> list[StoreField]:
+    """Each of `keys` — an array's path, with its Selection after it where it
+    has one — that is still a field a Variable can be mapped from, with which
+    of its axes is which: what a harvest asks a store about. One the cube no
+    longer offers is left out: an array it no longer offers, or a Selection
+    that does not choose one of the values it lists for each extra axis (#830)."""
     offered = {array.path: array for array in _store_arrays(cube) if array.offered}
-    return [StoreField(path, tuple(offered[path].axes)) for path in paths if path in offered]
+    fields = []
+    for key in keys:
+        path, selection = split_field_key(key)
+        array = offered.get(path)
+        if array is not None and _selects(array, dict(selection)):
+            fields.append(StoreField(path, tuple(array.axes), selection))
+    return fields
+
+
+def _selects(array: SurveyedArray, selection: dict) -> bool:
+    """Whether `selection` chooses one of the listed values of each of `array`'s extra axes, and nothing else."""
+    return chooses(selection, {axis["name"]: axis["values"] for axis in array.selectable})
 
 
 def store_media_type(described: UpstreamCollection) -> str:
@@ -922,35 +949,47 @@ def _is_geographic(dimension: CubeDimension) -> bool:
     system = dimension.reference_system.lower()
     if system:
         return any(known in system for known in _GEOGRAPHIC_SYSTEMS)
-    return dimension.name.lower() in _GEOGRAPHIC_NAMES
+    # A grid named `x` and `y` and measured in degrees is latitude and longitude all the same (#830).
+    return dimension.name.lower() in _GEOGRAPHIC_NAMES or dimension.unit.lower() in _GEOGRAPHIC_UNITS
 
 
-def _axes(array: CubeArray, cube: UpstreamCube, horizontal: dict[str, str]) -> tuple[list[str], str]:
-    """`(each axis's part, "")` for an array that can become a Variable, or
-    `([], why not)` in an operator's words."""
-    axes, times = [], []
+def _axes(array: CubeArray, cube: UpstreamCube, horizontal: dict[str, str]) -> tuple[list[str], str, list[dict]]:
+    """`(each axis's part, "", its extra axes)` for an array that can become a
+    Variable, or `([], why not, [])` in an operator's words.
+
+    An extra axis — neither time nor the grid — is read at one of its values
+    (#830): it is offered where the collection lists its values and the store
+    keeps one map per value, else refused by what it is."""
+    axes, times, selectable = [], [], []
     for position, name in enumerate(array.dimensions):
         dimension = cube.dimensions.get(name)
         if name in horizontal:
             if not _is_geographic(dimension):
-                return [], "It is on a projected grid."
+                return [], "It is on a projected grid.", []
             axes.append(horizontal[name])
         elif (dimension is not None and dimension.kind == "temporal") or name.lower() in _STEP_NAMES:
             times.append(position)
             axes.append("time")
+        elif dimension is not None and dimension.values is not None and name not in _PARTS:
+            if array.chunks is not None and len(array.chunks) == len(array.dimensions) and array.chunks[position] != 1:
+                said = name.replace("_", " ")
+                return [], f"It keeps every {said} of a map together, so one cannot be shown alone.", []
+            axes.append(name)
+            unit = dimension.unit if dimension.unit != "1" else ""
+            selectable.append({"name": name, "values": list(dimension.values), "unit": unit})
         else:
             lowered = name.lower()
             known = next((why for words, why in _OTHER_DIMENSIONS if any(word in lowered for word in words)), None)
-            return [], known or f"It is divided up in a way GeoRiva does not know (“{name}”)."
+            return [], known or f"It is divided up in a way GeoRiva does not know (“{name}”).", []
     if not times:
-        return [], "It has no time steps."
+        return [], "It has no time steps.", []
     if len(times) > 2:
-        return [], "It has more kinds of time step than GeoRiva can show."
+        return [], "It has more kinds of time step than GeoRiva can show.", []
     if len(times) == 2:
         run = _run_axis(array, cube, times)
         for position in times:
             axes[position] = "run" if position == run else "step"
-    return axes, ""
+    return axes, "", selectable
 
 
 def _run_axis(array: CubeArray, cube: UpstreamCube, times: list[int]) -> int:

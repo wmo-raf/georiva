@@ -499,6 +499,51 @@ class PlainFilesCatalogTests(SimpleTestCase):
         self.assertEqual((cube.arrays["t"].dimensions, cube.arrays["t"].chunks), (("time",), None))
         self.assertEqual((cube.arrays["u"].dimensions, cube.arrays["u"].chunks), ((), None))
 
+    def test_an_extra_axis_lists_its_values_where_the_collection_gives_them(self):
+        # As dynamical.org describes its ensembles (#830).
+        cube = parse_collection(
+            {
+                "id": "x",
+                "cube:dimensions": {
+                    "statistic": {"type": "other", "values": ["mean", "p10"], "unit": "1", "size": 2},
+                    "ensemble_member": {"type": "other", "extent": [0, 50], "unit": "1", "size": 51},
+                    "pressure_level": {"type": "other", "extent": [10, 1000], "unit": "hPa", "size": 14},
+                    "level": {"type": "other", "extent": [100, 1000], "step": 300, "unit": "hPa"},
+                    "member": {"type": "other", "values": [True, {"a": 1}]},
+                    "latitude": {"type": "spatial", "axis": "y", "extent": [-90, 90], "size": 181},
+                },
+            }
+        ).cube
+
+        self.assertEqual(cube.dimensions["statistic"].values, ("mean", "p10"))
+        self.assertEqual(cube.dimensions["ensemble_member"].values, tuple(range(51)))
+        self.assertIsNone(cube.dimensions["pressure_level"].values)
+        self.assertEqual(cube.dimensions["pressure_level"].unit, "hPa")
+        self.assertEqual(cube.dimensions["level"].values, (100, 400, 700, 1000))
+        self.assertIsNone(cube.dimensions["member"].values)
+        self.assertIsNone(cube.dimensions["latitude"].values)
+
+    def test_a_grid_dimension_keeps_its_unit(self):
+        cube = parse_collection(
+            {"id": "x", "cube:dimensions": {"x": {"type": "spatial", "axis": "x", "unit": "degree_east"}}}
+        ).cube
+
+        self.assertEqual(cube.dimensions["x"].unit, "degree_east")
+
+    def test_a_vertical_axis_typed_spatial_lists_its_values_too(self):
+        # The datacube extension types a vertical axis "spatial", axis "z" (#830).
+        cube = parse_collection(
+            {
+                "id": "x",
+                "cube:dimensions": {
+                    "pressure_level": {"type": "spatial", "axis": "z", "values": [500, 850], "unit": "hPa"},
+                },
+            }
+        ).cube
+
+        self.assertEqual(cube.dimensions["pressure_level"].values, (500, 850))
+        self.assertEqual(cube.dimensions["pressure_level"].unit, "hPa")
+
     def many(self, count):
         """A catalog of plain files linking to `count` collections, each with its own document."""
         hrefs = [f"https://stac.upstream.example/c{n}/collection.json" for n in range(count)]

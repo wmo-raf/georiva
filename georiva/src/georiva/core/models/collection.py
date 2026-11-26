@@ -359,8 +359,10 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         return self.harvested_by_id is None and not self.derived_by_recipe
 
     def store_mapping(self) -> dict | None:
-        """The arrays of its Upstream store that its harvest feed maps, each to
-        its Variable, for a collection harvested from a store; ``None`` for any other.
+        """The fields of its Upstream store that its harvest feed maps, each to
+        its Variable, by field key — an array's path, with its Selection after
+        it where it has one (#830) — for a collection harvested from a store;
+        ``None`` for any other.
 
         A vector Variable of such a collection is computed from two of them
         (ADR 0048). Asked of the harvest app by model label: core is not built on it.
@@ -376,7 +378,8 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
         feed = feeds.objects.filter(pk=self.harvested_by_id).first()
         if feed is None or not feed.is_store:
             return None
-        return {row.asset_key: row.variable for row in feed.variable_mappings.select_related("variable")}
+        # By field key: an array mapped at two Selections is two fields (#830).
+        return {row.field_key: row.variable for row in feed.variable_mappings.select_related("variable")}
 
     @property
     def spatial_extent(self) -> list | None:

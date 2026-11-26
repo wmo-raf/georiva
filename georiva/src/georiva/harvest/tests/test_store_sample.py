@@ -336,6 +336,45 @@ class NewestClosedRunTests(StoreFixture, SimpleTestCase):
         self.assertTrue(samples["temperature_2m"].readable)
 
 
+class SampleAtASelectionTests(StoreFixture, SimpleTestCase):
+    """An array with an extra axis is sampled at the value chosen of it (#830)."""
+
+    AXES = ("run", "ensemble_member", "step", "y", "x")
+
+    def build(self):
+        def build(store):
+            members = zarr.create_array(store, name="ensemble_member", shape=(3,), dtype="i8")
+            members[:] = [0, 1, 2]
+            array = zarr.create_array(
+                store, name="temperature_2m", shape=(3, 3, 4, 4, 8), chunks=(1, 1, 1, 4, 8), dtype="f8"
+            )
+            for member in range(3):
+                array[1, member] = 10.0 * (member + 1)  # the newest whole run, each member its own value
+            array[2, 2, 0] = 9999.0  # the newest run: one member's first step
+
+        self.commit(build)
+
+    def member(self, value):
+        return StoreField("temperature_2m", self.AXES, (("ensemble_member", value),))
+
+    def test_each_selection_is_sampled_at_its_own_map_and_known_by_its_key(self):
+        self.build()
+
+        samples = self.read(self.member(0), self.member(2))
+
+        self.assertEqual((samples[self.member(0).key].value_min, samples[self.member(0).key].value_max), (10.0, 10.0))
+        self.assertEqual((samples[self.member(2).key].value_min, samples[self.member(2).key].value_max), (30.0, 30.0))
+
+    def test_a_value_the_store_does_not_have_is_not_read_and_says_so(self):
+        self.build()
+
+        sample = self.read(self.member(7))[self.member(7).key]
+
+        self.assertFalse(sample.readable)
+        self.assertIn("7", sample.problem)
+        self.assertEqual(sample.elsewhere, "")
+
+
 class OnlyConfirmedPlacesAreFollowedTests(StoreFixture, SimpleTestCase):
     """A virtual store whose own configuration says where its data lives, and
     would have a reader go there (ADR 0044 §11)."""

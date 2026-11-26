@@ -13,6 +13,7 @@ A feed over a forecast store has a Rolling window in place of the fixed one
 (ADR 0044 §7), and its mapping's rows name arrays of the store by their path.
 """
 
+import json
 from copy import deepcopy
 
 from django import forms
@@ -68,9 +69,14 @@ class HarvestFeedForm(DataFeedForm):
             if self.instance.is_store:
                 fields["asset_key"].label = _("Array in the store")
                 fields["asset_key"].help_text = _("The array's full path in the upstream store.")
+                if "selection" in fields:
+                    # Empty for an array with no extra axis: nothing to choose (#830).
+                    fields["selection"].required = False
             else:
-                # A run is a store's: a feed of items has no first step to hold an array at (#782).
+                # A run is a store's: a feed of items has no first step to hold an array at (#782),
+                # and no array with extra axes to read at one value of each (#830).
                 fields.pop("fixed_field", None)
+                fields.pop("selection", None)
 
         for row in formset.forms:
             narrow(row.fields)
@@ -136,29 +142,73 @@ class HarvestFeedForm(DataFeedForm):
         # For a store, the survey decided which arrays can be mapped at all (ADR 0044 §8):
         # one it listed as not yet supported is not mapped by typing its path.
         offered = {key for key, _label in self._asset_key_choices(formset)} if self.instance.is_store else None
+        seen = set()
         for row in formset.forms:
             row_cleaned = getattr(row, "cleaned_data", None) or {}
             variable = row_cleaned.get("variable")
             if variable is None or row_cleaned.get("DELETE"):
                 continue
+            mapped = (row_cleaned.get("asset_key"), json.dumps(row_cleaned.get("selection") or {}, sort_keys=True))
+            if mapped in seen:
+                row.add_error(
+                    "asset_key",
+                    _("This array is a duplicate of another row's, at the same values.")
+                    if self.instance.is_store
+                    else _("This asset key is a duplicate of another row's."),
+                )
+            seen.add(mapped)
             if collection is None or variable.collection_id != collection.pk:
                 row.add_error("variable", _("This Variable does not belong to the feed's collection."))
             if offered is not None and row_cleaned.get("asset_key") not in offered:
                 row.add_error("asset_key", _("This is not an array the upstream store offers for mapping."))
+            elif offered is not None:
+                self._check_selection(row, row_cleaned)
         if self.instance.is_store and collection is not None:
             self._check_vector_parts(formset, collection)
+
+    def _check_selection(self, row, row_cleaned):
+        """A row of an array with extra axes names one value the survey saw of
+        each, and a row of one with none names nothing (#830)."""
+        from georiva.core.selection import SelectionInvalid, chooses, described, selection_of
+
+        surveyed = self.instance.surveyed_selectable.get(row_cleaned["asset_key"], [])
+        axes = {axis["name"]: axis["values"] for axis in surveyed}
+        try:
+            selection = dict(selection_of(row_cleaned.get("selection") or {}))
+        except SelectionInvalid as invalid:
+            row.add_error("selection", str(invalid))
+            return
+        if chooses(selection, axes):
+            return
+        if not axes:
+            row.add_error("selection", _("This array has no extra axis to choose a value of. Leave it empty."))
+            return
+        choices = "; ".join(
+            f"{name.replace('_', ' ')}: {', '.join(str(value) for value in values)}" for name, values in axes.items()
+        )
+        said = described(selection_of(selection)) or _("nothing")
+        row.add_error(
+            "selection",
+            _("Choose one value of each of this array's axes (%(choices)s). It names %(said)s.")
+            % {"choices": choices, "said": said},
+        )
 
     def _check_vector_parts(self, formset, collection):
         """An array a vector Variable is computed from stays mapped while the
         vector names it (ADR 0048): unmapped, the vector would quietly go blank."""
         from georiva.core.models import Variable
         from georiva.core.models.variable import VECTOR_TRANSFORMS
+        from georiva.core.selection import SelectionInvalid, field_key, selection_of
 
+        # By field key, as a vector names its parts: an array at a Selection (#830).
         kept = set()
         for row in formset.forms:
             row_cleaned = getattr(row, "cleaned_data", None) or {}
             if row_cleaned.get("asset_key") and not row_cleaned.get("DELETE"):
-                kept.add(row_cleaned["asset_key"])
+                try:
+                    kept.add(field_key(row_cleaned["asset_key"], selection_of(row_cleaned.get("selection") or {})))
+                except SelectionInvalid:
+                    continue
         for variable in Variable.objects.filter(collection=collection, transform_type__in=VECTOR_TRANSFORMS):
             components = variable.vector_components
             if components is None:

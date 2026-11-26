@@ -358,6 +358,15 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
             "slice of. Which slice is its item's reference time and valid time."
         ),
     )
+    store_selection = models.JSONField(
+        default=dict,
+        blank=True,
+        editable=False,
+        help_text=_(
+            "For a Store asset whose array has extra axes — ensemble members, statistics, levels: the value of "
+            "each it is read at, by the axis's name. Empty for an array with none."
+        ),
+    )
 
     class Meta:
         ordering = ["sort_order"]

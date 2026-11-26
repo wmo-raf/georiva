@@ -21,7 +21,8 @@ from django_redis import get_redis_connection
 from georiva.core.machine_plane.remote_assets import PUBLISHED_FIELD, REMOTE_ASSETS_KEY_PREFIX, variable_key
 from georiva.core.models import Asset, Catalog, Collection, Item
 from georiva.harvest import background_survey
-from georiva.harvest.models import HarvestFeed
+from georiva.harvest.models import HarvestFeed, VariableMapping
+from georiva.harvest.upstream import CubeDimension
 from georiva.ingestion.models import RunIngestion
 from georiva.organisations.testing import dial_org
 from georiva.sources.models import FetchRun
@@ -577,3 +578,42 @@ class ConfirmedChangesReachTitilerTests(HearsStoreAnnouncements, StoreRecheckMix
         self.answer({})
 
         self.assertEqual(self.heard(), [])
+
+
+class ChangedValuesTests(StoreRecheckMixin, TestCase):
+    """An array whose extra axis offers other values than it did (#830)."""
+
+    dimensions = {
+        **StoreRecheckMixin.dimensions,
+        "statistic": CubeDimension("statistic", kind="other", size=2, values=("mean", "p90")),
+    }
+    arrays = {
+        "temperature_2m": (("init_time", "statistic", "lead_time", "latitude", "longitude"), (1, *WHOLE_FIELD)),
+        "wind_u_10m": (RUN_STEP_GRID, WHOLE_FIELD),
+    }
+
+    def setUp(self):
+        super().setUp()
+        statistic = {"name": "statistic", "values": ["mean", "p50"], "unit": ""}
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(
+            surveyed_assets=[{"key": "temperature_2m", "title": "", "selectable": [statistic]}, {"key": "wind_u_10m"}]
+        )
+        VariableMapping.objects.filter(variable=self.temperature).update(selection={"statistic": "p50"})
+
+    def test_an_array_whose_values_changed_is_put_to_the_operator(self):
+        page = self.look()
+
+        self.assertEqual([array.path for array in page.context["changed_arrays"]], ["temperature_2m"])
+        self.assertContains(page, "offers other values")
+
+    def test_a_mapped_value_no_longer_offered_is_named(self):
+        page = self.look()
+
+        self.assertEqual(page.context["lost_selections"], ["Temperature-2M (statistic p50)"])
+        self.assertContains(page, "statistic p50")
+
+    def test_on_their_yes_the_mapping_offers_the_new_values(self):
+        self.answer({"offer_arrays": "1"})
+
+        feed = HarvestFeed.objects.get(pk=self.feed.pk)
+        self.assertEqual(feed.surveyed_selectable["temperature_2m"][0]["values"], ["mean", "p90"])

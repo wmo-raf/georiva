@@ -7,7 +7,7 @@
 <div class="gr-map-settings-card gr-map-settings-card--wind" data-wind data-parts="{{ pair.index }} {{ pair.v_index }}"
      data-after="{{ pair.after }}">
     <p class="hwiz-note">
-        {% blocktrans with u=pair.u v=pair.v %}<strong>{{ u }}</strong> and <strong>{{ v }}</strong> are the two parts of one wind. GeoRiva can also show its speed and the direction it blows from, worked out from the two whenever they are shown.{% endblocktrans %}
+        {% blocktrans with u=pair.u_label|default:pair.u v=pair.v_label|default:pair.v %}<strong>{{ u }}</strong> and <strong>{{ v }}</strong> are the two parts of one wind. GeoRiva can also show its speed and the direction it blows from, worked out from the two whenever they are shown.{% endblocktrans %}
     </p>
     {% for offer in pair.offers %}
         <label class="hwiz-check" for="{{ offer.name }}">
