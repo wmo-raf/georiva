@@ -95,6 +95,10 @@ be opened.**
    - plain Zarr: "This collection's data is kept in a kind of data store GeoRiva cannot read yet."
    - Series-shaped and needing an account: the existing reasons.
 
+   Anonymous access covers each kind of place ADR 0044 §11 lists. A folder of an `https` host joined that list
+   with wmo-raf/georiva#828, so a store keeping its data on a web host of its own (dynamical.org's WeatherNext) is
+   accepted on this axis; a web address spelled otherwise than its reader will match it is still refused by name.
+
    Where several axes stop a collection, the survey names the one an operator can do least about first: placement,
    then shape, then format, then access.
 

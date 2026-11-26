@@ -9,6 +9,7 @@ Nothing reaches a network: where a read would, it is stood in for.
 import os
 import tempfile
 import threading
+from functools import partial
 from unittest import mock
 
 import icechunk
@@ -18,6 +19,7 @@ from django.test import SimpleTestCase
 
 from georiva.harvest import upstream
 from georiva.harvest.asset_hosts import ChunkPlace, chunk_place
+from georiva.harvest.testing import PUBLIC_ADDRESS
 from georiva.harvest.upstream import (
     FieldSample,
     StacApiClient,
@@ -32,6 +34,7 @@ from georiva.harvest.upstream import (
 STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
 GFS = "s3://noaa-gfs-bdp-pds/"
 ECMWF = "gs://ecmwf-open-data/"
+WEATHERNEXT = "https://wn.dynamical.org/chunks/"
 FORECAST = ("run", "step", "y", "x")
 #: Three runs of four steps on a 4 × 8 grid.
 SHAPE = (3, 4, 4, 8)
@@ -50,11 +53,41 @@ class ChunkPlaceTests(SimpleTestCase):
         for declared in (
             "az://container/",
             "abfs://container@account.dfs.core.windows.net/",
-            "https://data.example/grib/",
             "http://minio.internal:9000/bucket/",
             "file:///srv/grib/",
             "noaa-gfs-bdp-pds",
             "",
+        ):
+            with self.subTest(declared=declared):
+                self.assertIsNone(chunk_place(declared))
+
+    def test_a_web_address_is_a_place_and_so_is_its_whole_host(self):
+        self.assertEqual(chunk_place(WEATHERNEXT), ChunkPlace("https", host="wn.dynamical.org"))
+        self.assertEqual(chunk_place("https://wn.dynamical.org/"), ChunkPlace("https", host="wn.dynamical.org"))
+
+    def test_a_web_address_is_a_place_only_as_its_reader_will_match_it(self):
+        # What the store's reader matches a chunk against is the address as it
+        # normalises it: a prefix spelled any other way would pass judgement as
+        # one place and be matched as another.
+        for declared in (
+            "http://wn.dynamical.org/chunks/",  # plain http
+            "HTTPS://wn.dynamical.org/chunks/",
+            "https://WN.dynamical.org/chunks/",
+            "https://wn.dynamical.org:8443/chunks/",  # a port
+            "https://wn.dynamical.org:443/chunks/",
+            "https://user@wn.dynamical.org/chunks/",  # credentials
+            "https://203.0.113.9/chunks/",  # an address, not a host's name
+            "https://localhost/chunks/",
+            "https://wn.dynamical.org/chunks/../other/",
+            "https://wn.dynamical.org/./chunks/",
+            "https://wn.dynamical.org//chunks/",
+            "https://wn.dynamical.org/%2e%2e/chunks/",
+            "https://wn.dynamical.org/chunks/?a=b/",
+            "https://wn.dynamical.org/chunks/#a/",
+            "https://wn.dynamical.org/chunks",  # no closing slash
+            "https://wn.dynamical.org/données/",  # escaped before matching: it would never match
+            "https://wn.dynamical.org",
+            "https:///chunks/",
         ):
             with self.subTest(declared=declared):
                 self.assertIsNone(chunk_place(declared))
@@ -384,7 +417,17 @@ class OnlyConfirmedPlacesAreFollowedTests(StoreFixture, SimpleTestCase):
         self.assertEqual(self.containers({}), {})
 
     def test_a_place_of_a_kind_that_is_never_pinned_is_never_followed(self):
-        self.assertEqual(self.containers({self.data_prefix: "", "https://data.example/": ""}), {})
+        self.assertEqual(self.containers({self.data_prefix: "", "http://data.example/": ""}), {})
+
+    def test_a_web_place_is_read_at_its_own_address_anonymously_and_every_request_bounded(self):
+        containers = self.containers({WEATHERNEXT: ""})
+
+        self.assertEqual(containers.keys(), {WEATHERNEXT})
+        said = str(containers[WEATHERNEXT].store)
+        self.assertIn("Http", said)
+        self.assertIn('"timeout"', said)
+        self.assertIn('"connect_timeout"', said)
+        self.assertNotIn("allow_http", said, "plain http is never allowed to a web place")
 
     def test_what_the_repository_says_of_its_own_caching_is_kept(self):
         # Not where anything is read from, and what makes a large store quick to open.
@@ -393,11 +436,130 @@ class OnlyConfirmedPlacesAreFollowedTests(StoreFixture, SimpleTestCase):
         self.assertEqual(opened.config.caching.num_chunk_refs, 1_000_000)
 
 
+class WebPlaceTests(StoreFixture, SimpleTestCase):
+    """A store whose data is kept at a web address: a host may answer one file
+    by sending its reader elsewhere, which the store's reader would follow, so
+    a file of it is asked about first by a reader that will not (#828)."""
+
+    PLACE = "https://wn.example.invalid/chunks/"
+    FILE = f"{PLACE}run-2/field.bin"
+
+    def setUp(self):
+        super().setUp()
+
+        def build(store):
+            zarr.create_array(
+                store, name="temperature_2m", shape=SHAPE, chunks=(1, 1, 4, 8), dtype="f8", compressors=None
+            )
+            for step in range(SHAPE[1]):
+                store.set_virtual_ref(
+                    f"temperature_2m/c/2/{step}/0/0", self.FILE, offset=0, length=256, validate_container=False
+                )
+
+        self.commit(build)
+        self.asked = []
+
+    def sample(self, verdict):
+        def check(address):
+            self.asked.append(address)
+            return verdict
+
+        read = partial(read_field_samples, self.storage, [TEMPERATURE], {self.PLACE: ""}, check_chunk=check)
+        if verdict is not None:
+            return read()["temperature_2m"]
+        # Allowed, it is read from a host that does not exist, and that failure is logged.
+        with self.assertLogs("georiva.harvest.upstream", level="WARNING"):
+            return read()["temperature_2m"]
+
+    def test_a_file_in_a_web_place_is_asked_about_before_it_is_read(self):
+        self.sample(None)
+
+        self.assertEqual(self.asked, [self.FILE])
+
+    def test_a_host_that_sends_its_reader_elsewhere_is_not_followed(self):
+        sample = self.sample("it sends readers on to another address (https://elsewhere.example/x)")
+
+        self.assertFalse(sample.readable)
+        self.assertIn("sends readers on to another address", sample.problem)
+        self.assertEqual(sample.elsewhere, "", "the place is allowed: it is the host's answer that is refused")
+
+    def test_a_file_asked_about_and_allowed_is_then_read_from_its_place(self):
+        # The host does not exist, so the read fails — but at the place, not before it.
+        sample = self.sample(None)
+
+        self.assertFalse(sample.readable)
+        self.assertNotIn("sends readers on", sample.problem)
+        self.assertEqual(sample.elsewhere, "")
+
+    def test_with_nobody_to_ask_a_web_place_is_not_read(self):
+        sample = read_field_samples(self.storage, [TEMPERATURE], {self.PLACE: ""})["temperature_2m"]
+
+        self.assertFalse(sample.readable)
+        self.assertIn("could not be checked", sample.problem)
+
+
+class ChunkRefusalTests(SimpleTestCase):
+    """What a reader that never follows a redirect makes of a host's answer for one file (#828)."""
+
+    FILE = "https://wn.dynamical.org/chunks/run/field.bin"
+
+    def refusal(self, status=206, location=None, addresses=(PUBLIC_ADDRESS,)):
+        opened = []
+
+        class Answer:
+            def __init__(self):
+                self.status = status
+                self.headers = {"Location": location} if location else {}
+
+            def release_conn(self):
+                pass
+
+        def fetch(url, address, *, timeout, headers):
+            opened.append((url, address, headers))
+            return Answer()
+
+        said = upstream.chunk_refusal(self.FILE, resolve=lambda host: list(addresses), fetch=fetch)
+        return said, opened
+
+    def test_a_host_that_answers_the_range_asked_for_may_be_read(self):
+        said, opened = self.refusal(206)
+
+        self.assertIsNone(said)
+        self.assertEqual(opened, [(self.FILE, PUBLIC_ADDRESS, {"Range": "bytes=0-0"})])
+
+    def test_a_host_that_answers_the_whole_file_may_be_read(self):
+        self.assertIsNone(self.refusal(200)[0])
+
+    def test_a_host_that_sends_its_reader_elsewhere_may_not(self):
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                said, _opened = self.refusal(status, location="http://10.0.0.1/secret")
+                self.assertIn("sends readers on to another address", said)
+                self.assertIn("http://10.0.0.1/secret", said)
+
+    def test_a_host_that_does_not_have_the_file_may_not(self):
+        self.assertIn("404", self.refusal(404)[0])
+
+    def test_a_host_at_a_private_address_is_never_asked(self):
+        said, opened = self.refusal(addresses=("10.0.0.7",))
+
+        self.assertIn("private", said)
+        self.assertEqual(opened, [])
+
+    def test_a_host_that_does_not_answer_may_not(self):
+        def fetch(url, address, *, timeout, headers):
+            raise OSError("connection refused")
+
+        said = upstream.chunk_refusal(self.FILE, resolve=lambda host: [PUBLIC_ADDRESS], fetch=fetch)
+
+        self.assertIn("did not answer", said)
+
+
 class SampleStoreTests(SimpleTestCase):
     """What a sample makes of a store that will not be read. The read is stood in for."""
 
     def test_each_field_is_read_from_the_address_it_is_given_with_the_places_confirmed(self):
-        def read(storage, fields, places, *, into):
+        def read(storage, fields, places, *, into, check_chunk):
             into["temperature_2m"] = FieldSample(readable=True, value_min=1.0, value_max=2.0)
 
         with (
@@ -430,7 +592,7 @@ class SampleStoreTests(SimpleTestCase):
         release = threading.Event()
         self.addCleanup(release.set)
 
-        def read(storage, fields, places, *, into):
+        def read(storage, fields, places, *, into, check_chunk):
             into["temperature_2m"] = FieldSample(readable=True, value_min=1.0, value_max=2.0)
             release.wait(30)
 
@@ -451,4 +613,16 @@ class SampleStoreTests(SimpleTestCase):
             )
 
         self.assertEqual(answer, "samples")
-        sampled.assert_called_once_with(STORE, [TEMPERATURE], {GFS: "us-east-1"})
+        sampled.assert_called_once_with(STORE, [TEMPERATURE], {GFS: "us-east-1"}, check_chunk=mock.ANY)
+
+    def test_the_real_client_asks_about_a_web_places_file_where_its_host_resolves(self):
+        client = StacApiClient("https://stac.upstream.example/catalog.json")
+        with mock.patch.object(upstream, "sample_store") as sampled:
+            client.sample_store(STORE, [TEMPERATURE], {WEATHERNEXT: ""})
+        check = sampled.call_args.kwargs["check_chunk"]
+
+        with mock.patch.object(client, "resolve_host", return_value=["10.0.0.7"]) as resolved:
+            said = check(f"{WEATHERNEXT}run/field.bin")
+
+        resolved.assert_called_once_with("wn.dynamical.org")
+        self.assertIn("private", said)

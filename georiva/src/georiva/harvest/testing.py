@@ -133,6 +133,11 @@ class FakeUpstream:
         self.store_times_out = False
         #: The stores opened, in order.
         self.stores_opened: list[str] = []
+        #: Why a file of each web place may not be read, by its prefix: as the real one finds it, by
+        #: asking for one of its newest files with a reader that follows no redirect (#828).
+        self.web_refusals: dict[str, str] = {}
+        #: The web places a held-step listing was asked to check, in order, one tuple per listing.
+        self.web_places_asked: list[tuple[str, ...]] = []
         #: The range a sample of each array shows, by path; one not here ranges 0–100.
         self.field_ranges: dict[str, tuple[float, float]] = {}
         #: The declared place each array's data is in, by path; one not here needs none.
@@ -310,6 +315,7 @@ class FakeUpstream:
         *,
         skip_runs: frozenset = frozenset(),
         allow_http: bool = False,
+        web_places: tuple[str, ...] = (),
     ) -> list[HeldStep]:
         self._answer()
         if href.lower().startswith("http://") and not allow_http:
@@ -332,6 +338,11 @@ class FakeUpstream:
                     if run is not None:
                         looked_into.add(run)
         self.runs_asked.append(looked_into)
+        if web_places:
+            self.web_places_asked.append(tuple(web_places))
+        for place in web_places:
+            if place in self.web_refusals:
+                raise UpstreamUnreachable(f"upstream data at {place} was refused: {self.web_refusals[place]}")
         return [
             HeldStep(
                 time=when,

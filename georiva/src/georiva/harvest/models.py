@@ -231,6 +231,14 @@ class HarvestFeed(DataFeed):
         return self.upstream_shape == UpstreamShape.STORE
 
     @property
+    def web_places(self) -> tuple[str, ...]:
+        """The web places among this store feed's Pinned locations: each is
+        judged, and a file of it asked about, at every harvest (#828)."""
+        from .asset_hosts import web_places
+
+        return web_places(self.pinned_chunk_locations) if self.is_store else ()
+
+    @property
     def harvests_a_forecast(self) -> bool:
         """Whether its collection is a forecast: the Upstream is a store with a
         run axis. A forecast store's window rolls and an analysis store's does

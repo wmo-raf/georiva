@@ -506,9 +506,15 @@ _Avoid_: test item, preview item
 A place an Upstream's files live that an operator confirmed for one Harvest feed: an `https` host, or an `s3://`
 bucket with the public `https` host its hrefs are translated to at harvest time. Proposed by the Upstream survey,
 never typed. An asset anywhere else is rejected. For a virtual Upstream store, the buckets its chunks point into are
-Pinned locations too — an `s3://` or a `gs://` bucket, read as it is and never translated — and a chunk anywhere
-else is not read.
+Pinned locations too — an `s3://` or a `gs://` bucket, or a folder of an `https` host (a web place), read as it is
+and never translated — and a chunk anywhere else is not read.
 _Avoid_: bucket mapping, rewrite rule, trusted bucket
+
+**Web place**:
+A folder of an `https` host that a virtual Upstream store's data may be pinned in (ADR 0044 §11), as opposed to a
+bucket. Taken only spelled as the store's reader will match it, its host judged as a COG's file host is, and one file
+of it asked for, with no redirect followed, before it is read: at the sample read and at every harvest (#828).
+_Avoid_: http place, URL bucket, HTTP container
 
 **Variable mapping**:
 A Harvest feed's explicit table of upstream name → curated `Variable`: an asset key, or for an Upstream store the

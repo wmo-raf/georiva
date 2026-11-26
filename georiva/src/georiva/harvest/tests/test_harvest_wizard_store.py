@@ -31,6 +31,7 @@ STORE_HOST = "dynamical-noaa-gfs.s3.us-west-2.amazonaws.com"
 GFS = "s3://noaa-gfs-bdp-pds/"
 ECMWF_S3 = "s3://ecmwf-forecasts/"
 ECMWF_GS = "gs://ecmwf-open-data/"
+WEATHERNEXT = "https://wn.dynamical.org/chunks/"
 FORECAST = {"init_time": None, "lead_time": 209, "latitude": 721, "longitude": 1440, "pressure_level": 13}
 RUN_STEP_GRID = ("init_time", "lead_time", "latitude", "longitude")
 WHOLE_FIELD = (1, 1, 721, 1440)
@@ -620,6 +621,29 @@ class WizardConfirmsWhereAStoresDataIsTests(StoreWizardMixin, TestCase):
         self.assertNotContains(verdict, step(4))
         self.assertRedirects(self.client.get(step(4)), step(3))
         self.assertEqual(self.upstream.samples_asked, [], "its own description was read, and none of its data")
+
+
+class WizardConfirmsAWebPlaceTests(StoreWizardMixin, TestCase):
+    """dynamical.org's WeatherNext stores: their data is kept on a web host of
+    the provider's own, and is read there once confirmed (#828)."""
+
+    places = (WEATHERNEXT,)
+
+    def test_the_web_place_is_asked_about_in_plain_words(self):
+        page = self.reach_fields()
+
+        self.assertContains(page, "<strong>wn.dynamical.org/chunks</strong>, on the provider&#x27;s own web server")
+        self.assertTrue(page.context["places"][0]["usable"], "nothing needs finding before it is asked about")
+
+    def test_a_confirmed_web_place_is_saved_as_declared_with_no_region(self):
+        self.reach_fields()
+        self.choose_temperature(places=(0,))
+
+        self.save_store()
+
+        feed = HarvestFeed.objects.get()
+        self.assertEqual(feed.pinned_chunk_locations, {WEATHERNEXT: ""})
+        self.assertNotIn("wn.dynamical.org", feed.allowed_asset_hosts, "a place is pinned, never an asset host")
 
 
 class WizardJudgesTheStoresAddressTests(StoreWizardMixin, TestCase):

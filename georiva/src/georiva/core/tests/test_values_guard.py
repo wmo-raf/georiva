@@ -38,7 +38,10 @@ ALLOWED = {
     "ingestion/asset_writer.py": "ingestion's writer: writes the COG",
     "formats/": "the format plugins: decode a source file into the arrays ingestion writes",
     "harvest/materialize.py": "the materializer: copies a Remote COG's bytes into our bucket (#725)",
-    "harvest/upstream.py": "the Upstream survey's probe: opens an upstream file to describe it",
+    "harvest/upstream.py": (
+        "the Upstream survey's probe: opens an upstream file to describe it; and finds which file a store's "
+        "field is read from, by a read that follows its data nowhere (#828)"
+    ),
     "harvest/testing.py": "FakeUpstream: writes the files a test's Upstream serves",
     "virtual_zarr/": "virtual Zarr's layout reader: reads a COG's layout and a store's coverage",
 }

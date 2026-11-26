@@ -46,7 +46,7 @@ from georiva.core.storage.asset_location import remote_q, store_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
 from . import runs
-from .asset_hosts import AssetHostAllowlist, PinnedBuckets
+from .asset_hosts import AssetHostAllowlist, PinnedBuckets, chunk_place
 from .materialize import enqueue_due as enqueue_materialization
 from .survey import store_fields, store_media_type
 from .upstream import (
@@ -164,6 +164,12 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
         if refusal:
             logger.warning("Harvest %s: store address %s refused — %s", feed.name, feed.store_href, refusal)
             raise RunStopped(f"store address refused — {refusal}")
+        # So is each web place its data is pinned in: whoever reads there resolves the host anew (#828).
+        for place in feed.web_places:
+            judged = AssetHostAllowlist([chunk_place(place).host], allow_http=False, resolve=upstream.resolve_host)
+            if why := judged.refusal(place):
+                logger.warning("Harvest %s: data place %s refused — %s", feed.name, place, why)
+                raise RunStopped(f"data place refused — {why}")
     reach = _Reach.of(feed)
     by_array = feed.mapped_variables(collection)
     # A store collection's vector Variables are indexed beside the arrays they are computed from (ADR 0048).
@@ -397,7 +403,12 @@ def _listed(
     held = (
         list(
             upstream.list_held_steps(
-                feed.store_href, fields, window, skip_runs=frozenset(settled), allow_http=feed.allow_http
+                feed.store_href,
+                fields,
+                window,
+                skip_runs=frozenset(settled),
+                allow_http=feed.allow_http,
+                web_places=feed.web_places,
             )
         )
         if fields
