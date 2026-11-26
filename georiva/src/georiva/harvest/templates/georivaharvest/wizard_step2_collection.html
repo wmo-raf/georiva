@@ -200,7 +200,7 @@
     </style>
 {% endblock %}
 
-{% block wizard_content %}
+{% block wizard_top %}
     <p class="hwiz-lead">
         {% blocktrans count counter=collections|length with address=session.upstream_url %}The catalog at {{ address }} holds one collection.{% plural %}The catalog at {{ address }} holds {{ counter }} collections. Choose the one to show.{% endblocktrans %}
     </p>
@@ -212,15 +212,20 @@
     <p class="hwiz-note">
         {% trans "GeoRiva will look at a few of its entries to see how it is organised. For a large data store this can take a minute; the next page says what it is waiting on." %}
     </p>
+    {% if collections|length > 12 %}
+        {% comment %}
+            Outside the form, pinned with the top: it filters the cards and sends nothing.
+        {% endcomment %}
+        <div class="hwiz-field">
+            <input type="search" id="hwiz-filter" class="w-field__input" aria-label="{% trans 'Find a collection' %}"
+                   placeholder="{% trans 'Find a collection: part of its name, who makes it, or a keyword, e.g. rainfall' %}">
+        </div>
+    {% endif %}
+{% endblock %}
+
+{% block wizard_content %}
     <form method="post" action="">
         {% csrf_token %}
-        {% if collections|length > 12 %}
-            <div class="w-field__wrapper hwiz-field">
-                <label class="w-field__label" for="hwiz-filter">{% trans "Find a collection" %}</label>
-                <input type="search" id="hwiz-filter" class="w-field__input"
-                       placeholder="{% trans 'Type part of its name, who makes it, or a keyword, e.g. rainfall' %}">
-            </div>
-        {% endif %}
         <fieldset class="hwiz-collections">
             <legend class="w-sr-only">{% trans "Collection" %}</legend>
             {% for collection in collections %}
@@ -374,7 +379,22 @@
                     if (match) shown += 1;
                 }
                 none.hidden = shown > 0;
+                showFirst();
             });
+
+            // Where the list was scrolled to, the cards left may all be above it: bring the
+            // first one back to just under the pinned top. Only where the top is pinned.
+            const top = document.querySelector('.hwiz-top');
+            const pinned = window.matchMedia('(min-width: 50em)');
+            const showFirst = function () {
+                const first = Array.from(cards).find(function (card) { return !card.hidden; });
+                if (!first || !pinned.matches) return;
+                const gap = first.getBoundingClientRect().top - top.getBoundingClientRect().bottom;
+                if (gap >= 0 && gap <= 24) return;
+                const scroller = first.closest('.content-wrapper') || document.scrollingElement;
+                // Instant: Wagtail scrolls smoothly, and a scroll still under way would be measured wrong by the next keystroke.
+                scroller.scrollBy({top: gap - 16, behavior: 'instant'});
+            };
         });
     </script>
 {% endblock %}

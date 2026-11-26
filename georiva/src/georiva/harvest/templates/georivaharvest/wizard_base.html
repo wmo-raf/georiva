@@ -12,9 +12,30 @@
             display: flex;
             align-items: center;
             gap: 0.4em;
-            margin-bottom: 1.5em;
+            margin-bottom: 1em;
             font-size: 0.85em;
             flex-wrap: wrap;
+        }
+
+        .hwiz-top {
+            margin-bottom: 1.25rem;
+        }
+
+        .hwiz-top > :last-child {
+            margin-bottom: 0;
+        }
+
+        /* Pinned from where Wagtail pins its own header and footer. The offset is the
+           header's height, measured by the script below; 71px is what it measures alone. */
+        @media (min-width: 50em) {
+            .hwiz-top {
+                position: sticky;
+                top: var(--hwiz-header-height, 71px);
+                z-index: 3;
+                padding: 0.75rem 0;
+                background: var(--w-color-surface-page);
+                border-bottom: 1px solid var(--w-color-border-furniture);
+            }
         }
 
         .hwiz-step {
@@ -168,21 +189,44 @@
 {% endblock %}
 
 {% block main_content %}
-    <div class="hwiz-progress">
-        {% for label in step_labels %}
-            {% with forloop.counter as n %}
-                {% if n < step %}
-                    <span class="hwiz-step hwiz-step--done">{{ n }}. {{ label }}</span>
-                {% elif n == step %}
-                    <span class="hwiz-step hwiz-step--active">{{ n }}. {{ label }}</span>
-                {% else %}
-                    <span class="hwiz-step hwiz-step--pending">{{ n }}. {{ label }}</span>
-                {% endif %}
-                {% if not forloop.last %}<span class="hwiz-sep">→</span>{% endif %}
-            {% endwith %}
-        {% endfor %}
+    {% comment %}
+        The top of every step: its pills, and whatever the step adds through
+        `wizard_top`. Pinned under Wagtail's header on a wide screen, as the
+        footer is pinned over the window's foot.
+    {% endcomment %}
+    <div class="hwiz-top">
+        <div class="hwiz-progress">
+            {% for label in step_labels %}
+                {% with forloop.counter as n %}
+                    {% if n < step %}
+                        <span class="hwiz-step hwiz-step--done">{{ n }}. {{ label }}</span>
+                    {% elif n == step %}
+                        <span class="hwiz-step hwiz-step--active">{{ n }}. {{ label }}</span>
+                    {% else %}
+                        <span class="hwiz-step hwiz-step--pending">{{ n }}. {{ label }}</span>
+                    {% endif %}
+                    {% if not forloop.last %}<span class="hwiz-sep">→</span>{% endif %}
+                {% endwith %}
+            {% endfor %}
+        </div>
+        {% block wizard_top %}{% endblock %}
     </div>
     <div class="hwiz-body">
         {% block wizard_content %}{% endblock %}
     </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const header = document.querySelector('.w-slim-header');
+            if (!header) return;
+            const measure = function () {
+                document.documentElement.style.setProperty('--hwiz-header-height', header.offsetHeight + 'px');
+            };
+            measure();
+            new ResizeObserver(measure).observe(header);
+        });
+    </script>
 {% endblock %}
