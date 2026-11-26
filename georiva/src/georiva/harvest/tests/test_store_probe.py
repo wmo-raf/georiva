@@ -246,7 +246,7 @@ class ProbeStoreTests(SimpleTestCase):
 
         self.assertTrue(probe.readable)
         self.assertEqual(probe.codecs, {"t": ("bytes",)})
-        read.assert_called_once_with("storage")
+        self.assertEqual(read.call_args.args, ("storage",))
         (call,) = storage.call_args_list
         self.assertEqual(call.args, (STORE,))
         self.assertIn("timeout", call.kwargs["opts"], "each request to the store has a limit of its own")
@@ -267,19 +267,39 @@ class ProbeStoreTests(SimpleTestCase):
         for jargon in ("chunk", "zarr", "codec", "Icechunk", "s3://"):
             self.assertNotIn(jargon, probe.problem)
         self.assertIn("chunk container", logged.output[0], "what the library said is kept for whoever reads the log")
+        self.assertIn("chunk container s3://x", probe.detail, "and for whoever reads the verdict's technical details")
 
     def test_a_store_that_does_not_answer_is_given_up_on(self):
         release = threading.Event()
         self.addCleanup(release.set)
         with (
-            mock.patch.object(upstream, "read_store_arrays", side_effect=lambda storage: release.wait(30)),
+            mock.patch.object(upstream, "read_store_arrays", side_effect=lambda storage, **_: release.wait(30)),
             mock.patch.object(icechunk, "http_storage"),
         ):
             probe = probe_store(STORE, timeout=0.2)
 
         self.assertFalse(probe.readable)
         self.assertTrue(probe.timed_out)
-        self.assertIn("did not answer", probe.problem)
+        self.assertIn("still being opened", probe.problem)
+
+    def test_a_store_slow_to_send_its_table_of_contents_says_so(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def opened_then_slow(storage, *, opened):
+            opened()
+            release.wait(30)
+
+        with (
+            mock.patch.object(upstream, "read_store_arrays", side_effect=opened_then_slow),
+            mock.patch.object(icechunk, "http_storage"),
+        ):
+            probe = probe_store(STORE, timeout=0.2)
+
+        self.assertTrue(probe.timed_out)
+        self.assertIn("still sending its table of contents", probe.problem)
+        self.assertIn("can take minutes", probe.problem)
+        self.assertIn(STORE, probe.detail)
 
     def test_the_real_client_probes_the_address_it_is_given(self):
         with mock.patch.object(upstream, "probe_store", return_value="probe") as probed:

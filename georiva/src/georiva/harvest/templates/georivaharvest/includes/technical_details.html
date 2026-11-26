@@ -1,0 +1,25 @@
+{% load i18n %}
+{% comment %}
+    A survey's technical facts (#825), folded away under its plain-words
+    reason: for whoever supports the operator, to tell a collection GeoRiva
+    truly cannot show from one it misjudged. `details` maps a key to its text.
+{% endcomment %}
+{% if details %}
+    <details class="hwiz-technical">
+        <summary>{% trans "Technical details" %}</summary>
+        <dl class="hwiz-technical__list">
+            {% if details.address %}
+                <dt>{% trans "Address opened" %}</dt>
+                <dd><code>{{ details.address }}</code></dd>
+            {% endif %}
+            {% if details.error %}
+                <dt>{% trans "What was said" %}</dt>
+                <dd><code>{{ details.error }}</code></dd>
+            {% endif %}
+            {% if details.found %}
+                <dt>{% trans "What GeoRiva found" %}</dt>
+                <dd><code>{{ details.found }}</code></dd>
+            {% endif %}
+        </dl>
+    </details>
+{% endif %}

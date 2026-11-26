@@ -37,7 +37,13 @@ Window = tuple[datetime | None, datetime | None]
 class UpstreamUnreachable(Exception):
     """The Upstream could not be read: down, refusing us, or answering nonsense.
 
-    A `source` failure (ADR 0031): the harvest that meets it stops and retries."""
+    A `source` failure (ADR 0031): the harvest that meets it stops and retries.
+    `details` are its technical facts for whoever supports the operator — the
+    address, what the library said, what was under way — by key (#825)."""
+
+    def __init__(self, *args, details: Mapping[str, str] | None = None):
+        super().__init__(*args)
+        self.details = dict(details or {})
 
 
 class UpstreamTimedOut(UpstreamUnreachable):
@@ -187,6 +193,9 @@ class StoreProbe:
     #: How each array is divided up, by its path, where its metadata says.
     chunking: dict[str, StoreChunking] = field(default_factory=dict)
     store_format: StoreFormat = StoreFormat.ICECHUNK
+    #: What its library said, word for word, where it did not open: for the
+    #: verdict's technical details, never its headline.
+    detail: str = ""
     #: Whether it was given up on for not answering in time: worth asking again, not a refusal.
     timed_out: bool = False
 
@@ -696,7 +705,17 @@ def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIME
 
 #: Seconds opening a store and reading its arrays' metadata may take in all. A
 #: cold open was measured at several seconds, and one probe in three lost its connection.
-STORE_TIMEOUT = 45
+#: Most of it is the first read of its table of contents, the snapshot: GEFS
+#: 16-day's is 24 MB, and arrived in 17 s once and 153 s another time, from
+#: the same developer machine (#825). Within the wizard's own wait for a survey
+#: (`background_survey.GIVE_UP_SECONDS`).
+STORE_TIMEOUT = 170
+
+#: How much of what a store's library said is kept for the verdict's technical details.
+DETAIL_CHARACTERS = 2000
+
+#: Seconds one request to a store may take: a large store's listing is one request.
+STORE_REQUEST_TIMEOUT = 60
 
 #: The most arrays of a store that are asked about at once.
 STORE_CONCURRENCY = 32
@@ -798,9 +817,13 @@ async def _array_metadata(store) -> dict[str, StoreArrayMetadata]:
     return found
 
 
-def read_store_arrays(storage, *, branch: str = "main") -> dict[str, StoreArrayMetadata]:
+def read_store_arrays(
+    storage, *, branch: str = "main", opened: Callable[[], None] = lambda: None
+) -> dict[str, StoreArrayMetadata]:
     """Open the repository in `storage` read-only and say what each array's
-    own metadata says of it: its codecs and how it is divided up.
+    own metadata says of it: its codecs and how it is divided up. `opened` is
+    told once the repository is open, before its table of contents — the
+    snapshot, tens of megabytes for a large store — is read.
 
     No virtual chunk access is authorised: metadata needs none, and where a
     store's chunks may be read from is an operator's to confirm (ADR 0044 §11).
@@ -810,6 +833,7 @@ def read_store_arrays(storage, *, branch: str = "main") -> dict[str, StoreArrayM
     import icechunk
 
     repository = icechunk.Repository.open(storage)
+    opened()
     return asyncio.run(_array_metadata(repository.readonly_session(branch).store))
 
 
@@ -916,12 +940,17 @@ def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as TimedOut
 
+    #: What the probe is waiting on, for a timeout to say.
+    doing = ["being opened"]
+
     def read():
-        each = max(1, int(min(timeout, 20)))
+        each = max(1, int(min(timeout, STORE_REQUEST_TIMEOUT)))
         # Refused before anything is opened, as a plain `http` address is: no other reader may try it either.
         storage = repository_storage(href, timeout=f"{each}s")
         try:
-            return StoreFormat.ICECHUNK, read_store_arrays(storage)
+            return StoreFormat.ICECHUNK, read_store_arrays(
+                storage, opened=lambda: doing.__setitem__(0, "sending its table of contents")
+            )
         except Exception as exc:
             plain = _plain_zarr_at(href, timeout=each)
             if plain is None:
@@ -940,10 +969,15 @@ def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
             store_format=kind,
         )
     except TimedOut:
-        return StoreProbe(readable=False, problem=f"it did not answer within {int(timeout)} seconds", timed_out=True)
+        problem = f"it was still {doing[0]} after {int(timeout)} seconds"
+        if doing[0] != "being opened":
+            problem += ". A large store's table of contents can take minutes to arrive over a slow connection"
+        detail = f"Gave up after {int(timeout)} s at {href}, while it was {doing[0]}."
+        return StoreProbe(readable=False, problem=problem, timed_out=True, detail=detail)
     except Exception as exc:  # whatever the store or its library raises is an answer, never a crash
         logger.warning("Upstream store at %s did not open: %s", href, exc)
-        return StoreProbe(readable=False, problem="it did not open for a reader with no account")
+        said = f"{type(exc).__name__}: {exc}"[:DETAIL_CHARACTERS]
+        return StoreProbe(readable=False, problem="it did not open for a reader with no account", detail=said)
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 

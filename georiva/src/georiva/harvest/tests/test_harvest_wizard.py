@@ -43,9 +43,12 @@ def step(n: int) -> str:
 
 
 def wizard_copy(page) -> str:
-    """The wizard's own part of a page, without its CSRF tokens: 64 random
-    letters and digits, which sooner or later spell any short word ("S3")."""
+    """The wizard's own words on a page: without its CSRF tokens — 64 random
+    letters and digits, which sooner or later spell any short word ("S3") —
+    and without its technical details, which quote addresses and libraries
+    word for word for whoever supports the operator (#825)."""
     html = page.content.decode()
+    html = re.sub(r'<details class="hwiz-technical">.*?</details>', "", html, flags=re.S)
     return re.sub(r"\b[A-Za-z0-9]{64}\b", "", html[html.index("hwiz-progress") :])
 
 
@@ -565,6 +568,21 @@ class WizardDoesNotWaitOnTheRequestTests(WizardMixin, TestCase):
         self.assertContains(page, "Try again")
         self.assertFalse(HarvestFeed.objects.exists())
 
+    def test_a_store_that_does_not_answer_in_time_shows_what_was_under_way_in_its_technical_details(self):
+        self.upstream = FakeUpstream("noaa-gfs-forecast-virtual", title="NOAA GFS forecast")
+        self.upstream.is_api = False
+        self.upstream.become_store(STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))})
+        self.upstream.store_times_out = True
+        self.upstream.store_detail = "Gave up after 170 s, while it was sending its table of contents."
+        self.give_address(STATIC)
+        self.pick_collection("noaa-gfs-forecast-virtual")
+
+        page = self.client.get(step(3))
+
+        self.assertContains(page, "Technical details")
+        self.assertContains(page, STORE)
+        self.assertContains(page, "while it was sending its table of contents")
+
     def test_a_catalog_that_does_not_answer_in_time_at_step_one_offers_to_try_again(self):
         self.upstream.times_out = "upstream catalog did not answer within 30 seconds"
 
@@ -832,6 +850,17 @@ class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
         self.assertContains(page, "packed in a way GeoRiva cannot unpack: “acme_wavelet”")
         self.assert_no_way_on(page)
         self.assert_nothing_was_made()
+
+    def test_a_refused_store_shows_what_its_library_said_under_technical_details(self):
+        self.store()
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+        self.upstream.store_detail = "RepositoryNotFoundError: the repository doesn&#x27;t exist"
+
+        page = self.reach_verdict()
+
+        self.assertContains(page, "<summary>Technical details</summary>", html=False)
+        self.assertContains(page, "RepositoryNotFoundError")
+        self.assertContains(page, "What GeoRiva found")
 
     def test_a_store_that_cannot_be_reached_is_refused_as_any_upstream_is(self):
         self.store()

@@ -30,6 +30,7 @@ import re
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -296,6 +297,8 @@ class _Wait:
     #: Why it came to nothing, for the operator; empty unless it did.
     error: str = ""
     waited: int = 0
+    #: Its technical facts, by key, for whoever supports the operator (#825); empty unless it came to nothing.
+    details: dict = dataclass_field(default_factory=dict)
 
     @property
     def running(self) -> bool:
@@ -314,6 +317,7 @@ def _wait_for(token: str, since: float) -> _Wait:
         return _Wait(waiting_on=answer.get("waiting_on", ""), waited=int(waited))
     if state == background_survey.FAILED:
         error = _too_slow(answer["why"]) if answer.get("timed_out") else _unreadable(answer["why"])
+        return _Wait(error=error, waited=int(waited), details=answer.get("details") or {})
     elif state == background_survey.CHECKING:
         error = _too_slow(_("GeoRiva stopped waiting after %(seconds)d seconds") % {"seconds": int(waited)})
     else:

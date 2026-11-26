@@ -234,6 +234,27 @@
             display: block;
             color: var(--w-color-warning-100);
         }
+
+        /* A survey's technical facts, folded under its plain-words reason (#825). */
+        .hwiz-technical {
+            max-width: 46rem;
+            margin-top: 1em;
+        }
+
+        .hwiz-technical summary {
+            cursor: pointer;
+            color: var(--w-color-text-label);
+        }
+
+        .hwiz-technical__list dt {
+            margin-top: 0.75em;
+            font-weight: 600;
+        }
+
+        .hwiz-technical__list dd {
+            margin: 0.25em 0 0;
+            overflow-wrap: anywhere;
+        }
     </style>
 {% endblock %}
 

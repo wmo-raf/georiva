@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from django.test import SimpleTestCase
 
+from georiva.harvest import background_survey
 from georiva.harvest.survey import (
     Access,
     Format,
@@ -24,6 +25,7 @@ from georiva.harvest.survey import (
 )
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import (
+    STORE_TIMEOUT,
     AssetProbe,
     CubeArray,
     CubeDimension,
@@ -401,8 +403,25 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         with self.assertRaises(UpstreamTimedOut) as raised:
             self.survey()
 
-        self.assertEqual(str(raised.exception), "the provider's data store did not answer within 45 seconds")
+        self.assertEqual(
+            str(raised.exception), f"the provider's data store did not answer within {STORE_TIMEOUT} seconds"
+        )
         self.assert_plain(str(raised.exception))
+
+    def test_a_store_that_does_not_answer_in_time_carries_what_was_under_way_for_whoever_supports_the_operator(self):
+        self.map_shaped()
+        self.upstream.store_times_out = True
+        self.upstream.store_detail = f"Gave up after 170 s at {STORE}, while it was sending its table of contents."
+
+        with self.assertRaises(UpstreamTimedOut) as raised:
+            self.survey()
+
+        self.assertEqual(raised.exception.details["address"], STORE)
+        self.assertIn("sending its table of contents", raised.exception.details["error"])
+
+    def test_a_store_is_given_up_on_before_the_wizard_gives_up_waiting_for_the_survey(self):
+        # The catalog and the collection are read first, within the same wait (#825).
+        self.assertLess(STORE_TIMEOUT + 30, background_survey.GIVE_UP_SECONDS)
 
     def test_it_says_what_it_is_waiting_on_before_it_waits(self):
         self.map_shaped(chunk_locations=("s3://noaa-gfs-bdp-pds/",))
@@ -900,6 +919,41 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertIn("it did not open for a reader with no account", found.reason)
         self.assertNotIn("divided up", found.reason, "the collection is not blamed for what STAC does not ask")
 
+    def test_a_store_that_does_not_open_carries_what_its_library_said_beside_the_plain_reason(self):
+        self.map_shaped()
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+        self.upstream.store_detail = "RepositoryNotFoundError: the repository doesn't exist"
+
+        found = self.survey()
+
+        self.assertEqual(found.details["address"], STORE)
+        self.assertEqual(found.details["error"], "RepositoryNotFoundError: the repository doesn't exist")
+        self.assertNotIn("repository", found.reason, "the headline stays in an operator's words")
+
+    def test_a_refused_store_says_what_was_found_on_each_axis(self):
+        self.series_shaped()
+
+        found = self.survey()
+
+        self.assertEqual(
+            found.details["found"], "placement: per-collection · shape: series · format: icechunk · access: anonymous"
+        )
+
+    def test_fields_on_cells_that_are_no_grid_of_rows_and_columns_are_refused_for_that(self):
+        # DWD ICON-EU on its own icosahedral mesh: one `cell` dimension, no latitude or longitude one.
+        self.upstream.become_store(
+            STORE,
+            {"init_time": None, "lead_time": 93, "cell": 768608},
+            {"cloud_cover_high": (("init_time", "lead_time", "cell"), (1, 1, 768608))},
+        )
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.UNGRIDDED_STORE)
+        self.assertIn("not on a grid of rows and columns", found.reason)
+        self.assertNotIn("the collection does not", found.reason, "nothing the collection left out")
+        self.assert_plain(found.reason)
+
     def test_a_store_at_a_private_address_is_refused_and_never_opened(self):
         self.upstream.addresses[STORE_HOST] = ["10.0.0.7"]
         self.map_shaped()
@@ -935,10 +989,6 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
                 {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)), "wind_u_10m": (RUN_STEP_GRID, (1, 721, 1440))},
             ),
             "lists no fields on its grid": (FORECAST, dict(BESIDE)),
-            "a grid with a width and a height": (
-                {"init_time": None, "lead_time": 209, "station": 500},
-                {"temperature_2m": (("init_time", "lead_time", "station"), (1, 1, 500))},
-            ),
         }
         for missing, (dimensions, arrays) in cases.items():
             with self.subTest(missing=missing):

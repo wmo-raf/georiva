@@ -33,7 +33,7 @@ KEEP_SECONDS = 60 * 60
 
 #: How long the wizard waits for a survey before it stops waiting: past the
 #: slowest one measured, and the timeouts of every read it makes.
-GIVE_UP_SECONDS = 180
+GIVE_UP_SECONDS = 300
 
 CHECKING = "checking"
 FOUND = "found"
@@ -83,9 +83,9 @@ def run(token: str, upstream_url: str, collection_id: str) -> None:
     try:
         found = survey_collection(client, upstream_url, collection_id, progress=progress)
     except UpstreamTimedOut as late:
-        _put(token, state=FAILED, why=str(late), timed_out=True)
+        _put(token, state=FAILED, why=str(late), timed_out=True, details=late.details)
     except UpstreamUnreachable as why:
-        _put(token, state=FAILED, why=str(why), timed_out=False)
+        _put(token, state=FAILED, why=str(why), timed_out=False, details=why.details)
     except Exception:  # an answer the survey could not make sense of is still an answer for the operator
         logger.exception("Survey of %s at %s failed", collection_id, upstream_url)
         _put(token, state=FAILED, why=_("it answered in a way GeoRiva could not make sense of"), timed_out=False)
@@ -104,6 +104,7 @@ def as_session(found) -> dict:
         "harvestable": found.harvestable,
         "store": store,
         "reason": found.reason,
+        "details": dict(found.details),
         "items_sampled": found.items_sampled,
         "assets": [asdict(asset) for asset in found.assets],
         "locations": [{**asdict(location), "proposed": location.proposed} for location in found.locations],

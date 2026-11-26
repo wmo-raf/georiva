@@ -127,6 +127,8 @@ class FakeUpstream:
         self.store_formats: dict[str, StoreFormat] = {}
         #: A message for a store that cannot be opened.
         self.store_unreadable: str | None = None
+        #: What the store's library says, word for word, when it does not open or answer.
+        self.store_detail: str = ""
         #: True for a store that does not answer in the time it is given.
         self.store_times_out = False
         #: The stores opened, in order.
@@ -472,9 +474,9 @@ class FakeUpstream:
         self.stores_opened.append(href)
         if self.store_times_out:
             problem = f"it did not answer within {STORE_TIMEOUT} seconds"
-            return StoreProbe(readable=False, problem=problem, timed_out=True)
+            return StoreProbe(readable=False, problem=problem, timed_out=True, detail=self.store_detail)
         if self.store_unreadable:
-            return StoreProbe(readable=False, problem=self.store_unreadable)
+            return StoreProbe(readable=False, problem=self.store_unreadable, detail=self.store_detail)
         if href not in self.stores:
             return StoreProbe(readable=False, problem="there is no store at that address")
         return StoreProbe(
