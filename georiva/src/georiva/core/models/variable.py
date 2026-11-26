@@ -76,7 +76,8 @@ class VectorComponents:
     """What a vector Variable is computed from: the names of its eastward (`u`)
     and northward (`v`) parts in its source, and which of the two quantities it
     is (`transform`, a ``Variable.TransformType``). In a store collection the
-    names are array paths in the store (ADR 0048)."""
+    names are field keys: an array's path in the store, with its Selection
+    after it where it has one (ADR 0048, #830)."""
 
     u: str
     v: str
@@ -84,7 +85,29 @@ class VectorComponents:
 
     @property
     def arrays(self) -> tuple[str, str]:
+        """Its two parts, by name: in a store collection, their field keys."""
         return (self.u, self.v)
+
+    @property
+    def paths(self) -> tuple[str, str]:
+        """The paths in the store of the arrays its two parts are read from."""
+        from georiva.core.selection import split_field_key
+
+        return tuple(split_field_key(name)[0] for name in self.arrays)
+
+    @property
+    def selection(self):
+        """The Selection both its parts are read at: u's, which a clean vector shares with v (#830)."""
+        from georiva.core.selection import split_field_key
+
+        return split_field_key(self.u)[1]
+
+    @property
+    def one_selection(self) -> bool:
+        """Whether its u and v are read at the same Selection, as one vector's parts are."""
+        from georiva.core.selection import split_field_key
+
+        return split_field_key(self.u)[1] == split_field_key(self.v)[1]
 
 
 class Variable(TimeStampedModel, ClusterableModel, Orderable):
@@ -551,6 +574,14 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                     "then name it here by its path in the store."
                 )
                 % {"names": ", ".join(unmapped)}
+            }
+        if not vector.one_selection:
+            from georiva.core.selection import described, split_field_key
+
+            said = [described(split_field_key(name)[1]) or _("the whole array") for name in components]
+            return {
+                "sources": _("Its two parts are read at different values (%(u)s; %(v)s), so they are not one vector's.")
+                % {"u": said[0], "v": said[1]}
             }
         u, v = (mapping[name] for name in components)
         if u.source_unit_id != v.source_unit_id:

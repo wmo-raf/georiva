@@ -6,7 +6,7 @@
     and for a kind of image (`row.key`; shown or not by the box in its header).
     The page renders it, and so does the read that follows a tick.
 {% endcomment %}
-<div class="gr-map-settings-card" data-settings="{{ row.index }}">
+<div class="gr-map-settings-card" data-settings="{{ row.index }}" data-order="{{ row.order|default:row.index|unlocalize }}">
     <div class="gr-map-settings-card__head">
         {% if row.key %}
             <input type="checkbox" name="use_{{ row.index }}" id="use_{{ row.index }}" class="gr-map-settings-card__use"
@@ -15,7 +15,8 @@
         {% endif %}
         <span class="gr-map-settings-card__title">{{ row.label }}</span>
         {% include "georivaharvest/includes/map_badges.html" %}
-        {% if row.path %}
+        {# A field read at one value of an extra axis is left out by unticking that value above (#830). #}
+        {% if row.path and not row.selection %}
             <button type="button" class="button button-small button-secondary gr-map-settings-card__remove"
                     data-untick="{{ row.index }}" hidden>{% trans "Remove" %}</button>
         {% endif %}

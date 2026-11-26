@@ -11,6 +11,7 @@ disk instead. Nothing reaches a network.
 """
 
 import os
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest import mock
 
@@ -354,3 +355,79 @@ class VectorStoreAssetTests(TestCase):
                 s.field(self.asset("wind-u-10m"))
 
         self.assertEqual(opening.call_count, 1)
+
+
+#: The statistics a forecast of them keeps, one map of each per step (#830).
+STATISTICS = ["mean", "p10", "p90"]
+
+
+def by_statistic(run: int, step: int, at: dict) -> np.ndarray:
+    """Each statistic's field its own: 1000 apart."""
+    return expected(run, step, edition=at["statistic"])
+
+
+class StoreSelectionTests(TestCase):
+    """An array with an extra axis is read at the value its Store asset names of it (#830)."""
+
+    def setUp(self):
+        super().setUp()
+        # The p90 of run 1 has not arrived at its last step.
+        held = lambda run, step, at: not (run == 1 and step == 2 and at["statistic"] == 2)  # noqa: E731
+        self.store = LocalStore(
+            self,
+            href=STORE,
+            runs=RUNS,
+            leads=LEADS,
+            axes={"statistic": STATISTICS},
+            arrays=[
+                StoreArray(ARRAY, values=by_statistic, held=held, extra=("statistic",)),
+                StoreArray(U, values=lambda r, s, at: eastward(r, s) * (at["statistic"] + 1), extra=("statistic",)),
+                StoreArray(V, values=lambda r, s, at: northward(r, s) * (at["statistic"] + 1), extra=("statistic",)),
+            ],
+        )
+
+    def at(self, value, run=1, step=1):
+        return replace(self.store.at(ARRAY, run, step), selection=(("statistic", value),))
+
+    def test_each_value_reads_its_own_field(self):
+        with values.session() as s:
+            np.testing.assert_array_equal(s.field(self.at("p90")).data, expected(1, 1, edition=2))
+            np.testing.assert_array_equal(s.field(self.at("mean")).data, expected(1, 1, edition=0))
+
+    def test_a_value_the_store_does_not_have_is_a_misdescribed_store_not_a_step_not_held(self):
+        with values.session() as s, self.assertRaisesRegex(values.StoreUnreadable, "p95") as refused:
+            s.field(self.at("p95"))
+        self.assertNotIsInstance(refused.exception, values.StepNotHeld)
+
+    def test_an_extra_axis_read_at_no_value_is_refused(self):
+        with values.session() as s, self.assertRaisesRegex(values.StoreUnreadable, "statistic"):
+            s.field(self.store.at(ARRAY, 1, 1))
+
+    def test_a_value_not_held_at_a_step_is_that_step_not_held(self):
+        with values.session() as s, self.assertRaises(values.StepNotHeld):
+            s.field(self.at("p90", step=2))
+
+    def test_harvested_rows_are_read_at_their_selection_and_a_vector_at_its_parts(self):
+        organisation = make_organisation()
+        self.store.harvest(
+            organisation,
+            variables={
+                f'{ARRAY}{{"statistic":"p90"}}': StoreVariable("t2m-p90", selection={"statistic": "p90"}),
+                f'{U}{{"statistic":"p10"}}': StoreVariable("u-p10", source_unit="m/s", selection={"statistic": "p10"}),
+                f'{V}{{"statistic":"p10"}}': StoreVariable("v-p10", source_unit="m/s", selection={"statistic": "p10"}),
+            },
+            vectors=[
+                StoreVector(
+                    "speed-p10",
+                    f'{U}{{"statistic":"p10"}}',
+                    f'{V}{{"statistic":"p10"}}',
+                    Variable.TransformType.VECTOR_MAGNITUDE,
+                    source_unit="m/s",
+                )
+            ],
+        )
+        rows = Asset.objects.select_related("item", "variable").filter(item__reference_time=RUNS[0], item__time=RUNS[0])
+
+        np.testing.assert_array_equal(values.field(rows.get(variable__slug="t2m-p90")).data, expected(0, 0, edition=2))
+        # u = 3 × 2, v = 4 × 2 at p10: twice a 3-4-5 triangle.
+        np.testing.assert_allclose(values.field(rows.get(variable__slug="speed-p10")).data, np.full((4, 8), 10.0))

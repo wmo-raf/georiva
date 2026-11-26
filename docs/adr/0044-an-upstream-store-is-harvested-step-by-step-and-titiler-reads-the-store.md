@@ -11,6 +11,11 @@ Revises ADR 0043 §9 for stores only.
 Amended after a second real store was read (ECMWF AIFS Single, virtual): §11 now says which kinds of place a store's
 data may be pinned in, and what happens when an operator confirms some and not others. Nothing is reversed.
 
+Amended when stores of ensembles and statistics were surveyed (dynamical.org's ECMWF IFS ENS and Google WeatherNext 3,
+wmo-raf/georiva#830): §8 now offers an array with extra axes, read at one value of each — its Selection — where the
+collection lists their values and the store keeps one map per value. Arrays with levels whose values are not listed
+stay out, refused by name. Nothing is reversed.
+
 Amended when the first store keeping its data on a web host was surveyed (dynamical.org's Google WeatherNext,
 wmo-raf/georiva#828): §11's closed list of kinds of place gains a folder of an `https` host, judged as a COG's file
 host is and checked for redirects, which its reader would follow. Nothing is reversed.
@@ -163,6 +168,34 @@ the store, and Titiler draws maps by reading the store itself.**
    Variable mapping's key is the array's full path in the store, so pinning a level later adds to it rather than
    changing it.
 
+   *Amended by wmo-raf/georiva#830:* **an array with extra axes is mapped at a Selection.** A Map-shaped store can
+   hold one map per step for each ensemble member, statistic or level. Where it keeps one chunk per value of each
+   such axis, the map at one value of each is still one chunk, and Streamable for maps (ADR 0052 §7). So the survey
+   offers such an array with each extra axis and its values, and the operator picks, per Variable, one value of each:
+   its **Selection**, kept on the mapping row beside the array's path. One array may be mapped at several Selections,
+   each its own Variable. Every reader — the harvest, the sample read of §12, core's value reader and Titiler —
+   reads the array at the selected value of each axis; a step is Held for a Variable only where its own map is.
+
+   - **The value is kept, not its index**, and each reader finds it among the store's own coordinate when it opens
+     the store. An Upstream inserting a member or level does not shift a Variable onto another's map; the
+     coordinate costs one small read per opening. A value that is gone is a misdescribed store: a harvest stops
+     naming it and a tile is an error, never a blank map.
+   - **An axis is offered only where its values can be listed**: the collection's `cube:dimensions` gives them
+     (`values`), or an extent of whole numbers it divides evenly (`step`, or `size`). Any other is refused as before,
+     by what it is. dynamical.org's `pressure_level` (10 to 1000 over 14 uneven levels) is such a one, until the
+     survey reads a store's coordinates, which it does not (ADR 0052 §1: metadata only). An axis the store keeps more
+     than one value of in a chunk is refused too: reading one value would read every one.
+   - **A Vector Variable's u and v share one Selection** (ADR 0048): its sources name each part by its array's path
+     with the Selection after it, and one over parts at two Selections is refused, and not indexed.
+   - **The default name says the Selection**: "2 metre temperature (statistic mean)", "… (ensemble member 0)". The
+     store does not say which member is a control, or what a statistic is called in words; the operator renames.
+   - **A Fixed field is not special-cased.** A time-invariant field the store keeps for one member only is Held for
+     that member's Selection alone.
+
+   Out of this amendment: reducing an axis (an ensemble mean, spread or probabilities computed from members), which
+   reads every member's chunk and is a pull (ADR 0052 §8); and letting a map's user switch the Selection at view
+   time — one Variable per Selection instead.
+
 9. **Titiler opens the store.** The tile server gains a store reader beside its COG reader, and the decoder the store
    names. Django publishes what it needs — store address, array path, run and step, and the feed's Pinned
    locations — the way it publishes a Remote asset's href. Values and units are whatever the store's own decode
@@ -250,7 +283,9 @@ the store, and Titiler draws maps by reading the store itself.**
 ## Out of scope
 
 - Series-shaped stores, and so time series read from a store and a Published collection with no map.
-- Arrays with a level, then ensemble members and projected grids.
+- Arrays with a level, then ensemble members and projected grids. *Since #830:* an array with extra axes whose values
+  are listed is read at one value of each (§8); reducing over an axis, and levels whose values are not listed, are
+  still out.
 - Time series and zonal statistics over store assets: a time series request says so, and zonal backfill skips them.
 - A cache shared across tile server workers. Measured, it would save the 0.5 s a worker takes to read a new field
   (0.8 s at the median when read directly), at most once

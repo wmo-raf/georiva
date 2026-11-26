@@ -41,6 +41,16 @@ store and its u and v, and the field drawn is their magnitude or the bearing
 the wind blows from, computed from the two fields read at the same step through
 the same open store. Both parts and the result are kept like any field.
 
+**It reads an array with extra axes at its Selection** (wmo-raf/georiva#830).
+A store may keep more than one map per step — one per ensemble member,
+statistic or pressure level. An entry's ``selection`` names one value of each
+such axis; each is found among the store's own coordinates by value and the map
+read at that index, both u and v of a vector at the same one. A value the store
+does not have, an axis the array does not have, or one not kept one map per
+value is a misdescribed store — an error, never a blank tile. A selected map
+missing at a step is that step not held. An axis not selected is refused as
+before, and an entry with no selection reads exactly as it always has.
+
 **It refreshes on a missing step, and never draws a blank one** (ADR 0044 §10).
 The store is kept open at the snapshot it was opened on, and an Upstream store
 commits several times a minute while a run arrives: a row can name a step that
@@ -130,6 +140,9 @@ class StoreSlice:
 
     A vector field (ADR 0048) names no array: ``vector`` names the two it is
     computed from at the same step.
+
+    ``selection`` is the Selection (#830): one value of each of the array's
+    extra axes, as (dimension, value) pairs sorted by dimension; empty for none.
     """
 
     store: str
@@ -139,6 +152,7 @@ class StoreSlice:
     reftime: datetime | None = None
     allow_http: bool = False
     vector: Vector | None = None
+    selection: tuple[tuple[str, str | int | float], ...] = ()
 
     @classmethod
     def published(cls, entry: dict, time: datetime, reftime: datetime | None) -> StoreSlice:
@@ -154,6 +168,7 @@ class StoreSlice:
             time=time,
             reftime=reftime,
             allow_http=allow_http,
+            selection=published_selection(entry),
         )
 
     def components(self) -> tuple[StoreSlice, StoreSlice]:
@@ -164,7 +179,8 @@ class StoreSlice:
         at = self.time.isoformat() if self.reftime is None else f"{self.reftime.isoformat()}+{self.time.isoformat()}"
         vector = self.vector
         arrays = f"{vector.transform}({vector.u},{vector.v})" if vector else self.array
-        return f"{self.store}#{arrays}@{at}"
+        selected = "".join(f"[{name}={value}]" for name, value in self.selection)
+        return f"{self.store}#{arrays}{selected}@{at}"
 
 
 def is_store_entry(value: str) -> bool:
@@ -187,7 +203,8 @@ def published_store(entry) -> tuple[str, tuple[str, ...], tuple[tuple[str, str],
     allowed, as a published entry names them, the pins as every request spells
     them. The arrays are one, or a vector's u and v. Raises
     :class:`StoreMisdescribed` for an entry that is not Django's shape, or for
-    a plain ``http`` store its feed does not allow. What a tile reads and what
+    a plain ``http`` store its feed does not allow, or a selection that is not
+    Django's shape (:func:`published_selection`). What a tile reads and what
     the warm-up opens are both named here, so a warmed store is the one a tile finds."""
     if not isinstance(entry, dict):
         entry = {}
@@ -195,6 +212,7 @@ def published_store(entry) -> tuple[str, tuple[str, ...], tuple[tuple[str, str],
     arrays = _published_arrays(entry)
     if not isinstance(store, str) or arrays is None or not isinstance(places, dict):
         raise StoreMisdescribed("The published description of this upstream store is incomplete.")
+    published_selection(entry)
     if not store.startswith(("https://", "http://")):
         raise StoreMisdescribed("The upstream store's address is not an http(s) URL.")
     # Only Django's own `true` allows it: anything else, or nothing, does not.
@@ -202,6 +220,22 @@ def published_store(entry) -> tuple[str, tuple[str, ...], tuple[tuple[str, str],
     _may_open(store, allow_http)
     pins = tuple(sorted((str(prefix), str(region or "")) for prefix, region in places.items()))
     return store, arrays, pins, allow_http
+
+
+def published_selection(entry: dict) -> tuple[tuple[str, str | int | float], ...]:
+    """The Selection an entry names (#830), as (dimension, value) pairs sorted by
+    dimension; empty where it names none. Raises :class:`StoreMisdescribed` for
+    one that is not a JSON object naming each dimension's one value, a string
+    or a number."""
+    selection = entry.get("selection")
+    if selection is None:
+        return ()
+    if not isinstance(selection, dict) or not all(
+        isinstance(name, str) and name and isinstance(value, str | int | float) and not isinstance(value, bool)
+        for name, value in selection.items()
+    ):
+        raise StoreMisdescribed("The published description of this upstream store is incomplete.")
+    return tuple(sorted(selection.items()))
 
 
 def _published_arrays(entry: dict) -> tuple[str, ...] | None:
@@ -456,28 +490,51 @@ class OpenStore:
             return values
         raise StoreMisdescribed(f"The upstream store has no “{name}” to place its maps by.")
 
-    def _measured(self, path: str):
-        """The array at ``path``, which part each of its dimensions is, and the
-        coordinates each is measured on."""
+    def _dimensions(self, path: str):
+        """The array at ``path``, its dimensions' names, and the coordinates each is measured on."""
         array = self._array(path)
         names = getattr(array.metadata, "dimension_names", None)
-        if array.ndim not in (3, 4) or not names or len(names) != array.ndim:
+        if not names or len(names) != array.ndim or None in names:
             raise StoreMisdescribed("This upstream array is not one map per time step.")
-
-        measured = [self._coordinate(path, str(name)) for name in names]
-        return array, _axes([str(name) for name in names], measured), measured
+        names = [str(name) for name in names]
+        return array, names, [self._coordinate(path, name) for name in names]
 
     def warm(self, path: str) -> None:
         """Open the array at ``path`` and read its coordinates, decoding no field:
-        all a first tile of it pays before its field (#684)."""
-        self._measured(path)
+        all a first tile of it pays before its field (#684). The coordinates of
+        any extra axes are read too, whatever a Selection will make of them."""
+        self._dimensions(path)
 
-    def field(self, path: str, time: datetime, reftime: datetime | None) -> Field:
-        array, axes, measured = self._measured(path)
-        at = _where(dict(zip(axes, measured, strict=True)), time, reftime)
+    def field(
+        self,
+        path: str,
+        time: datetime,
+        reftime: datetime | None,
+        selection: tuple[tuple[str, str | int | float], ...] = (),
+    ) -> Field:
+        array, names, measured = self._dimensions(path)
+        chosen = dict(selection)
+        for name, value in selection:
+            if name not in names:
+                raise StoreMisdescribed(
+                    f"This upstream array has no “{name}” to read at “{value}”: it is divided up by "
+                    + ", ".join(f"“{other}”" for other in names)
+                    + "."
+                )
+        axes = _axes(names, measured, set(chosen))
+        at: dict = {
+            part: _selected_index(values, part.name, chosen[part.name])
+            for part, values in zip(axes, measured, strict=True)
+            if isinstance(part, Selected)
+        }
         for part in at:
             if array.chunks[axes.index(part)] != 1:
+                raise StoreMisdescribed(f"This upstream store does not keep one map per “{part.name}” value.")
+        when = _where(dict(zip(axes, measured, strict=True)), time, reftime)
+        for part in when:
+            if array.chunks[axes.index(part)] != 1:
                 raise StoreMisdescribed("This upstream store does not keep one map per time step.")
+        at.update(when)
 
         cell = tuple(at.get(part, 0) for part in axes)
         if not self._held(f"{path}/{array.metadata.encode_chunk_key(cell)}"):
@@ -509,13 +566,23 @@ def _where(coordinates: dict[str, np.ndarray], time: datetime, reftime: datetime
     return {"run": run, "step": step}
 
 
-def _axes(names: list[str], measured: list[np.ndarray]) -> list[str]:
+@dataclass(frozen=True)
+class Selected:
+    """The part a dimension a Selection names is (#830): read at one value of it."""
+
+    name: str
+
+
+def _axes(names: list[str], measured: list[np.ndarray], selected: set[str] = frozenset()) -> list[str | Selected]:
     """Which part each dimension is — "run", "step", "time", "y", "x" — from
-    the coordinates it is measured on and, for the grid, its name."""
+    the coordinates it is measured on and, for the grid, its name; or
+    :class:`Selected`, for a dimension in ``selected``, read at one value."""
     axes = []
     for name, values in zip(names, measured, strict=True):
         lowered = name.lower()
-        if values.dtype.kind == "M":
+        if name in selected:
+            axes.append(Selected(name))
+        elif values.dtype.kind == "M":
             axes.append("time")
         elif values.dtype.kind == "m":
             axes.append("step")
@@ -527,9 +594,37 @@ def _axes(names: list[str], measured: list[np.ndarray]) -> list[str]:
             raise StoreMisdescribed(f"This upstream array is divided up in a way maps are not drawn from (“{name}”).")
     if "step" in axes and axes.count("time") == 1:
         axes[axes.index("time")] = "run"
-    if sorted(axes) not in (sorted(["run", "step", "y", "x"]), sorted(["time", "y", "x"])):
+    if sorted(part for part in axes if isinstance(part, str)) not in (
+        sorted(["run", "step", "y", "x"]),
+        sorted(["time", "y", "x"]),
+    ):
         raise StoreMisdescribed("This upstream array is not one map per time step on a latitude/longitude grid.")
     return axes
+
+
+def _selected_index(values: np.ndarray, name: str, wanted: str | int | float) -> int:
+    """The index of ``wanted`` among the values of the dimension ``name``,
+    the first where it is more than once (#830).
+
+    A number matches a numeric coordinate by value (850 is 850.0); a string
+    matches a coordinate of strings, bytes read as UTF-8. Nothing else matches,
+    and a value not found is a misdescribed store: the store a Selection was
+    made against no longer has it.
+    """
+    kind = values.dtype.kind
+    found = []
+    if isinstance(wanted, str) and kind in "USOT":
+        texts = [_text(value) for value in values.tolist()]
+        found = [index for index, text in enumerate(texts) if text == wanted]
+    elif isinstance(wanted, int | float) and not isinstance(wanted, bool) and kind in "iuf":
+        found = np.flatnonzero(values == wanted).tolist()
+    if not found:
+        raise StoreMisdescribed(f"The upstream store has no “{wanted}” among the values of “{name}”.")
+    return int(found[0])
+
+
+def _text(value) -> str:
+    return value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
 
 
 def _index(values: np.ndarray, wanted) -> int:
@@ -796,7 +891,7 @@ def _decode_together(parts: tuple[StoreSlice, ...], missing: StoreSlice) -> tupl
     key = _store_key(missing)
 
     def read_all(opened: OpenStore) -> tuple[Field, ...]:
-        return tuple(opened.field(part.array, part.time, part.reftime) for part in parts)
+        return tuple(opened.field(part.array, part.time, part.reftime, part.selection) for part in parts)
 
     def read() -> tuple[Field, ...]:
         with _opened.lock:
@@ -820,7 +915,7 @@ def _decode_together(parts: tuple[StoreSlice, ...], missing: StoreSlice) -> tupl
 class FieldCache:
     """Decoded fields, at most ``capacity`` bytes of them, least recently used out first.
 
-    Keyed by the whole :class:`StoreSlice` — store, array, run and step, and the
+    Keyed by the whole :class:`StoreSlice` — store, array, Selection, run and step, and the
     pins too, so a field read under one feed's pins is never handed to a request
     naming others. A field is kept read-only, since every request shares it. One
     larger than the whole cache is not kept, rather than emptying it for nothing.

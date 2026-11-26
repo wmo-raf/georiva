@@ -114,6 +114,35 @@
             display: none;
         }
 
+        .gr-map-card__choices {
+            margin: -0.25rem 0 0.25rem 2.4rem;
+        }
+
+        .gr-map-card__choices[hidden] {
+            display: none;
+        }
+
+        .gr-map-card__values {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.2rem 0.6rem;
+            font-size: 0.875em;
+            max-height: 7.5rem;
+            overflow-y: auto;
+        }
+
+        .gr-map-card__axis {
+            font-weight: 600;
+            color: var(--w-color-text-label);
+        }
+
+        .gr-map-card__value {
+            display: inline-flex;
+            gap: 0.25rem;
+            align-items: center;
+            white-space: nowrap;
+        }
+
         .hwiz-reading {
             font-weight: 600;
         }
@@ -189,6 +218,25 @@
                                 <span class="gr-map-card__status" data-status role="status" hidden></span>
                             </span>
                         </label>
+                        {# An extra axis: each value ticked is a map of its own (#830). #}
+                        {% if row.choices %}
+                            <div class="gr-map-card__choices" data-values="{{ row.index }}" {% if not row.use %}hidden{% endif %}>
+                                {% for axis in row.choices %}
+                                    <div class="gr-map-card__values" role="group" aria-label="{{ axis.label }}">
+                                        <span class="gr-map-card__axis">{{ axis.label|capfirst }}:</span>
+                                        {% for value in axis.values %}
+                                            <label class="gr-map-card__value" for="pick_{{ row.index }}_{{ axis.position }}_{{ value.position }}">
+                                                <input type="checkbox" class="gr-map-card__pick" data-array="{{ row.index }}"
+                                                       name="pick_{{ row.index }}_{{ axis.position }}_{{ value.position }}"
+                                                       id="pick_{{ row.index }}_{{ axis.position }}_{{ value.position }}"
+                                                       {% if value.picked %}checked{% endif %}>
+                                                {{ value.shown }}
+                                            </label>
+                                        {% endfor %}
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
                     {% endfor %}
                 </div>
                 {% if unoffered %}
@@ -264,12 +312,32 @@
             const readingOne = '{{ _("Reading one map…")|escapejs }}';
             const failed = '{{ _("It could not be read just now: untick it and tick it again to try again.")|escapejs }}';
 
-            const box = function (index) { return document.getElementById('use_' + index); };
-            const pick = function (index) { return form.querySelector('[data-pick="' + index + '"]'); };
+            // A field is its array's index, or — read at one value of an extra axis — `array-combination` (#830).
+            const arrayOf = function (index) { return String(index).split('-')[0]; };
+            const box = function (index) { return document.getElementById('use_' + arrayOf(index)); };
+            const pick = function (index) { return form.querySelector('[data-pick="' + arrayOf(index) + '"]'); };
             const card = function (index) { return settings.querySelector('[data-settings="' + index + '"]'); };
+            const choices = function (array) { return form.querySelector('[data-values="' + array + '"]'); };
+            // The fields of an array: itself, or one per combination of the values ticked of each axis.
+            const fieldsOf = function (array) {
+                const block = choices(array);
+                if (!block) return [String(array)];
+                let combinations = [0];
+                block.querySelectorAll('.gr-map-card__values').forEach(function (axis) {
+                    const boxes = Array.from(axis.querySelectorAll('.gr-map-card__pick'));
+                    const next = [];
+                    combinations.forEach(function (ordinal) {
+                        boxes.forEach(function (value, at) {
+                            if (value.checked) next.push(ordinal * boxes.length + at);
+                        });
+                    });
+                    combinations = next;
+                });
+                return combinations.map(function (ordinal) { return array + '-' + ordinal; });
+            };
             const ticked = function () {
-                return Array.from(form.querySelectorAll('.gr-map-card__box:checked')).map(function (b) {
-                    return b.id.slice(4);
+                return Array.from(form.querySelectorAll('.gr-map-card__box:checked')).flatMap(function (b) {
+                    return fieldsOf(b.id.slice(4));
                 });
             };
 
@@ -320,9 +388,9 @@
                 timer = setTimeout(read, 400);
             };
             const place = function (element) {
-                const index = Number(element.dataset.settings);
+                const order = Number(element.dataset.order);
                 const next = Array.from(settings.querySelectorAll('[data-settings]')).find(function (other) {
-                    return Number(other.dataset.settings) > index;
+                    return Number(other.dataset.order) > order;
                 });
                 settings.insertBefore(element, next || null);
             };
@@ -353,7 +421,7 @@
                         const fresh = holder.firstElementChild;
                         const old = card(index);
                         if (old) old.replaceWith(fresh); else place(fresh);
-                        include(fresh, box(index).checked);
+                        include(fresh, ticked().includes(index));
                     });
                     settings.querySelectorAll('[data-wind]').forEach(function (wind) { wind.remove(); });
                     answer.winds.forEach(function (html) {
@@ -371,23 +439,46 @@
                 if (pending.size) read(); else hold(false);
             };
 
+            // An array's fields as ticked now: each one's card in the form or out, and what has no card read.
+            const follow = function (array) {
+                const wanted = box(array).checked ? fieldsOf(array) : [];
+                settings.querySelectorAll('[data-settings]').forEach(function (existing) {
+                    const index = existing.dataset.settings;
+                    if (arrayOf(index) === String(array)) include(existing, wanted.includes(index));
+                });
+                Array.from(pending).forEach(function (index) {
+                    if (arrayOf(index) === String(array) && !wanted.includes(index)) pending.delete(index);
+                });
+                say(array, '');
+                const unread = wanted.filter(function (index) { return !card(index); });
+                unread.forEach(function (index) { pending.add(index); });
+                if (unread.length) {
+                    say(array, readingOne);
+                    later();
+                }
+                tidy();
+            };
+
             form.addEventListener('change', function (event) {
                 const target = event.target;
                 if (target.classList.contains('gr-map-card__box')) {
-                    const index = target.id.slice(4);
-                    const existing = card(index);
-                    if (!target.checked) {
-                        pending.delete(index);
-                        say(index, '');
-                        if (existing) include(existing, false);
-                    } else if (existing) {
-                        include(existing, true);
-                    } else {
-                        say(index, readingOne);
-                        pending.add(index);
-                        later();
+                    const array = target.id.slice(4);
+                    const block = choices(array);
+                    if (block) {
+                        block.hidden = !target.checked;
+                        // Ticked with no value of an axis, it is read at that axis's first value.
+                        if (target.checked) {
+                            block.querySelectorAll('.gr-map-card__values').forEach(function (axis) {
+                                if (!axis.querySelector('.gr-map-card__pick:checked')) {
+                                    const first = axis.querySelector('.gr-map-card__pick');
+                                    if (first) first.checked = true;
+                                }
+                            });
+                        }
                     }
-                    tidy();
+                    follow(array);
+                } else if (target.classList.contains('gr-map-card__pick')) {
+                    follow(target.dataset.array);
                 } else if (target.name === 'allow_store' || /^allow_\d+$/.test(target.name)) {
                     // What was read with a place taken away is read again without it.
                     ticked().forEach(function (index) {
@@ -432,6 +523,11 @@
                     const tick = row.querySelector('input[type="checkbox"]');
                     // A ticked card stays in sight: what is chosen is never hidden by a search.
                     row.hidden = Boolean(wanted) && !row.dataset.search.includes(wanted) && !(tick && tick.checked);
+                });
+                // An array's values are shown with it, while it is ticked.
+                form.querySelectorAll('[data-values]').forEach(function (block) {
+                    const array = block.dataset.values;
+                    block.hidden = !box(array).checked || pick(array).hidden;
                 });
             });
         });

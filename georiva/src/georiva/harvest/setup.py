@@ -46,6 +46,8 @@ class PlannedVariable:
     slug: str = ""
     #: Whether the store holds its array at a run's first step only (#782).
     fixed_field: bool = False
+    #: The value of each extra axis its array is read at, for one with any (#830).
+    selection: dict = field(default_factory=dict)
     #: What its array declares of its time statistic (ADR 0051); `instant` when it says nothing.
     time_statistic: str = "instant"
     statistic_window: str = ""
@@ -128,7 +130,11 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                 )
                 if planned.components is None:
                     VariableMapping.objects.create(
-                        feed=feed, asset_key=planned.asset_key, variable=variable, fixed_field=planned.fixed_field
+                        feed=feed,
+                        asset_key=planned.asset_key,
+                        selection=dict(planned.selection),
+                        variable=variable,
+                        fixed_field=planned.fixed_field,
                     )
     except IntegrityError as clash:
         raise SetupRefused(_("This could not be saved: %(why)s") % {"why": clash}) from clash

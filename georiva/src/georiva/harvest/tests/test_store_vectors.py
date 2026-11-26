@@ -17,6 +17,7 @@ from django_redis import get_redis_connection
 from georiva.core.machine_plane import remote_assets
 from georiva.core.models import Asset, Collection, Unit, Variable
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
+from georiva.harvest.upstream import CubeDimension
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.testing import dial_org
 from georiva.organisations.tests.factories import PASSWORD, grant_everything, make_user
@@ -313,3 +314,71 @@ class VectorStacTests(VectorFeedMixin, TestCase):
         self.assertEqual(asset["href"], STORE)
         self.assertNotIn("georiva:array", asset)
         self.assertEqual(asset["georiva:vector"], {"u": U, "v": V, "transform": "vector_magnitude"})
+
+
+ENSEMBLE_GRID = ("init_time", "lead_time", "ensemble_member", "latitude", "longitude")
+#: The control's u and v, as their Variables are mapped and named (#830).
+U0, V0 = (f'{path}{{"ensemble_member":0}}' for path in (U, V))
+V1 = f'{V}{{"ensemble_member":1}}'
+
+
+class VectorAtASelectionTests(VectorFeedMixin, TestCase):
+    """A vector over arrays with an extra axis is computed from its u and v at one Selection, the same for both."""
+
+    dimensions = {**StoreFeedMixin.dimensions, "ensemble_member": CubeDimension("ensemble_member", values=(0, 1))}
+    arrays = {
+        "temperature_2m": (RUN_STEP_GRID, WHOLE_FIELD),
+        U: (ENSEMBLE_GRID, (1, 1, 1, 721, 1440)),
+        V: (ENSEMBLE_GRID, (1, 1, 1, 721, 1440)),
+    }
+
+    def setUp(self):
+        StoreFeedMixin.setUp(self)
+        self.u = self.map_variable(U, "wind-u-10m", selection={"ensemble_member": 0})
+        self.v = self.map_variable(V, "wind-v-10m", selection={"ensemble_member": 0})
+        self.v1 = self.map_variable(V, "wind-v-10m-1", selection={"ensemble_member": 1})
+
+    def test_its_asset_is_read_at_its_parts_selection(self):
+        speed = self.vector(u=U0, v=V0)
+        self.hold(U0, 0, 3)
+        self.hold(V0, 0)
+
+        self.harvest()
+
+        asset = Asset.objects.get(variable=speed)
+        self.assertEqual((asset.store_array, asset.store_selection), ("", {"ensemble_member": 0}))
+        self.assertEqual(
+            remote_assets.remote_source(speed, self.run, self.run),
+            {
+                "store": STORE,
+                "vector": {"u": U, "v": V, "transform": "vector_magnitude"},
+                "selection": {"ensemble_member": 0},
+                "chunk_locations": {},
+                "allow_http": False,
+            },
+        )
+
+    def test_one_over_parts_at_two_selections_is_refused_and_not_indexed(self):
+        unit = Unit.objects.get(symbol="°C")
+        mixed = Variable(
+            collection=self.feed.collection,
+            slug="wind-speed-mixed",
+            name="Wind speed",
+            source_unit=unit,
+            unit=unit,
+            transform_type=Variable.TransformType.VECTOR_MAGNITUDE,
+            sources=[
+                {"type": "u_component", "value": {"source_name": U0}},
+                {"type": "v_component", "value": {"source_name": V1}},
+            ],
+        )
+        with self.assertRaises(ValidationError) as refused:
+            mixed.clean()
+        self.assertIn("ensemble member", " ".join(refused.exception.message_dict["sources"]))
+
+        Variable.objects.bulk_create([mixed])  # as if made before the rule, by hand
+        self.hold(U0, 0)
+        self.hold(V1, 0)
+        with self.assertLogs("georiva.harvest.harvester", "WARNING"):
+            self.harvest()
+        self.assertFalse(Asset.objects.filter(variable__slug="wind-speed-mixed").exists())

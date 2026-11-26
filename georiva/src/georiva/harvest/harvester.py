@@ -42,6 +42,7 @@ from georiva.analysis.zonal_stats.tasks import (
     enqueue_lost_boundary_stats,
 )
 from georiva.core.machine_plane.remote_assets import publish_variable
+from georiva.core.selection import as_dict, split_field_key
 from georiva.core.storage.asset_location import remote_q, store_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
@@ -376,7 +377,8 @@ def _listed(
     A store has no items. It is asked which steps it holds for the mapped
     arrays, of every run but the `settled` ones, and each Held step is an item:
     at its valid time, of its run where the store has runs, with a Store asset
-    — the store's address and the array's path — for each array held there. A
+    — the store's address, the array's path and its Selection (#830) — for each
+    mapped field held there. A
     step that is in the store's coordinates and not held is not in the answer,
     and gets no row (§6).
     """
@@ -393,7 +395,7 @@ def _listed(
     if not feed.store_href:
         raise RunStopped("source unavailable — the feed names no upstream store to read")
     fields = store_fields(described.cube, mapped)
-    missing = sorted(set(mapped) - {field.path for field in fields})
+    missing = sorted(set(mapped) - {field.key for field in fields})
     if missing:
         # Believed, this would read as "every step of it was deleted". An array
         # that is truly gone is the operator's to unmap.
@@ -433,8 +435,9 @@ def _listed(
             reference_time=step.reference_time,
             bbox=described.bbox,
             assets={
-                path: UpstreamAsset(href=feed.store_href, media_type=media_type, array=path)
-                for path in sorted(step.arrays)
+                key: UpstreamAsset(href=feed.store_href, media_type=media_type, array=path, selection=selection)
+                for key in sorted(step.arrays)
+                for path, selection in [split_field_key(key)]
             },
         )
         for step in held
@@ -463,6 +466,15 @@ def _vectors(collection, by_array: dict) -> dict:
     for variable in collection.variables.filter(transform_type__in=VECTOR_TRANSFORMS):
         vector = variable.vector_components
         if vector is None:
+            continue
+        if not vector.one_selection:
+            logger.warning(
+                "Harvest of %s: vector Variable %s is over %r and %r, which are read at different selections",
+                collection.slug,
+                variable.slug,
+                vector.u,
+                vector.v,
+            )
             continue
         if vector.u not in by_array or vector.v not in by_array:
             logger.warning(
@@ -613,6 +625,7 @@ class _Mine:
     extra_fields: dict
     href: str = ""
     store_array: str = ""
+    store_selection: dict | None = None
 
     def is_current(self, item: UpstreamItem, asset: UpstreamAsset, *, store: bool = False) -> bool:
         """Whether the upstream item's `updated` is the one this asset was last
@@ -620,11 +633,12 @@ class _Mine:
         is not re-synced (ADR 0042, consequences).
 
         A step of a store has no `updated`. Its Store asset says where the
-        store is and which array it means — a vector one, none (ADR 0048) — and is
-        current while both still hold: a store the feed now names at another
+        store is and which array it means — a vector one, none (ADR 0048) — at
+        which Selection (#830), and is current while all of it still holds: a store the feed now names at another
         address is followed there."""
         if store or asset.array:
-            return (self.href, self.store_array) == (asset.href, asset.array)
+            mine = (self.href, self.store_array, self.store_selection or {})
+            return mine == (asset.href, asset.array, as_dict(asset.selection))
         return self.extra_fields.get(UPSTREAM_UPDATED) == _updated_stamp(item)
 
 
@@ -644,9 +658,18 @@ class _Jurisdiction:
         self.reach = reach
         #: By place: the asset's run, or none, its valid time and its Variable's pk.
         self.assets = {
-            (run, when, variable_pk): _Mine(pk, extra_fields, href, store_array)
-            for pk, run, when, variable_pk, extra_fields, href, store_array in self.judged_rows().values_list(
-                "pk", "item__reference_time", "item__time", "variable_id", "extra_fields", "href", "store_array"
+            (run, when, variable_pk): _Mine(pk, extra_fields, href, store_array, store_selection)
+            for pk, run, when, variable_pk, extra_fields, href, store_array, store_selection in (
+                self.judged_rows().values_list(
+                    "pk",
+                    "item__reference_time",
+                    "item__time",
+                    "variable_id",
+                    "extra_fields",
+                    "href",
+                    "store_array",
+                    "store_selection",
+                )
             )
         }
 
@@ -767,6 +790,8 @@ def _lifted(asset, item: UpstreamItem) -> dict:
         "media_type": asset.media_type or COG_MEDIA_TYPE,
         # What a Store asset's slice is of; empty for any other (ADR 0044 §3).
         "store_array": asset.array,
+        # Which value of each extra axis it is read at; empty for an array with none (#830).
+        "store_selection": as_dict(asset.selection),
         "file_size": asset.file_size,
         "checksum": asset.checksum if len(asset.checksum) <= MAX_CHECKSUM_LENGTH else "",
         "bands": asset.bands or 1,

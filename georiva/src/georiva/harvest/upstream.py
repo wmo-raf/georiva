@@ -26,6 +26,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import urllib3
 
+from georiva.core.selection import Selection, field_key, index_of
 from georiva.core.time_statistic import Declared, from_store_array
 from georiva.core.values.store import refused_place, repository_storage, store_coordinate
 
@@ -65,6 +66,12 @@ class CubeDimension:
     size: int | None = None
     #: The grid a horizontal dimension is measured on, as the collection spells it; empty when it does not say.
     reference_system: str = ""
+    #: For an extra axis — neither time nor the grid — every value it has, in
+    #: order, where the collection lists them or spells them out by an extent
+    #: and an even, whole step; `None` when they cannot be listed (#830).
+    values: tuple[str | int | float, ...] | None = None
+    #: What an extra axis's values are measured in, as the collection spells it; empty when it does not say.
+    unit: str = ""
 
 
 @dataclass(frozen=True)
@@ -207,8 +214,15 @@ class StoreField:
 
     path: str
     #: Each axis's part, in the array's own order: "run" and "step" for a
-    #: forecast, "time" for an analysis, then "y" and "x".
+    #: forecast, "time" for an analysis, then "y" and "x", and each extra axis by its own name.
     axes: tuple[str, ...]
+    #: The value of each extra axis it is read at (#830); empty for an array with none.
+    selection: Selection = ()
+
+    @property
+    def key(self) -> str:
+        """What it is known by in what is read of it: its path, with its Selection after it."""
+        return field_key(self.path, self.selection)
 
 
 @dataclass(frozen=True)
@@ -291,6 +305,8 @@ class UpstreamAsset:
     chunk_endpoints: tuple[str, ...] = ()
     #: For a Store asset: the array's full path in the store its href names.
     array: str = ""
+    #: For a Store asset of an array with extra axes: the value of each it is read at (#830).
+    selection: Selection = ()
 
 
 @dataclass(frozen=True)
@@ -497,12 +513,16 @@ def parse_cube(payload: dict) -> UpstreamCube | None:
         values = dimension.get("values")
         if size is None and isinstance(values, list):
             size = len(values)
+        kind = str(dimension.get("type") or "").lower()
+        extra = kind not in ("temporal", "spatial")
         found[str(name)] = CubeDimension(
             name=str(name),
-            kind=str(dimension.get("type") or "").lower(),
+            kind=kind,
             axis=str(dimension.get("axis") or "").lower(),
             size=size,
             reference_system=_reference_system(dimension.get("reference_system")),
+            values=_axis_values(dimension, size) if extra else None,
+            unit=str(dimension.get("unit") or "") if extra else "",
         )
     arrays = {}
     for path, variable in (variables if isinstance(variables, dict) else {}).items():
@@ -519,6 +539,34 @@ def parse_cube(payload: dict) -> UpstreamCube | None:
             description=str(variable.get("comment") or ""),
         )
     return UpstreamCube(dimensions=found, arrays=arrays)
+
+
+#: The most values an extra axis is listed with: more is not an axis an operator picks one value of.
+MAX_AXIS_VALUES = 1000
+
+
+def _axis_values(dimension: dict, size: int | None) -> tuple[str | int | float, ...] | None:
+    """Every value of an extra axis, where the collection lists them (`values`)
+    or spells them out — an extent of whole numbers and a step, given or even
+    over its `size`; `None` when it does neither (#830)."""
+    listed = dimension.get("values")
+    if isinstance(listed, list):
+        plain = all(isinstance(v, str | int | float) and not isinstance(v, bool) for v in listed)
+        return tuple(listed) if plain and 0 < len(listed) <= MAX_AXIS_VALUES else None
+    extent = dimension.get("extent")
+    if not isinstance(extent, list) or len(extent) != 2:
+        return None
+    low, high = (_whole(end) for end in extent)
+    if low is None or high is None or high < low:
+        return None
+    step = _whole(dimension.get("step"))
+    if step is None and size:
+        step = (high - low) // (size - 1) if size > 1 and (high - low) % (size - 1) == 0 else None
+        if size == 1 and low == high:
+            return (low,)
+    if not step or (high - low) % step or (high - low) // step >= MAX_AXIS_VALUES:
+        return None
+    return tuple(range(low, high + 1, step))
 
 
 def _reference_system(value) -> str:
@@ -1082,7 +1130,9 @@ def _held(store, array, path: str, cells: list[tuple[int, ...]]) -> list[bool]:
     return list(asyncio.run(ask()))
 
 
-def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | None, str, tuple[int, ...]]:
+def _newest_whole(
+    store, array, field: StoreField, chosen: dict[str, int]
+) -> tuple[dict[str, int] | None, str, tuple[int, ...]]:
     """Where the field to sample is — `{"run": …, "step": …}` or `{"time": …}`
     — or why there is none, and for a forecast the steps its run holds. A forecast's is the middle step of its newest
     closed run. Coordinates are allocated ahead of data, so the newest run is
@@ -1097,7 +1147,7 @@ def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | Non
     sizes = dict(zip(field.axes, array.shape, strict=True))
 
     def cell(**at):
-        return tuple(at.get(part, 0) for part in field.axes)
+        return tuple({**chosen, **at}.get(part, 0) for part in field.axes)
 
     if "time" in sizes:
         newest = range(sizes["time"] - 1, max(-1, sizes["time"] - 1 - TIMES_IN_REACH), -1)
@@ -1129,10 +1179,14 @@ def _sample(store, field: StoreField, ask: Callable[[str, tuple], str | None] | 
     array = zarr.open_array(store, path=field.path, mode="r")
     if len(field.axes) != array.ndim:
         return FieldSample(readable=False, problem="it is not laid out as its collection says")
-    at, missing, held_steps = _newest_whole(store, array, field)
+    try:
+        chosen = _selected(store, field, array, {})
+    except _StoreMisdescribed as misdescribed:
+        return FieldSample(readable=False, problem=str(misdescribed))
+    at, missing, held_steps = _newest_whole(store, array, field, chosen)
     if at is None:
         return FieldSample(readable=False, problem=missing)
-    where = tuple(at.get(part, slice(None)) for part in field.axes)
+    where = tuple({**chosen, **at}.get(part, slice(None)) for part in field.axes)
     if ask is not None and (refused := ask(field.path, where)):
         return FieldSample(readable=False, problem=refused)
     low, high = display_range(array[where])
@@ -1230,7 +1284,7 @@ def read_field_samples(
     into: dict | None = None,
     check_chunk: ChunkCheck = _unchecked,
 ) -> dict[str, FieldSample]:
-    """A sample of each of `fields` from the repository in `storage`, by path.
+    """A sample of each of `fields` from the repository in `storage`, by its key.
 
     A field whose data is in a web place is read only once `check_chunk` has
     said nothing against the file it is read from (#828).
@@ -1254,11 +1308,11 @@ def read_field_samples(
         ask = partial(_web_refusal, unfollowed, web, check_chunk)
     for field_ in fields:
         try:
-            found[field_.path] = _sample(store, field_, ask)
+            found[field_.key] = _sample(store, field_, ask)
         except Exception as exc:  # whatever the store or its library raises is an answer
-            logger.warning("Upstream store field %s could not be read: %s", field_.path, exc)
+            logger.warning("Upstream store field %s could not be read: %s", field_.key, exc)
             # Only a read the store's reader refused to follow names where it would have gone.
-            found[field_.path] = FieldSample(
+            found[field_.key] = FieldSample(
                 readable=False,
                 problem="it could not be read by a reader with no account",
                 elsewhere=refused_place(str(exc)) or "",
@@ -1300,7 +1354,7 @@ def sample_store(
         pool.shutdown(wait=False, cancel_futures=True)
     read_by_now = dict(found)
     return {
-        field_.path: read_by_now.get(field_.path) or FieldSample(readable=False, problem=problem) for field_ in fields
+        field_.key: read_by_now.get(field_.key) or FieldSample(readable=False, problem=problem) for field_ in fields
     }
 
 
@@ -1396,7 +1450,7 @@ def _field_steps(
     if declared is not None:
         said = from_store_array(field.path, array.attrs)
         if said is not None:
-            declared[field.path] = said
+            declared[field.key] = said
     names = getattr(array.metadata, "dimension_names", None)
     if len(field.axes) != array.ndim or not names or len(names) != array.ndim:
         raise _StoreMisdescribed(f"“{field.path}” is not laid out as its collection says")
@@ -1413,8 +1467,10 @@ def _field_steps(
         if array.chunks[field.axes.index(part)] != 1:
             raise _StoreMisdescribed(f"“{field.path}” no longer keeps one map per time step")
 
+    chosen = _selected(store, field, array, known)
+
     def cell(**at):
-        return tuple(at.get(part, 0) for part in field.axes)
+        return tuple({**chosen, **at}.get(part, 0) for part in field.axes)
 
     if "time" in measured:
         if measured["time"].dtype.kind != "M":
@@ -1450,8 +1506,39 @@ def _field_steps(
         if settled:
             settled_held = _held(store, array, field.path, settled)
             found += [there for there, is_held in zip(settled, settled_held, strict=True) if is_held]
-        files[field.path] = _newest_first(found, field.axes)
+        files[field.key] = (field.path, _newest_first(found, field.axes))
     return [step for (_index, *step), there in zip(asked, held, strict=True) if there]
+
+
+#: The parts of an array's axes that are not extra axes.
+_PLAIN_PARTS = frozenset({"run", "step", "time", "y", "x"})
+
+
+def _selected(store, field: StoreField, array, known: dict) -> dict[str, int]:
+    """Where `field`'s Selection is along each extra axis: its value found among
+    the store's own coordinate (#830). A value that is gone, an extra axis the
+    field selects nothing of, or one the store keeps more than one value of in
+    a chunk, is a store not laid out as the harvest was told."""
+    selected = dict(field.selection)
+    chosen = {}
+    for position, part in enumerate(field.axes):
+        if part in _PLAIN_PARTS:
+            continue
+        if part not in selected:
+            raise _StoreMisdescribed(f"“{field.path}” has a “{part}” and no value of it was chosen")
+        value = selected.pop(part)
+        coordinate = store_coordinate(store, field.path, part, known)
+        if coordinate is None:
+            raise _StoreMisdescribed(f"it has no “{part}” to say what “{field.path}” is divided up by")
+        index = index_of(coordinate, value)
+        if index is None:
+            raise _StoreMisdescribed(f"“{field.path}” no longer has “{value}” among its “{part}”")
+        if array.chunks[position] != 1:
+            raise _StoreMisdescribed(f"“{field.path}” no longer keeps one map per “{part}”")
+        chosen[part] = index
+    if selected:
+        raise _StoreMisdescribed(f"“{field.path}” has no “{next(iter(selected))}”")
+    return chosen
 
 
 #: How many cells of one field are looked into for a file of each web place, at most.
@@ -1476,7 +1563,7 @@ def _ask_about_web_places(unfollowed, web: tuple[str, ...], check: ChunkCheck, f
     `UpstreamUnreachable` naming the place it refuses (#828). A web place no
     Held step reads from has no file to ask about, and nothing to serve."""
     unasked = set(web)
-    for path, cells in files.items():
+    for path, cells in files.values():
         for where in cells:
             if not unasked:
                 return
@@ -1516,11 +1603,11 @@ def read_held_steps(
     expected: dict[datetime, tuple[timedelta, ...]] = {}
     declared: dict[str, Declared] = {}
     known: dict = {}
-    files: dict[str, list[tuple]] | None = {} if web else None
+    files: dict[str, tuple[str, list[tuple]]] | None = {} if web else None
     for field_ in fields:
         steps = _field_steps(store, field_, window, known, frozenset(skip_runs), declared, files)
         for run, when, run_leads in steps:
-            found.setdefault((run, when), set()).add(field_.path)
+            found.setdefault((run, when), set()).add(field_.key)
             if run is not None:
                 # The first array to say speaks for the run: arrays beside one another share its lead times.
                 expected.setdefault(run, run_leads)

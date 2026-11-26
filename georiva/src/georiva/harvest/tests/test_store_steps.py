@@ -654,3 +654,61 @@ class AnArraysDeclaredTimeStatisticTests(StoreFixture, SimpleTestCase):
         self.commit(build)
 
         self.assertEqual(self.declared(), {})
+
+
+#: A forecast of statistics, as Google's WeatherNext is kept: one map per statistic per step (#830).
+STATISTIC_GRID = ("init_time", "statistic", "lead_time", "latitude", "longitude")
+STATISTICS = ["mean", "p10", "p90"]
+MEAN = StoreField("temperature_2m", ("run", "statistic", "step", "y", "x"), (("statistic", "mean"),))
+P90 = StoreField("temperature_2m", ("run", "statistic", "step", "y", "x"), (("statistic", "p90"),))
+
+
+class HeldStepsAtASelectionTests(StoreFixture, SimpleTestCase):
+    """An array with an extra axis is asked about at the selected value of it only."""
+
+    def build(self, statistics=STATISTICS, chunks=None):
+        def build(store):
+            self.coordinates(store)
+            statistic = zarr.create_array(
+                store, name="statistic", shape=(len(statistics),), dtype=str, dimension_names=("statistic",)
+            )
+            statistic[:] = np.array(statistics)
+            shape = (len(RUNS), len(statistics), len(LEADS), *GRID)
+            array = self.forecast(store, shape=shape, names=STATISTIC_GRID, chunks=chunks or (1, 1, 1, *GRID))
+            array[0, :, :] = 1.0  # the first run whole, every statistic
+            array[1, statistics.index("mean"), 0] = 1.0  # the second run: only its mean, at its first step
+
+        self.commit(build)
+
+    def test_a_step_is_held_for_a_selection_only_where_its_own_map_is(self):
+        self.build()
+
+        self.assertEqual(self.steps(MEAN), [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0)])
+        self.assertEqual(self.steps(P90), [(0, 0), (0, 1), (0, 2), (0, 3)])
+
+    def test_two_selections_of_one_array_are_two_fields_of_a_step(self):
+        self.build()
+
+        first = self.held(MEAN, P90)[0]
+
+        self.assertEqual(first.arrays, frozenset({MEAN.key, P90.key}))
+        self.assertNotEqual(MEAN.key, P90.key)
+        self.assertEqual(set(first.array_steps), {MEAN.key, P90.key})
+
+    def test_a_value_the_store_no_longer_has_stops_the_listing_saying_which(self):
+        self.build(statistics=["mean", "p10"])
+
+        with (
+            mock.patch.object(icechunk, "http_storage", return_value=self.storage),
+            self.assertRaisesRegex(UpstreamUnreachable, "p90"),
+        ):
+            list_held_steps(STORE, [P90], EVERYTHING)
+
+    def test_a_store_that_no_longer_keeps_one_map_per_value_is_said_so(self):
+        self.build(chunks=(1, 3, 1, *GRID))
+
+        with (
+            mock.patch.object(icechunk, "http_storage", return_value=self.storage),
+            self.assertRaisesRegex(UpstreamUnreachable, "statistic"),
+        ):
+            list_held_steps(STORE, [MEAN], EVERYTHING)

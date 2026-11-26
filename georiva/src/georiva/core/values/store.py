@@ -43,6 +43,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from affine import Affine
 
+from georiva.core.selection import Selection, index_of, selection_of
+
 if TYPE_CHECKING:
     from georiva.core.models.variable import VectorComponents
 
@@ -110,6 +112,11 @@ class StoreSlice:
     A vector field (ADR 0048) names no array: ``vector`` names the two it is
     computed from and which quantity of them it is. Both are read at the same
     step from the same opening of the store.
+
+    An array with extra axes — ensemble members, statistics, levels — is read
+    at one value of each, its ``selection`` (#830): found by value among the
+    store's own coordinate as the store is read, so a member or level the
+    Upstream inserts does not shift it. A vector's u and v are both read at it.
     """
 
     store: str
@@ -119,6 +126,7 @@ class StoreSlice:
     chunk_locations: Mapping[str, str] = field(default_factory=dict, hash=False, compare=False)
     allow_http: bool = False
     vector: VectorComponents | None = None
+    selection: Selection = ()
 
     @property
     def key(self) -> tuple:
@@ -126,6 +134,7 @@ class StoreSlice:
         return (
             self.store,
             self.array,
+            self.selection,
             self.vector,
             self.time,
             self.reference_time,
@@ -135,7 +144,9 @@ class StoreSlice:
 
     def components(self) -> tuple[StoreSlice, StoreSlice]:
         """The u and v fields a vector field is computed from."""
-        return tuple(replace(self, array=array, vector=None) for array in self.vector.arrays)
+        return tuple(
+            replace(self, array=path, vector=None, selection=self.vector.selection) for path in self.vector.paths
+        )
 
     @property
     def pins(self) -> tuple[tuple[str, str], ...]:
@@ -157,6 +168,7 @@ def store_slice(asset) -> StoreSlice:
         reference_time=item.reference_time,
         chunk_locations=access.chunk_locations,
         allow_http=access.allow_http,
+        selection=selection_of(asset.store_selection),
     )
     # A vector Variable's asset names no array: its Variable names two (ADR 0048).
     return replace(wanted, vector=asset.store_vector)
@@ -277,11 +289,23 @@ class _OpenStore:
         self._lock = threading.Lock()
 
     def field(self, wanted: StoreSlice) -> _ArraySource:
-        array, axes, measured = self._measured(wanted.array)
+        selected = dict(wanted.selection)
+        array, axes, measured = self._measured(wanted.array, selected)
+        # The Selection first: a value that is gone is a misdescribed store, whatever the step (#830).
+        chosen = {}
+        for name, value in selected.items():
+            position = axes.index(name)
+            index = index_of(measured[position], value)
+            if index is None:
+                raise StoreUnreadable(f"The upstream store has no “{value}” among the values of “{name}”.")
+            if array.chunks[position] != 1:
+                raise StoreUnreadable(f"This upstream store does not keep one map per “{name}” value.")
+            chosen[name] = index
         at = _where(dict(zip(axes, measured, strict=True)), wanted.time, wanted.reference_time)
         for part in at:
             if array.chunks[axes.index(part)] != 1:
                 raise StoreUnreadable("This upstream store does not keep one map per time step.")
+        at = {**chosen, **at}
         cell = tuple(at.get(part, 0) for part in axes)
         if not asyncio.run(self.store.exists(f"{wanted.array}/{array.metadata.encode_chunk_key(cell)}")):
             raise StepNotHeld(f"The upstream store does not hold {wanted.array} at {_when(wanted)}.")
@@ -315,13 +339,21 @@ class _OpenStore:
             raise StoreUnreadable(f"The upstream store's “{name}” is not a list of values.")
         return decoded
 
-    def _measured(self, path: str):
+    def _measured(self, path: str, selected: Mapping | None = None):
+        """The array at ``path``, each dimension's part, and each one's coordinate.
+        A dimension in ``selected`` is an extra axis, its part its own name (#830)."""
+        selected = selected or {}
         array = self._array(path)
         names = getattr(array.metadata, "dimension_names", None)
-        if array.ndim not in (3, 4) or not names or len(names) != array.ndim:
+        # How many dimensions it has is judged by `_axes`, which names one it does not know.
+        if not names or len(names) != array.ndim:
             raise StoreUnreadable(f"The upstream array “{path}” is not one map per time step.")
-        measured = [self._coordinate(path, str(name)) for name in names]
-        return array, _axes([str(name) for name in names], measured), measured
+        names = [str(name) for name in names]
+        for name, value in selected.items():
+            if name not in names:
+                raise StoreUnreadable(f"The upstream array “{path}” has no “{name}” to read at “{value}”.")
+        measured = [self._coordinate(path, name) for name in names]
+        return array, _axes(names, measured, frozenset(selected)), measured
 
 
 # ---- a decoded field as a raster -------------------------------------------------------
@@ -379,12 +411,15 @@ def _grid(latitudes: np.ndarray, longitudes: np.ndarray, shape: tuple[int, int])
     return Affine(x_step, 0.0, longitudes[0] - x_step / 2, 0.0, y_step, latitudes[0] - y_step / 2)
 
 
-def _axes(names: list[str], measured: list[np.ndarray]) -> list[str]:
-    """Which part each dimension is — "run", "step", "time", "y", "x"."""
+def _axes(names: list[str], measured: list[np.ndarray], selected: frozenset = frozenset()) -> list[str]:
+    """Which part each dimension is — "run", "step", "time", "y", "x" — or,
+    for one in ``selected``, its own name: an extra axis read at one value (#830)."""
     axes = []
     for name, coordinate in zip(names, measured, strict=True):
         lowered = name.lower()
-        if coordinate.dtype.kind == "M":
+        if name in selected:
+            axes.append(name)
+        elif coordinate.dtype.kind == "M":
             axes.append("time")
         elif coordinate.dtype.kind == "m":
             axes.append("step")
@@ -396,7 +431,8 @@ def _axes(names: list[str], measured: list[np.ndarray]) -> list[str]:
             raise StoreUnreadable(f"This upstream array is divided up in a way maps are not read from (“{name}”).")
     if "step" in axes and axes.count("time") == 1:
         axes[axes.index("time")] = "run"
-    if sorted(axes) not in (sorted(["run", "step", "y", "x"]), sorted(["time", "y", "x"])):
+    plain = sorted(part for part in axes if part not in selected)
+    if plain not in (sorted(["run", "step", "y", "x"]), sorted(["time", "y", "x"])):
         raise StoreUnreadable("This upstream array is not one map per time step on a latitude/longitude grid.")
     return axes
 

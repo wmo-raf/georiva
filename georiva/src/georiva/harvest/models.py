@@ -213,7 +213,12 @@ class HarvestFeed(DataFeed):
                 "Only mapped asset keys — for an upstream store, mapped arrays — are indexed. Variables are "
                 "curated in the feed's collection."
             ),
-            panels=[FieldPanel("asset_key"), FieldPanel("variable"), FieldPanel("fixed_field")],
+            panels=[
+                FieldPanel("asset_key"),
+                FieldPanel("selection"),
+                FieldPanel("variable"),
+                FieldPanel("fixed_field"),
+            ],
         ),
         # Where its files are read from is not edited here: it is confirmed, on
         # the feed's page, from what a re-check of the Upstream proposes.
@@ -317,6 +322,15 @@ class HarvestFeed(DataFeed):
         return StacApiClient(self.upstream_url, page_size=SAMPLE_ITEMS, timeout=10, listing_timeout=15)
 
     @property
+    def surveyed_selectable(self) -> dict[str, list[dict]]:
+        """Each extra axis of each array the Upstream survey last offered, with its values, by path (#830)."""
+        found = {}
+        for asset in self.surveyed_assets or []:
+            if isinstance(asset, dict) and asset.get("key") and isinstance(asset.get("selectable"), list):
+                found[str(asset["key"])] = asset["selectable"]
+        return found
+
+    @property
     def surveyed_asset_keys(self) -> list[tuple[str, str]]:
         """`(key, label)` for each raster asset key the Upstream survey last saw."""
         found = []
@@ -391,17 +405,19 @@ class HarvestFeed(DataFeed):
         return collection
 
     def fixed_fields(self) -> frozenset[str]:
-        """The upstream asset keys of the mapping declared Fixed fields (#782)."""
-        return frozenset(self.variable_mappings.filter(fixed_field=True).values_list("asset_key", flat=True))
+        """The field keys of the mapping declared Fixed fields (#782): each its
+        asset key, with its Selection after it where it has one (#830)."""
+        return frozenset(mapping.field_key for mapping in self.variable_mappings.filter(fixed_field=True))
 
     def mapped_variables(self, collection) -> dict:
-        """The Variable mapping as upstream asset key → Variable, for `collection`.
+        """The Variable mapping as field key → Variable, for `collection`: the
+        upstream asset key, with its Selection after it where it has one (#830).
 
         A mapping to a Variable of some other collection maps nothing: an asset
         cannot sit on one collection's item and carry another's Variable.
         """
         mappings = self.variable_mappings.select_related("variable")
-        return {m.asset_key: m.variable for m in mappings if m.variable.collection_id == collection.pk}
+        return {m.field_key: m.variable for m in mappings if m.variable.collection_id == collection.pk}
 
     # ── Runs ────────────────────────────────────────────────────────────────
 
@@ -446,6 +462,16 @@ class VariableMapping(models.Model):
         related_name="+",
         help_text=_("The Variable this asset is indexed under. It must belong to the feed's collection."),
     )
+    selection = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Selection"),
+        help_text=_(
+            "For an upstream store's array with extra axes — ensemble members, statistics, levels: the value of "
+            'each its Variable is read at, by the axis\'s name, such as {"statistic": "mean"}. One array may '
+            "be mapped more than once, at different values."
+        ),
+    )
     fixed_field = models.BooleanField(
         default=False,
         verbose_name=_("Fixed field"),
@@ -458,15 +484,44 @@ class VariableMapping(models.Model):
     class Meta:
         ordering = ["id"]
         constraints = [
-            models.UniqueConstraint(fields=["feed", "asset_key"], name="unique_asset_key_per_harvest_feed"),
+            # One array may be mapped once per Selection (#830). Over expressions, not
+            # fields: an admin form's own check cannot compare a Selection, so the
+            # form says so by field key instead (`HarvestFeedForm._check_mapping`).
+            models.UniqueConstraint(
+                models.F("feed"),
+                models.F("asset_key"),
+                models.F("selection"),
+                name="unique_asset_key_and_selection_per_harvest_feed",
+            ),
             # An item holds one asset per Variable, so two keys cannot share one.
             models.UniqueConstraint(fields=["feed", "variable"], name="unique_variable_per_harvest_feed"),
         ]
 
     def __str__(self):
-        return f"{self.asset_key} → {self.variable_id}"
+        return f"{self.field_key} → {self.variable_id}"
+
+    @property
+    def field_key(self) -> str:
+        """What its field is known by in a harvest: the asset key, with its Selection after it (#830)."""
+        from georiva.core.selection import field_key, selection_of
+
+        return field_key(self.asset_key, selection_of(self.selection))
+
+    def save(self, *args, **kwargs):
+        # A form's empty field is no Selection, not a missing one.
+        if self.selection is None:
+            self.selection = {}
+        super().save(*args, **kwargs)
 
     def clean(self):
+        from georiva.core.selection import SelectionInvalid, selection_of
+
+        if self.selection is None:
+            self.selection = {}
+        try:
+            selection_of(self.selection)
+        except SelectionInvalid as invalid:
+            raise ValidationError({"selection": str(invalid)}) from invalid
         super().clean()
         if not self.feed_id or not self.variable_id:
             return

@@ -114,7 +114,12 @@ def _published_assets():
 
 
 def store_entry(
-    href: str, array: str, chunk_locations: dict, allow_http: bool = False, vector: VectorComponents | None = None
+    href: str,
+    array: str,
+    chunk_locations: dict,
+    allow_http: bool = False,
+    vector: VectorComponents | None = None,
+    selection: dict | None = None,
 ) -> dict:
     """What Titiler is told of a Store asset: the store, the array, where the
     store's data may be followed (ADR 0044 §9, §11), and whether a plain
@@ -123,20 +128,29 @@ def store_entry(
 
     A vector Store asset (ADR 0048) names no array: in its place, ``vector``
     says which two arrays it is computed from and which quantity of them it is
-    (a ``VectorComponents``)."""
+    (a ``VectorComponents``): the paths of its u and v.
+
+    An array with extra axes is read at one value of each, its ``selection``
+    (#830): a vector's u and v both at the same one. An entry with none
+    carries no such key, as every entry before it."""
     entry = {"store": href}
     if vector is not None:
-        entry["vector"] = {"u": vector.u, "v": vector.v, "transform": str(vector.transform)}
+        u, v = vector.paths
+        entry["vector"] = {"u": u, "v": v, "transform": str(vector.transform)}
     else:
         entry["array"] = array
+    if selection:
+        entry["selection"] = dict(selection)
     entry["chunk_locations"] = dict(chunk_locations or {})
     entry["allow_http"] = bool(allow_http)
     return entry
 
 
-def _store_value(href: str, array: str, access: StoreAccess, vector: VectorComponents | None = None) -> str:
+def _store_value(
+    href: str, array: str, access: StoreAccess, vector: VectorComponents | None = None, selection: dict | None = None
+) -> str:
     """A Store asset's value in the hash: its :func:`store_entry` as JSON."""
-    return json.dumps(store_entry(href, array, access.chunk_locations, access.allow_http, vector))
+    return json.dumps(store_entry(href, array, access.chunk_locations, access.allow_http, vector, selection))
 
 
 def _vectors_of(variable_pks) -> dict[int, VectorComponents]:
@@ -189,21 +203,30 @@ def feed_store_access(feed_pks) -> dict[int, StoreAccess]:
 
 def _values(rows) -> dict[tuple, str]:
     """``(variable, field) → the hash value`` for rows of
-    ``(variable_id, time, reference_time, format, href, store_array, harvested_by_id)``."""
+    ``(variable_id, time, reference_time, format, href, store_array, harvested_by_id, store_selection)``."""
     rows = [(*row, AssetLocation(row[4], row[3]).is_store) for row in rows]
-    access = feed_store_access(row[6] for row in rows if row[7])
+    access = feed_store_access(row[6] for row in rows if row[8])
     # A Store asset with no array of its own is a vector's: its Variable names two.
-    vectors = _vectors_of(row[0] for row in rows if row[7] and not row[5])
+    vectors = _vectors_of(row[0] for row in rows if row[8] and not row[5])
     values = {}
-    for variable_pk, time, reference_time, _, href, store_array, harvested_by, is_store in rows:
+    for variable_pk, time, reference_time, _, href, store_array, harvested_by, selection, is_store in rows:
         if is_store:
             vector = vectors.get(variable_pk) if not store_array else None
-            href = _store_value(href, store_array, access.get(harvested_by, NO_FEED), vector)
+            href = _store_value(href, store_array, access.get(harvested_by, NO_FEED), vector, selection)
         values[variable_pk, timestep_field(time, reference_time)] = href
     return values
 
 
-_ROW = ("variable_id", "item__time", "item__reference_time", "format", "href", "store_array", "harvested_by_id")
+_ROW = (
+    "variable_id",
+    "item__time",
+    "item__reference_time",
+    "format",
+    "href",
+    "store_array",
+    "harvested_by_id",
+    "store_selection",
+)
 
 
 def remote_source(variable, time: datetime, reference_time: datetime | None = None) -> str | dict | None:
@@ -337,7 +360,9 @@ def publish_asset(asset) -> None:
     location = asset.location
     if location.is_store:
         access = feed_store_access([asset.harvested_by_id]).get(asset.harvested_by_id, NO_FEED)
-        _write_timestep(asset, _store_value(asset.href, asset.store_array, access, asset.store_vector))
+        _write_timestep(
+            asset, _store_value(asset.href, asset.store_array, access, asset.store_vector, asset.store_selection)
+        )
     elif asset.format != Asset.Format.COG:
         return
     elif location.is_remote:
