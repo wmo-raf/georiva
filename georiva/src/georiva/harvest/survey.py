@@ -854,6 +854,8 @@ def _chunk_regions(upstream: UpstreamCatalogClient, declared: list[str]) -> dict
 # ── Which of a store's arrays can become Variables ──────────────────────────
 
 _GEOGRAPHIC_NAMES = frozenset({"lat", "latitude", "lon", "longitude"})
+#: The CF units a horizontal dimension measured in latitude or longitude is given.
+_GEOGRAPHIC_UNITS = frozenset({"degree_east", "degrees_east", "degree_north", "degrees_north"})
 _GEOGRAPHIC_SYSTEMS = ("4326", "crs84", "wgs84", "wgs 84")
 #: Names the dimension that says which run a forecast field is of.
 _RUN_NAMES = frozenset({"init_time", "reference_time", "forecast_reference_time", "run", "run_time"})
@@ -947,7 +949,8 @@ def _is_geographic(dimension: CubeDimension) -> bool:
     system = dimension.reference_system.lower()
     if system:
         return any(known in system for known in _GEOGRAPHIC_SYSTEMS)
-    return dimension.name.lower() in _GEOGRAPHIC_NAMES
+    # A grid named `x` and `y` and measured in degrees is latitude and longitude all the same (#830).
+    return dimension.name.lower() in _GEOGRAPHIC_NAMES or dimension.unit.lower() in _GEOGRAPHIC_UNITS
 
 
 def _axes(array: CubeArray, cube: UpstreamCube, horizontal: dict[str, str]) -> tuple[list[str], str, list[dict]]:

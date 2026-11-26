@@ -585,6 +585,21 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assert_plain(found["temperature_2m_lumped"].reason)
         self.assertIn("statistic", found["temperature_2m_lumped"].reason)
 
+    def test_a_grid_named_x_and_y_measured_in_degrees_is_latitude_and_longitude(self):
+        # As dynamical.org describes Google's WeatherNext 3: no reference system, units in degrees (#830).
+        self.upstream.become_store(
+            STORE,
+            {
+                "init_time": None,
+                "lead_time": 48,
+                "x": CubeDimension("x", kind="spatial", axis="x", size=3600, unit="degree_east"),
+                "y": CubeDimension("y", kind="spatial", axis="y", size=1801, unit="degree_north"),
+            },
+            {"temperature_2m": (("init_time", "lead_time", "y", "x"), (1, 1, 1801, 3600))},
+        )
+
+        self.assertEqual(self.survey().store.offered[0].axes, ["run", "step", "y", "x"])
+
     def test_an_analysis_stores_fields_have_one_time_and_no_runs(self):
         self.upstream.become_store(
             STORE,

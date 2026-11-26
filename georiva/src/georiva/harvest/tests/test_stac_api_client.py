@@ -523,6 +523,13 @@ class PlainFilesCatalogTests(SimpleTestCase):
         self.assertIsNone(cube.dimensions["member"].values)
         self.assertIsNone(cube.dimensions["latitude"].values)
 
+    def test_a_grid_dimension_keeps_its_unit(self):
+        cube = parse_collection(
+            {"id": "x", "cube:dimensions": {"x": {"type": "spatial", "axis": "x", "unit": "degree_east"}}}
+        ).cube
+
+        self.assertEqual(cube.dimensions["x"].unit, "degree_east")
+
     def test_a_vertical_axis_typed_spatial_lists_its_values_too(self):
         # The datacube extension types a vertical axis "spatial", axis "z" (#830).
         cube = parse_collection(

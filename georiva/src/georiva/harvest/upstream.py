@@ -70,7 +70,7 @@ class CubeDimension:
     #: order, where the collection lists them or spells them out by an extent
     #: and an even, whole step; `None` when they cannot be listed (#830).
     values: tuple[str | int | float, ...] | None = None
-    #: What an extra axis's values are measured in, as the collection spells it; empty when it does not say.
+    #: What its values are measured in, as the collection spells it; empty when it does not say.
     unit: str = ""
 
 
@@ -524,7 +524,7 @@ def parse_cube(payload: dict) -> UpstreamCube | None:
             size=size,
             reference_system=_reference_system(dimension.get("reference_system")),
             values=_axis_values(dimension, size) if extra else None,
-            unit=str(dimension.get("unit") or "") if extra else "",
+            unit=str(dimension.get("unit") or ""),
         )
     arrays = {}
     for path, variable in (variables if isinstance(variables, dict) else {}).items():
